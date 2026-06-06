@@ -1,6 +1,3 @@
 opencv-python>=4.8.0
-pyvirtualcam>=0.13.0
-aiohttp>=3.9.0
-zeroconf>=0.131.0
-Pillow>=10.0.0
+pyvirtualcam>=0.4.0
 numpy>=1.24.0
