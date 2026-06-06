@@ -1,0 +1,38 @@
+# === Flutter ===
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.vscode/
+*.apk
+*.aab
+*.ipa
+*.app
+.pub/
+pubspec.lock
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+
+# === 閫氱敤 ===
+.DS_Store
+Thumbs.db
+*.log
+.env
