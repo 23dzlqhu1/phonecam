@@ -1,91 +1,172 @@
-# PhoneCam 鈥?鎵嬫満鎽勫儚澶存晳鎬ュ伐鍏?
-> 绗旇鏈憚鍍忓ご鍧忎簡锛?0绉掓妸鎵嬫満鍙樻垚鐢佃剳鎽勫儚澶淬€?
-## 鉁?鍔熻兘鐗圭偣
+# PhoneCam
 
-- **馃攳 WiFi 鑷姩鍙戠幇** 鈥?鎵嬫満鍜岀數鑴戝湪鍚屼竴灞€鍩熺綉鍗冲彲鑷姩杩炴帴锛屾棤闇€鎵嬪姩杈撳叆 IP
-- **馃攲 USB 鍗虫彃鍗崇敤** 鈥?閫氳繃 USB 鏁版嵁绾跨洿杩烇紝闆跺欢杩熴€侀浂閰嶇疆
-- **馃摴 铏氭嫙鎽勫儚澶磋緭鍑?* 鈥?鑷姩娉ㄥ唽涓虹郴缁熸憚鍍忓ご锛孼oom/Teams/寰俊绛夊簲鐢ㄧ洿鎺ュ彲鐢?- **鈿欙笍 闆堕厤缃?* 鈥?寮€绠卞嵆鐢紝涓嶉渶瑕佸畨瑁呴┍鍔ㄦ垨淇敼绯荤粺璁剧疆
+> 🎥 手机摄像头救急工具 — 30秒内将手机变成电脑虚拟摄像头
 
-## 馃殌 蹇€熷紑濮?
-### 绗竴姝ワ細鍚姩鐢佃剳绔?
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)](https://flutter.dev)
+[![Python](https://img.shields.io/badge/Python-3.10+-green)](https://python.org)
+
+## 为什么需要 PhoneCam？
+
+笔记本摄像头突然坏了？外接摄像头忘带了？答辩/面试/会议紧急需要摄像头？
+
+**PhoneCam** 让你的手机秒变电脑摄像头，Zoom、腾讯会议、OBS 等软件直接识别使用。
+
+## ✨ 特性
+
+- 🚀 **30秒上手** — 手机装 App，电脑一行命令，自动连接
+- 🔌 **即插即用** — USB 线一插自动连接，WiFi 同网段自动发现
+- 📹 **虚拟摄像头** — 系统级识别，任何视频软件都能用
+- 🖥️ **GUI 界面** — 图形界面，非技术用户也能用
+- 📱 **双端支持** — Android + iOS，Windows + Linux + macOS
+
+## 📦 快速开始
+
+### 1. 安装电脑端
+
 ```bash
-cd phonecam-host
+# 克隆项目
+git clone https://github.com/your-username/PhoneCam.git
+cd PhoneCam/desktop
+
+# 安装依赖
 pip install -r requirements.txt
-python main.py
 ```
 
-### 绗簩姝ワ細鍚姩鎵嬫満绔?
-鍦ㄦ墜鏈轰笂鎵撳紑 PhoneCam App锛屾巿鏉冩憚鍍忓ご鏉冮檺銆?
-### 绗笁姝ワ細鑷姩杩炴帴
+### 2. 安装手机端
 
-鎵嬫満鍜岀數鑴戝湪鍚屼竴 WiFi 涓嬩細鑷姩杩炴帴锛涙垨鐢?USB 鏁版嵁绾胯繛鎺ュ悗鑷姩璇嗗埆銆?
-杩炴帴鎴愬姛鍚庯紝鎵撳紑浠绘剰瑙嗛搴旂敤锛圸oom銆乀eams銆佸井淇＄瓑锛夛紝鍦ㄦ憚鍍忓ご鍒楄〃涓€夋嫨 **PhoneCam** 鍗冲彲銆?
-## 馃彈锔?鎶€鏈灦鏋?
-```
-+---------------------+         +--------------------------+
-|   鎵嬫満绔?(Flutter)   |         |     鐢佃剳绔?(Python)       |
-|                     |  WiFi   |                          |
-|  +---------------+  | ------> |  +--------------------+  |
-|  |  Camera API   |  |  鎴?   |  |  Video Receiver    |  |
-|  +-------+-------+  |  USB   |  +--------+-----------+  |
-|          |          | ------> |           |              |
-|  +-------v-------+  |        |  +--------v-----------+  |
-|  | Video Encoder |  |        |  |  Frame Processor   |  |
-|  +-------+-------+  |        |  +--------+-----------+  |
-|          |          |        |           |              |
-|  +-------v-------+  |        |  +--------v-----------+  |
-|  |  Stream Send  |  |        |  |  Virtual Camera    |  |
-|  +---------------+  |        |  |  (OBS/ffmpeg)      |  |
-|                     |        |  +--------------------+  |
-+---------------------+        +--------------------------+
+从 [Releases](https://github.com/your-username/PhoneCam/releases) 下载 APK 安装。
+
+或自行编译：
+```bash
+cd phone
+flutter build apk --release
 ```
 
-## 馃洜锔?鎶€鏈爤
+### 3. 使用
 
-| 缁勪欢 | 鎶€鏈?|
+```bash
+# 方式 1: 自动发现（推荐）
+python phonecam.py
+
+# 方式 2: GUI 模式
+python phonecam.py --gui
+
+# 方式 3: 手动指定 IP
+python phonecam.py --url http://192.168.1.100:8080/video
+
+# 方式 4: 显示预览窗口
+python phonecam.py --preview
+```
+
+## 🎯 使用场景
+
+| 场景 | 说明 |
 |------|------|
-| 鎵嬫満绔?| Flutter + Dart |
-| 鐢佃剳绔?| Python 3.10+ |
-| 瑙嗛浼犺緭 | MJPEG over HTTP / WebRTC |
-| 璁惧鍙戠幇 | mDNS (Bonjour/Avahi) |
-| 铏氭嫙鎽勫儚澶?| OBS Virtual Camera / pyvirtualcam |
-| USB 杩炴帴 | ADB 绔彛杞彂 |
+| 🎓 线上答辩 | 笔记本摄像头坏了，手机救急 |
+| 💼 远程面试 | 需要高质量摄像头，手机更清晰 |
+| 🎮 游戏直播 | 手机当摄像头，电脑当推流机 |
+| 📹 录课演示 | 手机对准白板/实物，电脑录屏 |
 
-## 馃搧 椤圭洰缁撴瀯
+## 📐 架构
 
 ```
-PhoneCam/
-鈹溾攢鈹€ phonecam-app/          # Flutter 鎵嬫満绔簲鐢?鈹?  鈹溾攢鈹€ lib/
-鈹?  鈹?  鈹溾攢鈹€ main.dart
-鈹?  鈹?  鈹溾攢鈹€ screens/       # 椤甸潰
-鈹?  鈹?  鈹溾攢鈹€ services/      # 鏈嶅姟锛堟憚鍍忓ご銆佺綉缁溿€乁SB锛?鈹?  鈹?  鈹斺攢鈹€ widgets/       # 缁勪欢
-鈹?  鈹斺攢鈹€ pubspec.yaml
-鈹溾攢鈹€ phonecam-host/         # Python 鐢佃剳绔湇鍔?鈹?  鈹溾攢鈹€ main.py            # 鍏ュ彛
-鈹?  鈹溾攢鈹€ discovery/         # 璁惧鍙戠幇
-鈹?  鈹溾攢鈹€ receiver/          # 瑙嗛鎺ユ敹
-鈹?  鈹溾攢鈹€ camera/            # 铏氭嫙鎽勫儚澶?鈹?  鈹斺攢鈹€ requirements.txt
-鈹溾攢鈹€ docs/                  # 鏂囨。
-鈹?  鈹斺攢鈹€ plan.md
-鈹溾攢鈹€ README.md
-鈹溾攢鈹€ LICENSE
-鈹斺攢鈹€ .gitignore
+手机(Flutter) ─── WiFi/USB ───→ 电脑(Python) ──→ 虚拟摄像头
+   │                                │
+   ├─ 摄像头采集                     ├─ MJPEG 接收
+   ├─ MJPEG HTTP 推流               ├─ 帧解码
+   └─ mDNS 广播                     ├─ pyvirtualcam 输出
+                                    └─ 自动发现 + 连接管理
 ```
 
-## 馃椇锔?寮€鍙戣矾绾垮浘
+详细架构请查看 [docs/architecture.md](docs/architecture.md)
 
-### Phase 1 鈥?MVP锛堟渶灏忓彲鐢ㄧ増鏈級
-- [x] 椤圭洰鍒濆鍖?- [ ] Flutter 鎵嬫満绔細鎽勫儚澶撮瑙?+ MJPEG 鎺ㄦ祦
-- [ ] Python 鐢佃剳绔細鎺ユ敹 MJPEG + 鏄剧ず绐楀彛
-- [ ] 鍩虹 WiFi 杩炴帴锛堟墜鍔ㄨ緭鍏?IP锛?
-### Phase 2 鈥?铏氭嫙鎽勫儚澶?- [ ] 闆嗘垚 pyvirtualcam / OBS Virtual Camera
-- [ ] 绯荤粺鎽勫儚澶存敞鍐?- [ ] Zoom/Teams/寰俊绛夊簲鐢ㄥ吋瀹规祴璇?
-### Phase 3 鈥?鑷姩鍙戠幇 & USB
-- [ ] mDNS 鑷姩鍙戠幇锛圵iFi 灞€鍩熺綉锛?- [ ] ADB USB 杩炴帴 & 绔彛杞彂
-- [ ] 杩炴帴鐘舵€?UI & 鑷姩閲嶈繛
+## 📡 协议
 
-### Phase 4 鈥?浼樺寲 & 鍙戝竷
-- [ ] 瑙嗛璐ㄩ噺浼樺寲锛圵ebRTC / 纭欢缂栫爜锛?- [ ] 浣庡欢杩熸ā寮?- [ ] 鎵撳寘鍙戝竷锛圵indows 瀹夎鍖?+ APK锛?- [ ] 鐢ㄦ埛鏂囨。 & 婕旂ず瑙嗛
+PhoneCam 使用 HTTP MJPEG 协议：
 
-## 馃搫 License
+| 端点 | 说明 |
+|------|------|
+| `GET /video` | MJPEG 视频流 |
+| `GET /info` | 设备信息 (JSON) |
+| `GET /snapshot` | 单帧快照 |
 
-[MIT License](LICENSE) 漏 2026 PhoneCam Contributors
+详细协议请查看 [docs/protocol.md](docs/protocol.md)
+
+## ⚙️ 配置
+
+### 电脑端参数
+
+```bash
+python phonecam.py --help
+
+选项:
+  --url URL           手动指定推流地址
+  --port PORT         默认端口 (默认: 8080)
+  --width WIDTH       虚拟摄像头宽度 (默认: 640)
+  --height HEIGHT     虚拟摄像头高度 (默认: 480)
+  --fps FPS           帧率 (默认: 15)
+  --no-virtual-cam    不使用虚拟摄像头
+  --preview           显示预览窗口
+  --gui               GUI 模式
+  -v, --verbose       详细日志
+```
+
+### 手机端设置
+
+在 App 设置页面可配置：
+- 分辨率: 320x240 / 640x480 / 1280x720
+- 帧率: 10 / 15 / 24 / 30 fps
+- JPEG 质量: 50-95
+- 端口号: 默认 8080
+
+## 🔧 依赖
+
+### 电脑端
+
+```
+opencv-python>=4.8.0
+pyvirtualcam>=0.4.0
+numpy>=1.24.0
+Pillow>=10.0.0
+```
+
+### 手机端
+
+```yaml
+camera: ^0.11.0+2
+shelf: ^1.4.2
+multicast_dns: ^0.3.2
+wakelock_plus: ^1.2.8
+```
+
+## ❓ FAQ
+
+**Q: 虚拟摄像头打不开？**
+- Windows: 通常自带支持，精简版系统可能需要安装驱动
+- Linux: 需要加载 v4l2loopback (`sudo modprobe v4l2loopback`)
+- macOS: 需要安装 OBS 或使用 DAL 插件
+
+**Q: 自动发现找不到手机？**
+- 确保手机和电脑在同一 WiFi
+- 或使用 USB 连接 + 开启网络共享
+- 或手动指定 `--url http://手机IP:8080/video`
+
+**Q: 画面卡顿？**
+- 降低分辨率 (设置页面)
+- 降低帧率
+- 使用 USB 连接代替 WiFi
+
+**Q: 防火墙拦截？**
+- Windows 弹窗时选择"允许访问"
+- 或手动放行 8080 端口
+
+## 📄 License
+
+[MIT License](LICENSE) © 2026
+
+## 🙏 致谢
+
+- [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) — 虚拟摄像头
+- [camera](https://pub.dev/packages/camera) — Flutter 摄像头
+- [OpenCV](https://opencv.org) — 图像处理
