@@ -2,11 +2,12 @@
 """PhoneCam Desktop - 将手机摄像头用作电脑虚拟摄像头
 
 用法:
-    python phonecam.py --url http://192.168.1.100:8080/video
-    python phonecam.py  # 自动发现（需要 mDNS）
+    python phonecam.py                          # 自动发现 (mDNS + USB)
+    python phonecam.py --url http://192.168.1.100:8080/video  # 手动指定
+    python phonecam.py --preview                # 显示预览窗口
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 import argparse
 import sys
@@ -15,6 +16,7 @@ import logging
 
 from receiver import MjpegReceiver
 from virtual_camera import VirtualCamera
+from connection_manager import ConnectionManager, ConnectionState
 
 logger = logging.getLogger("phonecam")
 
@@ -25,58 +27,32 @@ def parse_args(argv=None):
         description="PhoneCam Desktop - 手机摄像头变电脑虚拟摄像头"
     )
     parser.add_argument(
-        "--url",
-        type=str,
-        default=None,
+        "--url", type=str, default=None,
         help="手机推流地址 (例如 http://192.168.1.100:8080/video)",
     )
+    parser.add_argument("--port", type=int, default=8080, help="默认端口")
+    parser.add_argument("--width", type=int, default=640, help="虚拟摄像头宽度")
+    parser.add_argument("--height", type=int, default=480, help="虚拟摄像头高度")
+    parser.add_argument("--fps", type=int, default=15, help="帧率")
     parser.add_argument(
-        "--port",
-        type=int,
-        default=8080,
-        help="默认端口 (默认: 8080)",
-    )
-    parser.add_argument(
-        "--width", type=int, default=640, help="虚拟摄像头宽度 (默认: 640)"
-    )
-    parser.add_argument(
-        "--height", type=int, default=480, help="虚拟摄像头高度 (默认: 480)"
-    )
-    parser.add_argument(
-        "--fps", type=int, default=15, help="帧率 (默认: 15)"
-    )
-    parser.add_argument(
-        "--no-virtual-cam",
-        action="store_true",
-        default=False,
+        "--no-virtual-cam", action="store_true", default=False,
         help="不使用虚拟摄像头，仅显示窗口",
     )
     parser.add_argument(
-        "--preview",
-        action="store_true",
-        default=False,
-        help="显示预览窗口 (cv2.imshow)",
+        "--preview", action="store_true", default=False,
+        help="显示预览窗口",
     )
     parser.add_argument(
-        "--gui",
-        action="store_true",
-        default=False,
-        help="启用GUI模式（未实现）",
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        default=False,
+        "-v", "--verbose", action="store_true", default=False,
         help="详细日志",
     )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
-    """主入口函数"""
+    """主入口"""
     args = parse_args(argv)
 
-    # 日志
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -85,20 +61,51 @@ def main(argv=None):
     )
 
     print(f"PhoneCam Desktop v{__version__}")
-    print(f"  推流地址: {args.url or '(等待输入)'}")
-    print(f"  分辨率:   {args.width}x{args.height} @ {args.fps}fps")
-    print(f"  虚拟摄像头: {'关闭' if args.no_virtual_cam else '开启'}")
-    print(f"  预览窗口: {'开启' if args.preview else '关闭'}")
+    print(f"  分辨率: {args.width}x{args.height} @ {args.fps}fps")
     print()
 
-    # 如果没指定 URL，提示用户
+    # ── 获取推流 URL ──
     url = args.url
+
     if not url:
-        ip = input("请输入手机 IP 地址: ").strip()
-        if not ip:
-            print("未输入地址，退出。")
+        # 自动发现模式
+        print("🔍 自动发现手机设备中...")
+        print("   (USB 优先，WiFi mDNS 备用)")
+        print()
+
+        manager = ConnectionManager(port=args.port)
+        manager.on_state_change(
+            lambda info: print(f"   状态: {info.state.value} | {info.connection_type} | {info.url}")
+        )
+        manager.start()
+
+        # 等待发现设备
+        try:
+            device = None
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                if manager.state == ConnectionState.CONNECTED:
+                    url = manager.url
+                    break
+                time.sleep(0.5)
+
+            if not url:
+                print("\n❌ 30秒内未发现设备")
+                print("   请确认:")
+                print("   1. 手机 App 已启动推流")
+                print("   2. 手机和电脑在同一 WiFi，或 USB 已连接")
+                print("   3. 或手动指定: --url http://手机IP:8080/video")
+                manager.stop()
+                return
+        except KeyboardInterrupt:
+            print("\n用户中断")
+            manager.stop()
             return
-        url = f"http://{ip}:{args.port}/video"
+        finally:
+            pass  # manager 在后台继续运行
+
+    print(f"\n✅ 连接: {url}")
+    print()
 
     # ── 启动接收器 ──
     receiver = MjpegReceiver(url)
@@ -108,60 +115,44 @@ def main(argv=None):
     vcam = None
     if not args.no_virtual_cam:
         vcam = VirtualCamera(
-            width=args.width,
-            height=args.height,
-            fps=args.fps,
+            width=args.width, height=args.height, fps=args.fps,
         )
         if not vcam.open():
-            logger.warning("虚拟摄像头打开失败，降级为仅预览模式")
+            logger.warning("虚拟摄像头打开失败，降级为仅预览")
             vcam = None
 
-    # ── 帧率统计 ──
-    frame_count = 0
-    last_stat_time = time.time()
-    stats_interval = 5.0  # 每5秒打印一次
-
-    print()
-    print("运行中... 按 Ctrl+C 退出")
-    if vcam:
-        print(f"虚拟摄像头设备: {vcam.device_name}")
-    print()
-
+    # ── 主循环 ──
     import cv2
+
+    frame_count = 0
+    last_stat = time.time()
+
+    if vcam:
+        print(f"📹 虚拟摄像头: {vcam.device_name}")
+    print("按 Ctrl+C 退出\n")
 
     try:
         while True:
             frame = receiver.frame
-
             if frame is not None:
-                # 发送到虚拟摄像头
                 if vcam and vcam.is_open:
                     vcam.send(frame)
 
-                # 预览窗口
                 if args.preview:
-                    # 添加 FPS 覆盖
                     fps_text = f"FPS: {receiver.fps:.1f}"
-                    cv2.putText(
-                        frame, fps_text, (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
-                    )
+                    cv2.putText(frame, fps_text, (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     cv2.imshow("PhoneCam", frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
-                        print("\n用户退出")
                         break
 
-                # 统计
                 frame_count += 1
                 now = time.time()
-                if now - last_stat_time >= stats_interval:
-                    elapsed = now - last_stat_time
-                    fps = frame_count / elapsed
-                    logger.info(
-                        f"接收: {fps:.1f} fps | 虚拟摄像头: {'OK' if vcam and vcam.is_open else '-'}"
-                    )
+                if now - last_stat >= 5.0:
+                    fps = frame_count / (now - last_stat)
+                    logger.info(f"接收: {fps:.1f} fps | 虚拟摄像头: {'OK' if vcam and vcam.is_open else '-'}")
                     frame_count = 0
-                    last_stat_time = now
+                    last_stat = now
             else:
                 time.sleep(0.01)
 
