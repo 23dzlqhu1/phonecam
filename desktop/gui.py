@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PhoneCam Desktop GUI
+"""PhoneCam Desktop GUI - 简洁现代设计
 
 tkinter 桌面 GUI，显示连接状态和摄像头预览。
 """
@@ -20,6 +20,19 @@ from connection_manager import ConnectionManager, ConnectionState, ConnectionInf
 
 logger = logging.getLogger(__name__)
 
+# 颜色主题
+COLORS = {
+    'bg': '#0a0a0f',
+    'surface': '#111827',
+    'border': '#1f2937',
+    'text': '#e5e7eb',
+    'text_secondary': '#9ca3af',
+    'text_muted': '#6b7280',
+    'primary': '#3b82f6',
+    'danger': '#ef4444',
+    'success': '#10b981',
+}
+
 
 class PhoneCamGUI:
     """PhoneCam 桌面 GUI"""
@@ -27,9 +40,9 @@ class PhoneCamGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("PhoneCam")
-        self.root.geometry("800x600")
-        self.root.minsize(640, 480)
-        self.root.configure(bg='#1a1a2e')
+        self.root.geometry("900x640")
+        self.root.minsize(700, 500)
+        self.root.configure(bg=COLORS['bg'])
 
         # 状态
         self._manager: Optional[ConnectionManager] = None
@@ -51,83 +64,105 @@ class PhoneCamGUI:
         """构建界面"""
         style = ttk.Style()
         style.theme_use('clam')
-        style.configure('Title.TLabel', font=('Microsoft YaHei', 14, 'bold'),
-                        background='#1a1a2e', foreground='white')
-        style.configure('Status.TLabel', font=('Microsoft YaHei', 11),
-                        background='#16213e', foreground='#a0a0a0')
-        style.configure('Info.TLabel', font=('Consolas', 10),
-                        background='#16213e', foreground='#00d4aa')
-        style.configure('Action.TButton', font=('Microsoft YaHei', 11))
+
+        # 配置样式
+        style.configure('Main.TFrame', background=COLORS['bg'])
+        style.configure('Surface.TFrame', background=COLORS['surface'])
+        style.configure('Title.TLabel',
+                        font=('Segoe UI', 14, 'bold'),
+                        background=COLORS['surface'],
+                        foreground=COLORS['text'])
+        style.configure('Status.TLabel',
+                        font=('Segoe UI', 11),
+                        background=COLORS['surface'],
+                        foreground=COLORS['text_secondary'])
+        style.configure('Info.TLabel',
+                        font=('Consolas', 10),
+                        background=COLORS['surface'],
+                        foreground=COLORS['text_muted'])
+        style.configure('Primary.TButton',
+                        font=('Segoe UI', 11, 'bold'))
 
         # ── 顶部状态栏 ──
-        status_frame = tk.Frame(self.root, bg='#16213e', height=60)
+        status_frame = tk.Frame(self.root, bg=COLORS['surface'], height=70)
         status_frame.pack(fill='x', padx=0, pady=0)
         status_frame.pack_propagate(False)
 
-        self._status_icon = tk.Label(status_frame, text="🔍", font=('', 20),
-                                     bg='#16213e', fg='white')
-        self._status_icon.pack(side='left', padx=15)
+        # 状态指示器
+        self._status_dot = tk.Canvas(status_frame, width=12, height=12,
+                                     bg=COLORS['surface'], highlightthickness=0)
+        self._status_dot.pack(side='left', padx=(20, 10))
+        self._dot_id = self._status_dot.create_oval(2, 2, 10, 10, fill=COLORS['text_muted'])
 
-        status_text_frame = tk.Frame(status_frame, bg='#16213e')
-        status_text_frame.pack(side='left', fill='y')
+        # 状态文字
+        status_text_frame = tk.Frame(status_frame, bg=COLORS['surface'])
+        status_text_frame.pack(side='left', fill='y', pady=12)
 
         self._status_title = ttk.Label(status_text_frame, text="正在搜索设备...",
                                        style='Title.TLabel')
-        self._status_title.pack(anchor='w', pady=(8, 0))
+        self._status_title.pack(anchor='w')
 
         self._status_detail = ttk.Label(status_text_frame, text="请确保手机 App 已启动推流",
                                         style='Status.TLabel')
         self._status_detail.pack(anchor='w')
 
-        # 分辨率选择
-        res_frame = tk.Frame(status_frame, bg='#16213e')
-        res_frame.pack(side='right', padx=15)
+        # 右侧控制区
+        control_frame = tk.Frame(status_frame, bg=COLORS['surface'])
+        control_frame.pack(side='right', padx=20)
 
-        ttk.Label(res_frame, text="分辨率:", style='Status.TLabel').pack(side='left')
+        # 分辨率选择
+        ttk.Label(control_frame, text="分辨率", style='Status.TLabel').pack(side='left')
         self._res_var = tk.StringVar(value="640x480")
-        res_combo = ttk.Combobox(res_frame, textvariable=self._res_var,
+        res_combo = ttk.Combobox(control_frame, textvariable=self._res_var,
                                  values=["320x240", "640x480", "1280x720"],
                                  state='readonly', width=10)
-        res_combo.pack(side='left', padx=5)
+        res_combo.pack(side='left', padx=(8, 0))
         res_combo.bind('<<ComboboxSelected>>', self._on_resolution_change)
 
         # ── 预览区域 ──
-        preview_frame = tk.Frame(self.root, bg='#0a0a1a')
-        preview_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        preview_container = tk.Frame(self.root, bg=COLORS['bg'])
+        preview_container.pack(fill='both', expand=True, padx=16, pady=16)
 
-        self._canvas = tk.Canvas(preview_frame, bg='#0a0a1a', highlightthickness=0)
+        self._canvas = tk.Canvas(preview_container, bg=COLORS['bg'],
+                                highlightthickness=0)
         self._canvas.pack(fill='both', expand=True)
 
-        # 初始占位文字
+        # 初始占位
         self._canvas.create_text(
-            400, 250, text="等待连接...",
-            font=('Microsoft YaHei', 16), fill='#404060', tags='placeholder'
+            450, 280, text="等待连接...",
+            font=('Segoe UI', 16), fill=COLORS['text_muted'], tags='placeholder'
         )
 
         # ── 底部控制栏 ──
-        bottom_frame = tk.Frame(self.root, bg='#16213e', height=50)
+        bottom_frame = tk.Frame(self.root, bg=COLORS['surface'], height=56)
         bottom_frame.pack(fill='x', padx=0, pady=0)
         bottom_frame.pack_propagate(False)
 
-        # 连接信息
+        # 信息标签
         self._info_label = ttk.Label(bottom_frame, text="", style='Info.TLabel')
-        self._info_label.pack(side='left', padx=15)
+        self._info_label.pack(side='left', padx=20)
 
-        # 按钮
-        btn_frame = tk.Frame(bottom_frame, bg='#16213e')
-        btn_frame.pack(side='right', padx=15)
+        # 按钮区
+        btn_frame = tk.Frame(bottom_frame, bg=COLORS['surface'])
+        btn_frame.pack(side='right', padx=20)
 
-        self._mirror_btn = ttk.Button(btn_frame, text="镜像", width=6,
-                                      command=self._toggle_mirror, style='Action.TButton')
-        self._mirror_btn.pack(side='left', padx=5)
+        self._mirror_btn = tk.Button(btn_frame, text="镜像", width=6,
+                                     command=self._toggle_mirror,
+                                     bg=COLORS['border'], fg=COLORS['text'],
+                                     relief='flat', font=('Segoe UI', 10))
+        self._mirror_btn.pack(side='left', padx=4)
 
-        self._flip_btn = ttk.Button(btn_frame, text="翻转", width=6,
-                                    command=self._toggle_flip, style='Action.TButton')
-        self._flip_btn.pack(side='left', padx=5)
+        self._flip_btn = tk.Button(btn_frame, text="翻转", width=6,
+                                   command=self._toggle_flip,
+                                   bg=COLORS['border'], fg=COLORS['text'],
+                                   relief='flat', font=('Segoe UI', 10))
+        self._flip_btn.pack(side='left', padx=4)
 
-        self._quit_btn = ttk.Button(btn_frame, text="退出", width=6,
-                                    command=self._quit, style='Action.TButton')
-        self._quit_btn.pack(side='left', padx=5)
+        self._quit_btn = tk.Button(btn_frame, text="退出", width=6,
+                                   command=self._quit,
+                                   bg=COLORS['danger'], fg='white',
+                                   relief='flat', font=('Segoe UI', 10))
+        self._quit_btn.pack(side='left', padx=4)
 
         # 翻转/镜像状态
         self._mirror = False
@@ -148,17 +183,17 @@ class PhoneCamGUI:
         self._manager.start()
 
     def _on_connection_change(self, info: ConnectionInfo):
-        """连接状态变化回调（非 UI 线程）"""
+        """连接状态变化回调"""
         self.root.after(0, self._update_status_ui, info)
 
     def _update_status_ui(self, info: ConnectionInfo):
         """在 UI 线程更新状态"""
         if info.state == ConnectionState.SEARCHING:
-            self._status_icon.config(text="🔍")
+            self._status_dot.itemconfig(self._dot_id, fill=COLORS['text_muted'])
             self._status_title.config(text="正在搜索设备...")
             self._status_detail.config(text="请确保手机 App 已启动推流")
         elif info.state == ConnectionState.CONNECTED:
-            self._status_icon.config(text="✅")
+            self._status_dot.itemconfig(self._dot_id, fill=COLORS['success'])
             self._status_title.config(text=f"已连接 ({info.connection_type})")
             self._status_detail.config(text=info.url)
 
@@ -166,7 +201,7 @@ class PhoneCamGUI:
                 self._is_connected = True
                 self._start_receiver(info.url)
         elif info.state == ConnectionState.DISCONNECTED:
-            self._status_icon.config(text="❌")
+            self._status_dot.itemconfig(self._dot_id, fill=COLORS['danger'])
             self._status_title.config(text="连接断开")
             self._status_detail.config(text="正在重连...")
 
@@ -189,11 +224,10 @@ class PhoneCamGUI:
                 self._vcam = None
 
     def _on_frame(self, frame: np.ndarray):
-        """收到新帧（非 UI 线程）"""
+        """收到新帧"""
         with self._frame_lock:
             self._current_frame = frame
 
-        # 发送到虚拟摄像头
         if self._vcam and self._vcam.is_open:
             self._vcam.send(frame)
 
@@ -201,7 +235,6 @@ class PhoneCamGUI:
 
     def _update_loop(self):
         """定时更新 UI"""
-        # 更新预览
         with self._frame_lock:
             frame = self._current_frame
 
@@ -225,21 +258,18 @@ class PhoneCamGUI:
         info_parts.append(f"显示: {self._display_fps:.0f}fps")
         self._info_label.config(text=" | ".join(info_parts))
 
-        self.root.after(33, self._update_loop)  # ~30fps UI 刷新
+        self.root.after(33, self._update_loop)
 
     def _display_frame(self, frame: np.ndarray):
         """在 Canvas 上显示帧"""
         try:
-            # 镜像/翻转
             if self._mirror:
                 frame = cv2.flip(frame, 1)
             if self._flip:
                 frame = cv2.flip(frame, 0)
 
-            # BGR -> RGB
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # 缩放到 canvas 大小
             canvas_w = self._canvas.winfo_width()
             canvas_h = self._canvas.winfo_height()
             h, w = rgb.shape[:2]
@@ -249,28 +279,30 @@ class PhoneCamGUI:
                 new_h = int(h * scale)
                 rgb = cv2.resize(rgb, (new_w, new_h))
 
-            # 转为 PhotoImage
             img = Image.fromarray(rgb)
             photo = ImageTk.PhotoImage(image=img)
 
-            # 清除占位文字，显示图像
             self._canvas.delete('placeholder')
             self._canvas.delete('preview')
             self._canvas.create_image(
                 canvas_w // 2, canvas_h // 2,
                 image=photo, anchor='center', tags='preview'
             )
-            self._canvas._photo = photo  # 防止 GC
+            self._canvas._photo = photo
         except Exception as e:
             logger.debug(f"显示帧失败: {e}")
 
     def _toggle_mirror(self):
         self._mirror = not self._mirror
-        self._mirror_btn.config(text="镜像 ✓" if self._mirror else "镜像")
+        self._mirror_btn.config(
+            bg=COLORS['primary'] if self._mirror else COLORS['border']
+        )
 
     def _toggle_flip(self):
         self._flip = not self._flip
-        self._flip_btn.config(text="翻转 ✓" if self._flip else "翻转")
+        self._flip_btn.config(
+            bg=COLORS['primary'] if self._flip else COLORS['border']
+        )
 
     def _on_resolution_change(self, event):
         val = self._res_var.get()
@@ -282,7 +314,6 @@ class PhoneCamGUI:
             self._vcam.open()
 
     def _quit(self):
-        """退出"""
         if self._receiver:
             self._receiver.stop()
         if self._vcam:
@@ -292,7 +323,6 @@ class PhoneCamGUI:
         self.root.destroy()
 
     def run(self):
-        """启动 GUI"""
         self.root.protocol("WM_DELETE_WINDOW", self._quit)
         self.root.mainloop()
 

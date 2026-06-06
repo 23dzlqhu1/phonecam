@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'settings_page.dart';
 
-/// 主页面
+/// 主页面 - 简洁现代设计
 class HomePage extends StatefulWidget {
   final VoidCallback onStartStreaming;
   final VoidCallback onStopStreaming;
@@ -34,7 +34,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     super.initState();
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 1),
+      duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
   }
 
@@ -47,12 +47,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
-        title: const Text('PhoneCam'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'PhoneCam',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.settings_outlined),
             onPressed: () {
               Navigator.push(
                 context,
@@ -68,37 +77,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           child: Column(
             children: [
               const Spacer(flex: 1),
-
-              // 推流状态指示
               _buildStatusIndicator(),
-
-              const SizedBox(height: 32),
-
-              // 主按钮
+              const SizedBox(height: 40),
               _buildStreamButton(),
-
               const SizedBox(height: 24),
-
-              // 服务器地址
               if (widget.serverUrl != null) _buildUrlCard(),
-
               const SizedBox(height: 16),
-
-              // 连接数
               if (widget.isStreaming)
                 Text(
-                  '连接设备: ${widget.clientCount}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey,
+                  '${widget.clientCount} 台设备已连接',
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 14,
                   ),
                 ),
-
               const Spacer(flex: 2),
-
-              // 底部提示
               _buildTip(),
-
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -110,41 +105,61 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final isStreaming = widget.isStreaming;
     return Column(
       children: [
-        // 动画圆圈
         AnimatedBuilder(
           animation: _pulseController,
           builder: (context, child) {
-            final scale = isStreaming ? 1.0 + _pulseController.value * 0.05 : 1.0;
-            return Transform.scale(
-              scale: scale,
-              child: Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isStreaming
-                      ? Colors.red.withOpacity(0.15)
-                      : Colors.grey.withOpacity(0.1),
-                  border: Border.all(
-                    color: isStreaming ? Colors.red : Colors.grey.shade600,
-                    width: 3,
-                  ),
+            final opacity = isStreaming
+                ? 0.3 + _pulseController.value * 0.2
+                : 0.1;
+            return Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    (isStreaming ? Colors.red : Colors.grey).withOpacity(opacity),
+                    Colors.transparent,
+                  ],
                 ),
-                child: Icon(
-                  isStreaming ? Icons.videocam : Icons.videocam_off,
-                  size: 48,
-                  color: isStreaming ? Colors.red : Colors.grey,
+                border: Border.all(
+                  color: isStreaming
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF374151),
+                  width: 2,
+                ),
+              ),
+              child: Center(
+                child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isStreaming
+                        ? const Color(0xFFEF4444).withOpacity(0.15)
+                        : const Color(0xFF1F2937),
+                  ),
+                  child: Icon(
+                    isStreaming ? Icons.videocam_rounded : Icons.videocam_off_rounded,
+                    size: 44,
+                    color: isStreaming
+                        ? const Color(0xFFEF4444)
+                        : const Color(0xFF6B7280),
+                  ),
                 ),
               ),
             );
           },
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Text(
           widget.statusText,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: isStreaming ? Colors.red : Colors.grey,
+          style: TextStyle(
+            fontSize: 16,
             fontWeight: FontWeight.w500,
+            color: isStreaming
+                ? const Color(0xFFEF4444)
+                : const Color(0xFF9CA3AF),
           ),
         ),
       ],
@@ -152,21 +167,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildStreamButton() {
+    final isStreaming = widget.isStreaming;
     return SizedBox(
       width: double.infinity,
       height: 56,
-      child: FilledButton.icon(
+      child: ElevatedButton(
         onPressed: widget.isCameraReady
-            ? (widget.isStreaming ? widget.onStopStreaming : widget.onStartStreaming)
+            ? (isStreaming ? widget.onStopStreaming : widget.onStartStreaming)
             : null,
-        icon: Icon(widget.isStreaming ? Icons.stop : Icons.play_arrow, size: 28),
-        label: Text(
-          widget.isStreaming ? '停止推流' : '开始推流',
-          style: const TextStyle(fontSize: 18),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isStreaming
+              ? const Color(0xFF1F2937)
+              : const Color(0xFF3B82F6),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: isStreaming
+                ? const BorderSide(color: Color(0xFF374151))
+                : BorderSide.none,
+          ),
+          elevation: 0,
         ),
-        style: FilledButton.styleFrom(
-          backgroundColor: widget.isStreaming ? Colors.red : null,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isStreaming ? Icons.stop_rounded : Icons.play_arrow_rounded,
+              size: 24,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isStreaming ? '停止推流' : '开始推流',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -175,26 +212,37 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Widget _buildUrlCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900,
+        color: const Color(0xFF111827),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
+        border: Border.all(color: const Color(0xFF1F2937)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '推流地址',
-            style: TextStyle(color: Colors.grey, fontSize: 12),
+          const Row(
+            children: [
+              Icon(Icons.link_rounded, size: 16, color: Color(0xFF6B7280)),
+              SizedBox(width: 8),
+              Text(
+                '推流地址',
+                style: TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Text(
             widget.serverUrl!,
             style: const TextStyle(
-              fontFamily: 'monospace',
+              fontFamily: 'JetBrains Mono',
               fontSize: 14,
-              color: Colors.greenAccent,
+              color: Color(0xFF10B981),
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -206,17 +254,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.1),
+        color: const Color(0xFF111827),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF1F2937)),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          Icon(Icons.info_outline, color: Colors.blue.shade300, size: 20),
-          const SizedBox(width: 12),
+          Icon(Icons.info_outline_rounded, color: Color(0xFF3B82F6), size: 20),
+          SizedBox(width: 12),
           Expanded(
             child: Text(
               '电脑端运行 python phonecam.py 即可自动连接',
-              style: TextStyle(color: Colors.blue.shade200, fontSize: 13),
+              style: TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 13,
+              ),
             ),
           ),
         ],
