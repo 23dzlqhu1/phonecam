@@ -31,8 +31,26 @@ dist/
 .coverage
 htmlcov/
 
-# === 閫氱敤 ===
+# === 通用 ===
 .DS_Store
 Thumbs.db
 *.log
 .env
+build_output.txt
+build_log.txt
+*.zip
+release/
+PhoneCam-v*-*.zip
+
+# === IDE / 编辑器 ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === 系统临时文件 ===
+*.tmp
+*.bak
+*.orig
+*.rej
+~$*
