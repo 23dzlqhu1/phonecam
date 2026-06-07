@@ -108,7 +108,15 @@ class PcpReceiver:
     支持自动重连、指数退避、丢帧统计、FPS 计算。
     """
 
-    HEADER_STRUCT = struct.Struct('<4sBBBI Q I')  # 24 字节，与 HEADER_SIZE 对应
+    HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节，与 HEADER_SIZE 对应
+    #              │   │  │ │ │  │  │   └─ payload_len: u32
+    #              │   │  │ │ │  │  └───── pts: u64
+    #              │   │  │ │ │  └──────── sequence: u32
+    #              │   │  │ │ └─────────── flags: u8
+    #              │   │  │ └──────────── codec: u8
+    #              │   │  └────────────── type: u8
+    #              │   └───────────────── version: u8
+    #              └───────────────────── magic: 4s = 'PHCM'
 
     def __init__(self, host: str, port: int = 9999,
                  reconnect_delay: float = 2.0, max_delay: float = 30.0):

@@ -41,6 +41,7 @@ def test_import():
 def test_header_size():
     """验证协议头是 24 字节。"""
     assert HEADER_SIZE == 24
+    # 8 字段：magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts(Q) + payload_len(I)
     assert HEADER_STRUCT.size == 24
 
 

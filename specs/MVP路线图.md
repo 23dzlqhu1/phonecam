@@ -173,20 +173,34 @@ desktop/phonecam.py
 
 ### 4.6 PCP 协议最小设计（MVP-1 用）
 
+> ⚠️ 本节必须与 [docs/protocol.md](../docs/protocol.md) 一致。
+> 如果两边冲突，**以 docs/protocol.md 为准**。
+
 ```
-┌──────────────────────────┐
-│  Magic: 'PHCM' (4B)      │  防止误连
-│  Version: 0x01 (1B)      │
-│  Type: 0x01=video (1B)   │
-│  Sequence: u32 (4B)      │  用于丢帧检测
-│  PTS: u64 (8B)           │  时间戳
-│  Flags: u16 (2B)         │  0x0001=关键帧
-│  Payload Length: u32 (4B)│
-│  Payload: <RGB data>     │
-└──────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Offset  Size  Field        取值范围              │
+├──────────────────────────────────────────────────┤
+│ 0       4     magic        'PHCM'                │  协议魔数
+│ 4       1     version      0x01                  │  协议版本
+│ 5       1     type         0x01=video            │  通道类型
+│ 6       1     codec        0x01=raw_rgb          │  编码格式
+│ 7       1     flags        0x01=keyframe         │  帧标志
+│ 8       4     sequence     u32                    │  序列号
+│ 12      8     pts          u64 (微秒)            │  时间戳
+│ 20      4     payload_len  u32                    │  负载长度
+├──────────────────────────────────────────────────┤
+│ 24      N     payload      二进制媒体数据          │
+└──────────────────────────────────────────────────┘
 ```
 
-总头 24 字节 + 负载。
+**24 字节头**（8 字段）+ Payload。
+
+Python 实现：
+
+```python
+HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
+# magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts(Q) + payload_len(I)
+```
 
 ### 4.7 验收标准
 

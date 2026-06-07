@@ -66,8 +66,6 @@
 **当前正在做**：MVP-0 已完成 ✅ → **MVP-1 进行中**：电脑端 `PcpReceiver` 已实现，等待 mock 端 + 端到端联调。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
-**当前正在做**：MVP-0 已完成 ✅ → **下一步进入 MVP-1**。
-
 ---
 
 ## 🤝 参与贡献
