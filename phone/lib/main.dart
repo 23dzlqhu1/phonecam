@@ -32,7 +32,6 @@ class PhoneCamApp extends StatelessWidget {
   }
 }
 
-/// 业务控制器，连接 CameraService + StreamServer + UI
 class PhoneCamController extends StatefulWidget {
   const PhoneCamController({super.key});
 
@@ -49,7 +48,7 @@ class _PhoneCamControllerState extends State<PhoneCamController>
   bool _isCameraReady = false;
   String _statusText = '正在初始化摄像头...';
   String? _serverUrl;
-  Timer? _captureTimer;
+  String _codecInfo = 'H.264';
 
   @override
   void initState() {
@@ -77,9 +76,22 @@ class _PhoneCamControllerState extends State<PhoneCamController>
   Future<void> _initCamera() async {
     try {
       await _camera.initialize();
+
+      // H.264 帧 → WebSocket 推送
+      _camera.onH264Frame = (frame) {
+        if (_isStreaming) {
+          _server.sendH264Frame(frame);
+        }
+      };
+
+      // 关键帧请求回调
+      _server.onKeyframeRequest = () {
+        _camera.requestKeyframe();
+      };
+
       setState(() {
         _isCameraReady = true;
-        _statusText = '摄像头就绪';
+        _statusText = '摄像头就绪 (H.264)';
       });
     } catch (e) {
       setState(() {
@@ -93,35 +105,39 @@ class _PhoneCamControllerState extends State<PhoneCamController>
     try {
       final port = await _server.start(port: 8080);
       final ip = await _getLocalIp();
+      await _camera.startStream();
+
       setState(() {
         _isStreaming = true;
-        _statusText = '推流中...';
-        _serverUrl = 'http://$ip:$port/video';
+        _statusText = '推流中 (H.264)';
+        _serverUrl = 'http://$ip:$port/stream';
+        _codecInfo = 'H.264 · 1Mbps';
       });
-      _captureTimer = Timer.periodic(
-        const Duration(milliseconds: 66),
-        (_) => _captureAndPush(),
-      );
+
+      // 定期更新统计
+      Timer.periodic(const Duration(seconds: 2), (timer) {
+        if (!_isStreaming) {
+          timer.cancel();
+          return;
+        }
+        final stats = _camera.stats;
+        setState(() {
+          _codecInfo = 'H.264 · ${stats['fps']?.round() ?? 0}fps · ${stats['avgBitrate'] ?? 0}kbps';
+        });
+      });
     } catch (e) {
       setState(() => _statusText = '启动失败: $e');
     }
   }
 
   void _stopStreaming() {
-    _captureTimer?.cancel();
-    _captureTimer = null;
+    _camera.stopStream();
     _server.stop();
     setState(() {
       _isStreaming = false;
       _statusText = '已停止推流';
       _serverUrl = null;
     });
-  }
-
-  Future<void> _captureAndPush() async {
-    if (!_isStreaming) return;
-    final jpeg = await _camera.captureJpeg();
-    if (jpeg != null) _server.updateFrame(jpeg);
   }
 
   Future<String> _getLocalIp() async {
@@ -148,7 +164,7 @@ class _PhoneCamControllerState extends State<PhoneCamController>
       isCameraReady: _isCameraReady,
       statusText: _statusText,
       serverUrl: _serverUrl,
-      clientCount: _server.clientCount,
+      clientCount: _server.isConnected ? 1 : 0,
     );
   }
 }

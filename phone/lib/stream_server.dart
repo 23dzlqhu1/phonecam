@@ -1,29 +1,41 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'h264_encoder.dart';
 
-/// MJPEG HTTP 推流服务
-/// 手机端启动 HTTP server，通过 multipart/x-mixed-replace 输出 MJPEG 流
+/// H.264 WebSocket 推流服务
 class StreamServer {
   HttpServer? _server;
-  final List<Socket> _clients = [];
+  WebSocket? _client;
   bool _isRunning = false;
-  Timer? _frameTimer;
+  int _sequence = 0;
+  int _totalBytes = 0;
+  int _keyframeCount = 0;
 
-  // 帧率控制: 15fps = ~66ms per frame
-  static const int fps = 15;
-  static const int frameIntervalMs = 1000 ~/ fps;
-  static const String boundary = '--frame';
+  /// H.264 帧回调，由 CameraService 调用
+  void sendH264Frame(H264Frame frame) {
+    if (_client == null || !_client!.closeCode.isNaN) return;
 
-  /// 当前帧数据，由外部更新
-  Uint8List? _currentFrame;
+    try {
+      // 二进制帧格式: [4B seq][4B pts][4B flags][NAL data...]
+      final header = ByteData(12);
+      header.setUint32(0, _sequence++);
+      header.setUint32(4, frame.pts & 0xFFFFFFFF);
+      header.setUint32(8, frame.isKeyFrame ? 1 : 0);
 
-  /// 更新当前帧
-  void updateFrame(Uint8List jpegData) {
-    _currentFrame = jpegData;
+      final packet = Uint8List(12 + frame.size);
+      packet.setRange(0, 12, header.buffer.asUint8List());
+      packet.setRange(12, 12 + frame.size, frame.data);
+
+      _client!.add(packet);
+      _totalBytes += packet.length;
+      if (frame.isKeyFrame) _keyframeCount++;
+    } catch (e) {
+      // 发送失败，断开连接
+      _client = null;
+    }
   }
 
-  /// 启动 HTTP 服务
   Future<int> start({int port = 8080}) async {
     if (_isRunning) return port;
 
@@ -32,14 +44,11 @@ class StreamServer {
 
     _server!.listen((HttpRequest request) {
       switch (request.uri.path) {
-        case '/video':
-          _handleMjpegStream(request);
+        case '/stream':
+          _handleWebSocket(request);
           break;
         case '/info':
           _handleInfo(request);
-          break;
-        case '/snapshot':
-          _handleSnapshot(request);
           break;
         default:
           request.response
@@ -49,100 +58,69 @@ class StreamServer {
       }
     });
 
-    // 定时推帧给所有客户端
-    _frameTimer = Timer.periodic(
-      const Duration(milliseconds: frameIntervalMs),
-      (_) => _broadcastFrame(),
-    );
-
     return port;
   }
 
-  /// 处理 MJPEG 流请求
-  void _handleMjpegStream(HttpRequest request) {
-    request.response.headers
-      ..set('Content-Type', 'multipart/x-mixed-replace; boundary=$boundary')
-      ..set('Cache-Control', 'no-cache')
-      ..set('Connection', 'keep-alive')
-      ..set('Access-Control-Allow-Origin', '*');
+  void _handleWebSocket(HttpRequest request) {
+    WebSocketTransformer.upgrade(request).then((ws) {
+      _client = ws;
+      _sequence = 0;
+      _totalBytes = 0;
+      _keyframeCount = 0;
 
-    // 不关闭 response，持续推送
-    _clients.add(request.response.connection!.socket);
+      ws.listen(
+        (data) {
+          // 处理客户端消息
+          if (data is String) {
+            _handleMessage(data);
+          }
+        },
+        onDone: () {
+          _client = null;
+        },
+        onError: (_) {
+          _client = null;
+        },
+      );
+    }).catchError((e) {
+      // WebSocket 升级失败
+    });
   }
 
-  /// 处理设备信息请求
+  void _handleMessage(String message) {
+    // 简单的 JSON 消息处理
+    // 可以处理: keyframe_request, config, quality 等
+    if (message.contains('keyframe_request')) {
+      // 通知编码器请求关键帧
+      _onKeyframeRequest?.call();
+    }
+  }
+
   void _handleInfo(HttpRequest request) {
     request.response.headers
       ..set('Content-Type', 'application/json')
       ..set('Access-Control-Allow-Origin', '*');
     request.response
-      ..write('{"device_name":"PhoneCam","fps":$fps,"resolution":"640x480"}')
+      ..write('{"device_name":"PhoneCam","codec":"h264","protocol":"websocket"}')
       ..close();
   }
 
-  /// 处理单帧快照请求
-  void _handleSnapshot(HttpRequest request) {
-    final frame = _currentFrame;
-    if (frame == null) {
-      request.response
-        ..statusCode = HttpStatus.serviceUnavailable
-        ..write('No frame available')
-        ..close();
-      return;
-    }
-    request.response.headers
-      ..set('Content-Type', 'image/jpeg')
-      ..set('Access-Control-Allow-Origin', '*');
-    request.response
-      ..add(frame)
-      ..close();
-  }
-
-  /// 广播当前帧给所有客户端
-  void _broadcastFrame() {
-    final frame = _currentFrame;
-    if (frame == null || _clients.isEmpty) return;
-
-    final header = '$boundary\r\n'
-        'Content-Type: image/jpeg\r\n'
-        'Content-Length: ${frame.length}\r\n'
-        '\r\n';
-
-    final headerBytes = Uint8List.fromList(header.codeUnits);
-
-    final deadClients = <Socket>[];
-    for (final client in _clients) {
-      try {
-        client.add(headerBytes);
-        client.add(frame);
-        client.add(Uint8List.fromList([0x0D, 0x0A])); // \r\n
-      } catch (e) {
-        deadClients.add(client);
-      }
-    }
-
-    // 清理断开的客户端
-    for (final dead in deadClients) {
-      _clients.remove(dead);
-      try { dead.close(); } catch (_) {}
-    }
-  }
-
-  /// 停止服务
   Future<void> stop() async {
-    _frameTimer?.cancel();
-    _frameTimer = null;
-
-    for (final client in _clients) {
-      try { client.close(); } catch (_) {}
-    }
-    _clients.clear();
-
+    await _client?.close();
+    _client = null;
     await _server?.close(force: true);
     _server = null;
     _isRunning = false;
   }
 
   bool get isRunning => _isRunning;
-  int get clientCount => _clients.length;
+  bool get isConnected => _client != null;
+  int get totalBytes => _totalBytes;
+  int get keyframeCount => _keyframeCount;
+
+  // 关键帧请求回调
+  void Function()? _onKeyframeRequest;
+  set onKeyframeRequest(void Function()? callback) {
+    _onKeyframeRequest = callback;
+  }
 }

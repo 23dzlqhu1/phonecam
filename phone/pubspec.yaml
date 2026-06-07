@@ -1,5 +1,5 @@
 name: phone
-description: "PhoneCam - 手机摄像头推流工具"
+description: PhoneCam - 手机摄像头推流工具
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -12,9 +12,11 @@ dependencies:
   cupertino_icons: ^1.0.8
   camera: ^0.11.0+2
   shelf: ^1.4.2
+  shelf_websocket: ^1.0.4
   multicast_dns: ^0.3.2
   wakelock_plus: ^1.2.8
   path_provider: ^2.1.5
+  image: ^4.1.3
 
 dev_dependencies:
   flutter_test:
