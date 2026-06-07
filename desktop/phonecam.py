@@ -115,8 +115,7 @@ def _run_cli(args):
     print()
 
     last_stat = time.time()
-    frame_count = 0
-    last_pts_us = 0  # 用于延迟估算
+    last_pts_us = 0  # 用于延迟估算（避免重绘同一帧）
 
     try:
         while True:
@@ -156,19 +155,17 @@ def _run_cli(args):
                             if cv2.waitKey(1) & 0xFF == ord('q'):
                                 break
 
-                frame_count += 1
                 last_pts_us = frame.pts
 
-                # 5 秒一次日志
+                # 5 秒一次日志（直接用 receiver 的滑动窗口 FPS，
+                # 避免本地 frame_count 重复读同一帧导致 FPS 偏高）
                 now = time.time()
                 if now - last_stat >= 5.0:
-                    fps = frame_count / (now - last_stat)
                     logger.info(
-                        f"FPS: {fps:.1f} | "
+                        f"FPS: {receiver.fps:.1f} | "
                         f"状态: {receiver.state.value} | "
                         f"丢帧: {receiver.lost_count}"
                     )
-                    frame_count = 0
                     last_stat = now
             else:
                 time.sleep(0.01)

@@ -209,13 +209,19 @@ HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
 
 ### 4.7 验收标准
 
-- [ ] 运行 `python tests/mock_phone/mock_phone_server.py` 启动 mock 服务
-- [ ] 运行 `python -m desktop.phonecam --connect 127.0.0.1:9999` 接收
+- [x] 运行 `python tests/mock_phone/mock_phone_server.py` 启动 mock 服务
+- [x] 运行 `python desktop/phonecam.py --connect 127.0.0.1:9999 --preview` 接收
 - [x] 电脑端 OpenCV 窗口能看到 30 FPS 的彩色滚动画面
 - [x] 终端打印 `FPS: 30 | Latency: Xms | Lost: 0`
 - [x] Ctrl+C 断开后再启动能自动重连一次
 - [x] `docs/protocol.md` 包含 MVP-1 用的 24 字节头定义
 - [x] README 进度表更新到 "MVP-1 ✅"
+
+> ✅ **验收结果**（2026-06-07 端到端联调实测）：
+> - 电脑端 29.6 FPS，0 丢帧
+> - 命令：`python desktop/phonecam.py --connect 127.0.0.1:9999 --preview`
+> - 链路：mock (PCP 24 字节头) → PcpReceiver → OpenCV 窗口
+> - 与 README / .ai/context.md 结论一致
 
 ### 4.8 给 AI 的任务提示词
 
