@@ -47,12 +47,12 @@
 | 阶段 | 状态 | 验收物 |
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
-| **MVP-1** 假视频流闭环 | 🔄 进行中 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + FPS/延迟统计 |
+| **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
 | **MVP-2** 真实摄像头画面 | ⬜ 待开始 | Android 端 MediaCodec 硬编码 + USB adb reverse + PyAV 硬解码 + OpenCV 窗口看真画面 |
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 已完成 ✅，**下一步进入 MVP-1：写 mock_phone + 电脑端 PcpReceiver 已就绪**。
+**当前正在做**：MVP-0 ✅ + **MVP-1 ✅ 完成**（2026-06-07）。下一步进入 MVP-2：真实摄像头画面（MediaCodec 硬编 + PyAV 硬解）。
 
 ---
 
@@ -99,10 +99,44 @@
 | G-003 | mock 端 pts 必须相对 session 起点 | 2026-06-07 |
 | G-004 | HSV→RGB 手写公式的 2D mask 坑 | 2026-06-07 |
 | G-005 | AI Edit 工具有时会静默回退文件 | 2026-06-07 |
+| G-006 | **元规则**：任何更新都要同步全部文档 | 2026-06-07 |
 
 ---
 
 ## 你的工作方式
+
+
+### 文档同步强制规则（最重要的元规则）
+
+> ⚠️ **没有"只改一处"的事**。任何代码 / 协议 / 状态 / 决策变更 → 在同一组 commit 里**必须**同步更新所有引用方。漏更 = 文档脱节 = 信任崩塌。
+
+**变更类型 → 必同步的文档**：
+
+| 变更类型 | 必同步的文档 |
+|---------|------------|
+| 改了代码（新增 / 删除 / 重命名文件）| `README.md` 项目结构表 + `specs/项目结构.md` + `.ai/context.md` 进度表 |
+| 改了 MVP 阶段状态 | `README.md` 进度表 + `specs/MVP路线图.md` 阶段总览 + `.ai/context.md` 进度表 + `specs/产品概述.md` |
+| 改了协议 | `docs/protocol.md` + `.ai/decisions.md` + `.ai/context.md` 协议段 + `specs/MVP路线图.md` 协议引用 |
+| 改了 CLI 参数 / 命令 | `desktop/phonecam.py` 注释 + `tests/README.md` + `README.md` 快速开始 + `.ai/context.md` 协议段 |
+| 加了新依赖 | `specs/技术栈.md` + `README.md`（如有依赖清单）+ `.ai/decisions.md` |
+| 改了项目结构 / 目录 | `README.md` 项目结构表 + `specs/项目结构.md` + `.ai/context.md` 目录说明 |
+| 改了设计决策 | `.ai/decisions.md` + `.ai/context.md`（如果是关键决策）|
+| 踩了新坑 | `.ai/gotchas.md`（必须追加 G-NNN） + `.ai/context.md` 索引同步 |
+
+**操作清单**（**每次**代码/协议/状态变更都做）：
+1. 改前先 `git grep` / `rg` 列出所有引用方（包括隐含的）
+2. 在同一组 commit 内全部更新（不要拆 commit，留连不上的半成品）
+3. commit 信息里**写明**"同步更新了 X / Y / Z 文档"
+4. commit 后再 `git grep` 一次确认**无残留**旧内容
+5. 写"完成任务"报告时也要列"同步更新了哪些文档"
+
+**反例（不允许的）**：
+- ❌ 改代码不更新 README
+- ❌ 改 MVP 状态不更新 specs/MVP路线图.md
+- ❌ 改协议不更新 docs/protocol.md
+- ❌ 改命令参数不更新 tests/README.md
+- ❌ 改文件结构不更新 specs/项目结构.md
+- ❌ 踩了新坑不更新 .ai/gotchas.md
 
 ### 接到任务时
 1. 读 `specs/产品概述.md` 了解产品全貌
@@ -123,6 +157,8 @@
 1. 简短报告（不超过 5 行）
 2. 提示用户如何手动验证
 3. 等待用户确认再进入下一项
+4. **同步全部相关文档**（见上方"文档同步强制规则"，**先 grep 引用方 → 同步更新 → commit 信息列出 → 再 grep 一次**）
+5. 关键决策写进 `.ai/decisions.md` / 踩新坑写进 `.ai/gotchas.md`（G-NNN 单独 commit）
 
 ---
 

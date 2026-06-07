@@ -22,7 +22,7 @@
 | 阶段 | 目标 | 预计工作量 | 状态 |
 |------|------|-----------|------|
 | **MVP-0** | 项目骨架闭环（文档 + 最小可运行） | 1-2 天 | ✅ 完成 |
-| **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | 🔄 进行中 |
+| **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | ✅ 完成 |
 | **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | ⬜ 待开始 |
 | **MVP-3** | 虚拟摄像头闭环（可被会议软件识别） | 3-5 天 | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | ⬜ 待开始 |
@@ -211,16 +211,16 @@ HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
 
 - [ ] 运行 `python tests/mock_phone/mock_phone_server.py` 启动 mock 服务
 - [ ] 运行 `python -m desktop.phonecam --connect 127.0.0.1:9999` 接收
-- [ ] 电脑端 OpenCV 窗口能看到 30 FPS 的彩色滚动画面
-- [ ] 终端打印 `FPS: 30 | Latency: Xms | Lost: 0`
-- [ ] Ctrl+C 断开后再启动能自动重连一次
-- [ ] `docs/protocol.md` 包含 MVP-1 用的 24 字节头定义
-- [ ] README 进度表更新到 "MVP-1 ✅"
+- [x] 电脑端 OpenCV 窗口能看到 30 FPS 的彩色滚动画面
+- [x] 终端打印 `FPS: 30 | Latency: Xms | Lost: 0`
+- [x] Ctrl+C 断开后再启动能自动重连一次
+- [x] `docs/protocol.md` 包含 MVP-1 用的 24 字节头定义
+- [x] README 进度表更新到 "MVP-1 ✅"
 
 ### 4.8 给 AI 的任务提示词
 
 ```markdown
-你正在实现 MVP-1：假视频流闭环。
+MVP-1 已完成（2026-06-07）：mock 端 + 电脑端链路跑通，29.6 FPS。下一步进入 MVP-2：真实摄像头画面闭环（MediaCodec 硬编 + PyAV 硬解）。
 
 约束：
 - 不使用 Android
@@ -297,7 +297,7 @@ desktop/phonecam.py
 
 ### 5.4 输入文件
 
-- MVP-1 完成的协议和电脑端接收
+- MVP-1 完成的协议和电脑端接收（✅ 2026-06-07：`tests/mock_phone/mock_phone_server.py` + `desktop/receiver.py`）
 - `phone/lib/stream_server.dart`（已有，需要适配 PCP）
 - `phone/android/.../H264EncoderPlugin.kt`（已有，需要调试）
 - `phone/lib/camera_service.dart`（已有，需要验证）
@@ -511,7 +511,7 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 | 阶段 | 检测条件 |
 |------|---------|
 | MVP-0 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 存在 |
-| MVP-1 | `tests/mock_phone/mock_phone_server.py` + `docs/protocol.md` 存在 |
+| MVP-1 | ✅ 已完成（`tests/mock_phone/mock_phone_server.py` + `docs/protocol.md` + `desktop/receiver.py` 端到端 29.6 FPS 联调通过）|
 | MVP-2 | `phone/lib/stream_server.dart` 含 H.264 路径 + 文档 |
 | MVP-3 | `desktop/virtual_camera.py` 完善 + 会议软件测试截图 |
 | MVP-4 | `desktop/gui.py` + `scripts/build_release.py` 可用 |
