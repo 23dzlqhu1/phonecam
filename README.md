@@ -14,8 +14,10 @@
 | 我是 | 去看 |
 |------|------|
 | 📖 **普通用户**（想用这个工具）| [docs/user-manual.md](docs/) |
-| 💻 **开发者**（想参与贡献）| [specs/产品概述.md](specs/产品概述.md) |
+| 💻 **开发者**（想参与贡献）| [specs/产品概述.md](specs/产品概述.md) + [specs/MVP路线图.md](specs/MVP路线图.md) |
 | 🤖 **AI 助手**（想了解项目）| [.ai/context.md](.ai/context.md) |
+
+> 🗺️ **当前最重要的一份文档**：[`specs/MVP路线图.md`](specs/MVP路线图.md) — 定义了 MVP-0 到 MVP-4 每个阶段的目标、禁止事项、验收标准。
 
 ---
 
@@ -56,10 +58,13 @@
 | 阶段 | 目标 | 状态 |
 |------|------|------|
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
-| **MVP-1** | 假视频流闭环（mock + 协议 + 接收 + 显示） | ⬜ 待开始 |
+| **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | 🔄 进行中 |
 | **MVP-2** | 真实摄像头画面（MediaCodec 硬编 + PyAV 硬解） | ⬜ 待开始 |
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
+
+**当前正在做**：MVP-0 已完成 ✅ → **MVP-1 进行中**：电脑端 `PcpReceiver` 已实现，等待 mock 端 + 端到端联调。
+**协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 **当前正在做**：MVP-0 已完成 ✅ → **下一步进入 MVP-1**。
 

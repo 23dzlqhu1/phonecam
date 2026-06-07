@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """H.264 视频流接收器
 
-通过 WebSocket 接收 H.264 NAL 数据，解码为 BGR 帧。
+🚨 DEPRECATION WARNING / 废弃警告 🚨
+本文件当前实现是：WebSocket + 12 字节头 + H.264 NAL
+这与项目新协议路线（PCP / TCP / 24 字节头）冲突。
+
+计划：
+- MVP-1：不使用本文件，电脑端用 `tests/mock_phone/` 模拟
+- MVP-2：重写本文件，使用 PcpReceiver（receiver.py）+ PyAV 硬解码
+
+当前状态：冻结，禁止添加新功能。
+
+协议规范见 `docs/protocol.md`
+进度见 `.ai/context.md`
 """
 
 import asyncio

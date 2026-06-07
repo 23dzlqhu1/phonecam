@@ -40,18 +40,39 @@
 
 ---
 
-## 当前进度
+## 当前进度（MVP 阶段）
 
-| 阶段 | 状态 | 说明 |
-|------|------|------|
-| Phase 0：产品概述 | ✅ 完成 | `specs/产品概述.md` |
-| Phase 1：技术选型 | ⏳ 待开始 | `specs/技术栈.md` |
-| Phase 2：架构设计 | ⏳ 待开始 | `specs/项目结构.md` |
-| Phase 3：协议设计 PCP | ⏳ 待开始 | 核心差异化亮点 |
-| Phase 4：手机端 | 🔄 部分 | Flutter 框架有，H.264 编码部分完成 |
-| Phase 5：电脑端 | 🔄 部分 | Python 框架有，pyvirtualcam 已集成 |
-| Phase 6：测试中间件 | ⏳ 待开始 | `tests/` 目录已建好 |
-| Phase 7：打包发布 | ⏳ 待开始 | APK + EXE 打包脚本 |
+> 📌 **核心原则**：本项目的本质是**低延迟视频链路**。推进按"端到端闭环"分 MVP 阶段，**不按功能模块写代码**。
+
+| 阶段 | 状态 | 验收物 |
+|------|------|--------|
+| **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
+| **MVP-1** 假视频流闭环 | 🔄 进行中 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + FPS/延迟统计 |
+| **MVP-2** 真实摄像头画面 | ⬜ 待开始 | Android 端 MediaCodec 硬编码 + USB adb reverse + PyAV 硬解码 + OpenCV 窗口看真画面 |
+| **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
+| **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
+
+**当前正在做**：MVP-0 已完成 ✅，**下一步进入 MVP-1：写 mock_phone + 电脑端 PcpReceiver 已就绪**。
+
+---
+
+## ⚠️ 协议路线（项目唯一）
+
+> 🚨 **本项目只用 PCP 一种协议**。之前的 HTTP MJPEG 和 WebSocket 已被废弃。
+> 详细规范见 [`docs/protocol.md`](../docs/protocol.md)，不要参考 `docs/protocol.md` 的历史段落。
+
+| 协议 | 状态 | 关键文件 | 计划 |
+|------|------|---------|------|
+| HTTP MJPEG | ❌ 已废弃 | 原 `desktop/receiver.py::MjpegReceiver` 已删除 | — |
+| WebSocket + H.264 | ⚠️ MVP-2 重写 | `phone/lib/stream_server.dart`、`desktop/h264_receiver.py` 顶部有 deprecation 警告 | MVP-2 重写为 TCP+PCP |
+| **PCP (TCP + 二进制)** | ✅ 当前 | `desktop/receiver.py::PcpReceiver`（24 字节头 + payload） | MVP-1 启用 |
+
+**AI 工作流提醒**：
+- 看到 phone/lib/stream_server.dart 不要"修复"它，它已冻结
+- 不要建议 MJPEG 或 WebSocket 方案
+- 涉及协议的问题先看 docs/protocol.md
+
+**MVP 完成时（终极目标）**：用户 3 分钟内能在腾讯会议 / OBS 中看到手机摄像头画面。
 
 ---
 

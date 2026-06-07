@@ -1,3 +1,18 @@
+// 🚨 废弃警告 / DEPRECATION WARNING 🚨
+//
+// 本文件当前实现是：WebSocket + 12 字节头 + H.264 NAL
+// 这与项目新协议路线（PCP / TCP / 24 字节头）冲突。
+//
+// 计划：
+// - MVP-1：不修改本文件，电脑端用 `tests/mock_phone/` 模拟
+// - MVP-2：完全重写本文件为 TCP + PCP（24 字节头），并删除
+//          shelf / web_socket_channel 依赖
+//
+// 当前状态：**冻结**，禁止添加新功能，只修复编译错误。
+//
+// 协议规范见 `docs/protocol.md`
+// 进度见 `.ai/context.md`
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
