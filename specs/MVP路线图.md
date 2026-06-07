@@ -21,8 +21,8 @@
 
 | 阶段 | 目标 | 预计工作量 | 状态 |
 |------|------|-----------|------|
-| **MVP-0** | 项目骨架闭环（文档 + 最小可运行） | 1-2 天 | ⏳ 进行中 |
-| **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | ⬜ 待开始 |
+| **MVP-0** | 项目骨架闭环（文档 + 最小可运行） | 1-2 天 | ✅ 完成 |
+| **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | 🔄 进行中 |
 | **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | ⬜ 待开始 |
 | **MVP-3** | 虚拟摄像头闭环（可被会议软件识别） | 3-5 天 | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | ⬜ 待开始 |
@@ -158,7 +158,11 @@ desktop/phonecam.py
 
 - MVP-0 完成的 `desktop/`
 - 已有的 `desktop/receiver.py`、`desktop/phonecam.py`
-- `phone/lib/stream_server.dart`（参考其接口设计）
+- `docs/protocol.md`（PCP 协议规范）
+- `tests/README.md`（mock 工具说明）
+
+> ⚠️ **MVP-1 不碰 `phone/` 目录**。手机端在 MVP-2 才介入。
+> 不要参考 `phone/lib/stream_server.dart`（它是 WebSocket 旧实现，已冻结）。
 
 ### 4.5 输出文件
 
@@ -168,8 +172,9 @@ desktop/phonecam.py
 | `tests/legacy/test_vcam*.py` | 参考 | 已有 OpenCV 窗口显示代码可参考 |
 | `desktop/receiver.py` | 重构 | 实现 PCP 协议解析 |
 | `desktop/phonecam.py` | 重构 | 命令行入口 + 窗口显示 |
-| `specs/protocol.md` | 新建 | PCP 协议初版（最少必要字段）|
 | `tests/README.md` | 更新 | 写明 mock 工具怎么用 |
+
+> 📌 **协议规范统一在 [`docs/protocol.md`](../docs/protocol.md)**，MVP-1 不新建 `specs/protocol.md`。
 
 ### 4.6 PCP 协议最小设计（MVP-1 用）
 
@@ -209,7 +214,7 @@ HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
 - [ ] 电脑端 OpenCV 窗口能看到 30 FPS 的彩色滚动画面
 - [ ] 终端打印 `FPS: 30 | Latency: Xms | Lost: 0`
 - [ ] Ctrl+C 断开后再启动能自动重连一次
-- [ ] `specs/protocol.md` 包含 MVP-1 用的 24 字节头定义
+- [ ] `docs/protocol.md` 包含 MVP-1 用的 24 字节头定义
 - [ ] README 进度表更新到 "MVP-1 ✅"
 
 ### 4.8 给 AI 的任务提示词
@@ -237,7 +242,6 @@ HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
    - 启动接收
    - 用 OpenCV `cv2.imshow` 显示
    - 每秒打印 FPS、平均延迟、丢帧数
-4. 写 `specs/protocol.md`：至少包含 4.6 的字段定义
 
 测试：
 - 启动 mock，验证电脑端窗口能滚动
@@ -507,7 +511,7 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 | 阶段 | 检测条件 |
 |------|---------|
 | MVP-0 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 存在 |
-| MVP-1 | `tests/mock_phone/mock_phone_server.py` + `specs/protocol.md` 存在 |
+| MVP-1 | `tests/mock_phone/mock_phone_server.py` + `docs/protocol.md` 存在 |
 | MVP-2 | `phone/lib/stream_server.dart` 含 H.264 路径 + 文档 |
 | MVP-3 | `desktop/virtual_camera.py` 完善 + 会议软件测试截图 |
 | MVP-4 | `desktop/gui.py` + `scripts/build_release.py` 可用 |

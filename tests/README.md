@@ -44,7 +44,7 @@ tests/
 python tests/mock_phone/mock_phone_server.py
 
 # 另一个终端，启动真的电脑端
-python desktop/phonecam.py --url http://localhost:8080/video
+python desktop/phonecam.py --connect 127.0.0.1:9999 --preview
 ```
 
 ### 场景 2：测试协议延迟

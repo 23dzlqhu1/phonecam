@@ -112,12 +112,13 @@ TCP 监听 9999 ←──── 局域网直连 ────→  192.168.x.x:999
 ```python
 import struct
 
-HEADER_STRUCT = struct.Struct('<4sBBBI Q I')  # 24 字节
+# 24 字节定长头：magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts(Q) + payload_len(I)
+HEADER_STRUCT = struct.Struct('<4sBBBBIQI')
 
 # 接收
 header_buf = bytearray(24)
 sock.recv_into(header_buf, 24)
-magic, ver, ptype, codec, flags, seq, pts, plen = HEADER_STRUCT.unpack(header_buf)
+magic, ver, ptype, codec, flags, seq, pts, plen = HEADER_STRUCT.unpack(bytes(header_buf))
 payload = sock.recv(plen)
 ```
 
