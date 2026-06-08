@@ -325,13 +325,18 @@ Phase Y 实施 SettingsActivity 时，9 个设置项中有 3 项（码率 / 编�
 ### 后续行动
 
 - [x] 批次 3.2.0.1 实施完毕
-- [ ] 批次 3.2.0.2：EglRenderer 接收 Camera2 ImageReader 真实帧（替换 TestYuvFrames）
+- [x] 批次 3.2.0.2 实施完毕（EglRenderer 接收 Camera2 ImageReader 真实帧 + Yuv420Extractor + race condition 重试机制 + 自动编码绕开 ColorOS 5s swipe-up，49788B H.264 验证通过）
 - [ ] 批次 3.2.0.3：长时连拍（start→encodeFrame 循环→stop 手动）
 - [ ] 批次 3.3：NALU → TCP 发送到 desktop
 
 ---
 - [ ] 电脑端是否做 GUI（先 CLI + 简单 tkinter）
 - [ ] 错误重连策略（断连后 1s / 2s / 5s 重试？）
+- [ ] H.264 码率默认值（建议 4 Mbps for 1080p60）
+- [ ] 关键帧间隔（建议 2 秒）
+- [ ] 音频采样率（建议 44.1kHz，AAC 编码）
+
+## 待决策（TODO）
 
 ---
 

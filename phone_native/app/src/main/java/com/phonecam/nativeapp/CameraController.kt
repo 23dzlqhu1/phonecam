@@ -9,6 +9,8 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.media.Image
+import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -84,6 +86,18 @@ class CameraController(
     // 当前选中的预览尺寸（用于做 TextureView 的 letterbox transform）
     @Volatile private var currentPreviewSize: Size? = null
 
+    // ===================== 批次 3.2.0.2 真实帧出帧 (ImageReader) =====================
+    // 外部注册 listener 后, 内部会自动创建 ImageReader 并把它的 surface 加到 CaptureSession outputs
+    // 收到 Image 时回调 listener (注意: listener 内部用完必须 image.close(), 否则 ImageReader 会卡死)
+    @Volatile private var imageListener: ((Image) -> Unit)? = null
+    private var imageReader: ImageReader? = null
+    // ImageReader 自带一个 handler 线程跑 onImageAvailable, 避免阻塞相机线程
+    private var imageReaderThread: HandlerThread? = null
+    private var imageReaderHandler: Handler? = null
+    // 批次 3.2.0.2: 标记 setOnImageAvailableListener 在 cameraHandler 还是 null 时被调用
+    // → open() 完成后, 如果这个 flag 是 true, 就启动重试 loop
+    @Volatile private var pendingListenerRetry: Boolean = false
+
     // TextureView 监听器：等 surface ready 后才调 open()
     private val surfaceTextureListener = object : TextureView.SurfaceTextureListener {
         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
@@ -148,6 +162,17 @@ class CameraController(
         cameraThread = thread
         cameraHandler = Handler(thread.looper)
 
+        // 批次 3.2.0.2: 独立线程跑 ImageReader listener (避免相机线程被帧处理阻塞)
+        val irThread = HandlerThread("ImageReaderThread").also { it.start() }
+        imageReaderThread = irThread
+        imageReaderHandler = Handler(irThread.looper)
+
+        // 批次 3.2.0.2: 如果 setOnImageAvailableListener 之前因 cameraHandler==null 被推迟, 现在启动重试
+        if (pendingListenerRetry && imageListener != null) {
+            Log.d(TAG, "open: pendingListenerRetry detected, starting retry loop now")
+            startListenerRetryLoop(cameraHandler!!)
+        }
+
         // 如果 surface 还没好（监听器还没回调），等 onSurfaceTextureAvailable 触发
         // 如果 surface 已经好（监听器比 open() 早），就立刻打开
         tryOpenIfReady()
@@ -175,6 +200,23 @@ class CameraController(
         }
         cameraDevice = null
 
+        // 批次 3.2.0.2: 释放 ImageReader
+        try {
+            imageReader?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "close imageReader error: ${e.message}")
+        }
+        imageReader = null
+        imageListener = null
+        imageReaderThread?.quitSafely()
+        try {
+            imageReaderThread?.join(500)
+        } catch (e: InterruptedException) {
+            Log.w(TAG, "join imageReaderThread interrupted")
+        }
+        imageReaderThread = null
+        imageReaderHandler = null
+
         cameraThread?.quitSafely()
         try {
             cameraThread?.join(500)
@@ -191,6 +233,155 @@ class CameraController(
      * 暴露给外部做调试 / 日志
      */
     fun getCameraId(): String? = backCameraId
+
+    // ===================== 批次 3.2.0.2 真实帧出帧 API =====================
+
+    /**
+     * 注册"出帧"监听器。
+     *
+     * 内部会自动:
+     *  1. 创建一个与预览同尺寸的 ImageReader (YUV_420_888, 2 buffer)
+     *  2. 把 imageReader.surface 加到 CaptureSession 的 outputs
+     *  3. 在独立 HandlerThread 上跑 OnImageAvailableListener, 回调外部传入的 listener
+     *
+     * 约束:
+     *  - 必须在 open() 之后调用 (open() 已开相机线程, 内部会用 open 完的尺寸)
+     *  - 每张 Image 用完必须 image.close(), 否则 ImageReader 会停止出帧
+     *  - 暂不支持注销 (批次 3.2.0.2 单帧测试场景用)
+     *  - 暂不支持多 listener (单 listener 够用)
+     *
+     * @param listener 收到 YUV_420_888 Image 的回调
+     */
+    fun setOnImageAvailableListener(listener: (Image) -> Unit) {
+        Log.d(TAG, "setOnImageAvailableListener called")
+        imageListener = listener
+        val handler = cameraHandler ?: run {
+            Log.w(TAG, "setOnImageAvailableListener: cameraHandler is null, 推迟到 open() 后再启动重试")
+            // 推迟启动: 等 open() 完成为止
+            pendingListenerRetry = true
+            return
+        }
+        // 批次 3.2.0.2: onCameraPermissionGranted 在 open 之前就注册了 listener, 此时 CaptureSession 还没创建
+        // → 启动一个重试循环, 每 500ms 试一次, 最多 6s
+        startListenerRetryLoop(handler)
+    }
+
+    private fun startListenerRetryLoop(handler: Handler) {
+        handler.post(object : Runnable {
+            private var tries = 0
+            override fun run() {
+                if (released || imageReader != null) return
+                val ps = currentPreviewSize
+                val cs = captureSession
+                Log.d(TAG, "setOnImageAvailableListener retry #$tries ps=$ps cs=${if (cs != null) "READY" else "NULL"}")
+                if (ps != null && cs != null) {
+                    setupImageReaderInternal()
+                    return
+                }
+                tries++
+                if (tries >= 12) {  // 6s
+                    Log.w(TAG, "setOnImageAvailableListener: 等相机 ready 超时 6s, 放弃")
+                    return
+                }
+                handler.postDelayed(this, 500L)
+            }
+        })
+    }
+
+    /**
+     * 在相机线程上真正创建 ImageReader 并把它挂到 CaptureSession
+     */
+    private fun setupImageReaderInternal() {
+        if (released) return
+        val listener = imageListener ?: return
+        val previewSize = currentPreviewSize ?: run {
+            Log.w(TAG, "setupImageReaderInternal: currentPreviewSize is null, 相机还没 ready")
+            return
+        }
+        val session = captureSession ?: run {
+            Log.w(TAG, "setupImageReaderInternal: captureSession is null, 相机还没 ready")
+            return
+        }
+        // 已经创建过就不重复
+        if (imageReader != null) {
+            Log.d(TAG, "setupImageReaderInternal: imageReader already exists, skip")
+            return
+        }
+
+        val reader = ImageReader.newInstance(
+            previewSize.width, previewSize.height,
+            android.graphics.ImageFormat.YUV_420_888,
+            2  // 2 buffer: 1 张在用 + 1 张后备
+        )
+        reader.setOnImageAvailableListener({ r ->
+            val image = r.acquireLatestImage()
+            if (image != null) {
+                try {
+                    listener(image)
+                } finally {
+                    image.close()
+                }
+            }
+        }, imageReaderHandler)
+        imageReader = reader
+        InAppLogStore.i(TAG, "imageReader created: ${previewSize.width}x${previewSize.height} YUV_420_888")
+
+        // 关键: 重建 CaptureSession, 把 imageReader.surface 加进 outputs
+        // 重建会触发 preview 短暂黑屏 (~100-200ms), 用户能看到
+        recreateSessionWithImageReaderInternal(reader.surface, previewSize)
+    }
+
+    /**
+     * 重建 CaptureSession: outputs = [previewSurface (TextureView), imageReaderSurface]
+     */
+    private fun recreateSessionWithImageReaderInternal(
+        imageReaderSurface: android.view.Surface,
+        previewSize: Size
+    ) {
+        if (released) return
+        val camera = cameraDevice ?: return
+        val handler = cameraHandler ?: return
+        val texture = textureView.surfaceTexture ?: return
+        texture.setDefaultBufferSize(previewSize.width, previewSize.height)
+        val previewSurface = android.view.Surface(texture)
+
+        try {
+            captureSession?.close()
+
+            val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(previewSurface)
+                addTarget(imageReaderSurface)  // 关键: 把 ImageReader 也加进 request
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            }
+
+            camera.createCaptureSession(
+                listOf(previewSurface, imageReaderSurface),
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (released) {
+                            session.close()
+                            return
+                        }
+                        captureSession = session
+                        try {
+                            session.setRepeatingRequest(requestBuilder.build(), null, handler)
+                            InAppLogStore.i(TAG, "preview+imageReader started")
+                        } catch (e: CameraAccessException) {
+                            Log.e(TAG, "setRepeatingRequest failed: ${e.message}", e)
+                        }
+                    }
+
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        Log.e(TAG, "capture session (with imageReader) configure failed")
+                    }
+                },
+                handler
+            )
+        } catch (e: CameraAccessException) {
+            Log.e(TAG, "recreateSessionWithImageReaderInternal failed: ${e.message}", e)
+        }
+    }
 
     // ======================== 设置注入 (Phase Y-1 加) ========================
 

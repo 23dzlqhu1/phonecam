@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!--
   strings.xml — PhoneCam 字符串资源
   范围: viewfinder 4 层 (Layer A-D) + 4 个 Activity 文案 + 错误占位
@@ -36,7 +36,7 @@
     <string name="layer_c_btn_streaming">推流中断</string>
     <string name="layer_c_btn_disabled">请先打开摄像头</string>
     <!-- 批次 3.2.0.1 临时文案: 复用 Layer C 按钮为"拍 1 帧 EGL 零拷贝 H.264 编码"调试入口, 3.2.0.3 闭环后改回 layer_c_btn_start -->
-    <string name="layer_c_btn_test_3_1">🎬  拍 1 帧 (3.2 EGL)</string>
+    <string name="layer_c_btn_test_3_1">🎬  拍 1 帧 (3.2 真实)</string>
 
     <!-- ============== Layer D: 底部状态 ============== -->
     <string name="layer_d_format">PHONECAM %1$s · CAM%2$s · %3$s</string>

@@ -1,4 +1,4 @@
-package com.phonecam.nativeapp
+﻿package com.phonecam.nativeapp
 
 import android.Manifest
 import android.content.Intent
@@ -18,6 +18,8 @@ import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * MainActivity —— phone_native/ Phase X 主界面
@@ -69,6 +71,15 @@ class MainActivity : AppCompatActivity() {
     // --- 设置 (Phase Y-1 加) ---
     private lateinit var settings: SettingsStore
     private var currentLensPref: String = "back"  // 用于 Layer B 状态显示
+
+    // --- 批次 3.2.0.2 真实摄像头帧缓存 ---
+    // ImageReader listener 会把最近一帧 YUV 缓存到这里, 按按钮时立刻拿走编码
+    // 用 @Volatile 保证跨线程可见: listener 在 ImageReader 线程, 编码在 EGL-Test 线程
+    @Volatile private var lastCameraYuv: ByteArray? = null
+    @Volatile private var cameraW: Int = 0
+    @Volatile private var cameraH: Int = 0
+    @Volatile private var cameraFrameCount: Int = 0
+    @Volatile private var cameraFrameReady: CountDownLatch? = null  // 按按钮时 set, listener 收到帧 countDown
 
     // --- 双击退出 ---
     private var lastBackPressedMs: Long = 0L
@@ -142,8 +153,15 @@ class MainActivity : AppCompatActivity() {
         // 推流按钮 → 批次 3.2.0.1 临时复用为"拍 1 帧 EGL 零拷贝 H.264 编码"调试入口
         //  3.2.0.3 端到端闭环后会改回真正的"开始/停止推流"状态机
         btnPush.setOnClickListener {
-            onEncodeOneFrameEglTest()
+            onEncodeOneFrameCameraEglTest()
         }
+
+        // 批次 3.2.0.2: OPPO ColorOS 会在 5s 后自动 swipe-up 把 app 推到后台
+        // → 改成"启动后 3s 自动跑一次"不依赖用户 tap
+        Handler(Looper.getMainLooper()).postDelayed({
+            InAppLogStore.i(TAG, "[3.2.0.2-AUTO] 3s 自动触发真实摄像头 EGL 编码")
+            onEncodeOneFrameCameraEglTest()
+        }, 3000)
 
         // 重试按钮 → 重新申请权限
         btnRetry.setOnClickListener {
@@ -196,7 +214,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateFooter() {
         val camId = cameraController?.getCameraId() ?: getString(R.string.layer_d_cam_unknown)
         val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-        footerText.text = getString(R.string.layer_d_format, "v0.2.4-x", camId, time)
+        footerText.text = getString(R.string.layer_d_format, "v0.2.8-x", camId, time)
     }
 
     /**
@@ -281,7 +299,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 权限通过: 通知 Controller + 更新 Layer B 状态
+     * 权限通过: 通知 Controller + 更新 Layer B 状态 + 注册 ImageReader 帧回调
      */
     private fun onCameraPermissionGranted() {
         cameraController?.onPermissionGranted()
@@ -289,6 +307,32 @@ class MainActivity : AppCompatActivity() {
         val camId = cameraController?.getCameraId() ?: "?"
         statusText.text = getString(R.string.layer_b_status_idle)
         debugText.text = "CAM$camId — 等待推流"
+        // 批次 3.2.0.2: 注册 ImageReader 真实帧回调 (供 btnPush 拍 1 帧 H.264 用)
+        setupCameraImageCallback()
+    }
+
+    /**
+     * 批次 3.2.0.2: 给 CameraController 注册 ImageReader 帧回调, 把每帧 YUV420_888 转 I420 缓存
+     *
+     * 注意: CameraController 在 listener finally 里已经 image.close() 了, 我们只读不关
+     */
+    private fun setupCameraImageCallback() {
+        cameraController?.setOnImageAvailableListener { image ->
+            try {
+                val w = image.width
+                val h = image.height
+                val yuv = Yuv420Extractor.imageToI420(image)
+                lastCameraYuv = yuv
+                cameraW = w
+                cameraH = h
+                cameraFrameCount++
+                // 如果测试方法在等帧, 唤醒
+                cameraFrameReady?.countDown()
+                InAppLogStore.d(TAG, "[3.2.0.2] 真实帧 #$cameraFrameCount ${w}x${h} -> ${yuv.size} 字节 I420")
+            } catch (e: Exception) {
+                Log.e(TAG, "[3.2.0.2] 提取真实帧异常", e)
+            }
+        }
     }
 
     /**
@@ -382,5 +426,113 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.apply { name = "EGL-Test-Thread" }.start()
+    }
+
+    /**
+     * 批次 3.2.0.2 调试入口: 真实摄像头 → EGL 零拷贝 H.264 编码 → 1 帧存盘
+     *
+     * 流程:
+     *   1) 通知 listener 准备 latch 等下 1 帧
+     *   2) 主线程等 latch (最多 3s)
+     *   3) 拿最近 1 帧真实 YUV (已是 I420 格式)
+     *   4) 跟 3.2.0.1 一样: H264Encoder.start + EglRenderer.drawYuv + encodeFrame + stop
+     *   5) 写到 test_3_2_2_camera.h264
+     *
+     * 验证目标:
+     *   - Camera2 ImageReader 出帧链路通 (YUV_420_888 + NV12 适配)
+     *   - Yuv420Extractor 提取 I420 字节数组正确
+     *   - EglRenderer 把真实摄像头帧正确编码 H.264
+     *   - OpenCV 解码后不再是"水平渐变测试图", 而是真实摄像头画面
+     */
+    private fun onEncodeOneFrameCameraEglTest() {
+        Thread {
+            try {
+                InAppLogStore.i(TAG, "[3.2.0.2] 真实摄像头 EGL 编码验证开始")
+                val w = cameraW
+                val h = cameraH
+                if (w <= 0 || h <= 0) {
+                    InAppLogStore.e(TAG, "[3.2.0.2] 相机未 ready (w=$w h=$h), 等 1.5s 后重试")
+                    Thread.sleep(1500)
+                    val w2 = cameraW
+                    val h2 = cameraH
+                    if (w2 <= 0 || h2 <= 0) {
+                        runOnUiThread {
+                            Toast.makeText(this, "相机未就绪, 请稍候再试", Toast.LENGTH_SHORT).show()
+                        }
+                        return@Thread
+                    }
+                }
+                val wFinal = if (w > 0) w else cameraW
+                val hFinal = if (h > 0) h else cameraH
+
+                // 1) 准备 latch 等下一帧 (给 listener 一点时间)
+                val latch = CountDownLatch(1)
+                cameraFrameReady = latch
+                val yuv0 = lastCameraYuv
+                if (yuv0 == null) {
+                    InAppLogStore.i(TAG, "[3.2.0.2] 还没收到帧, 等 latch (最多 3s)")
+                    val got = latch.await(3, TimeUnit.SECONDS)
+                    cameraFrameReady = null
+                    if (!got) {
+                        runOnUiThread {
+                            Toast.makeText(this, "3s 内没收到真实帧", Toast.LENGTH_SHORT).show()
+                        }
+                        return@Thread
+                    }
+                }
+                val yuv = lastCameraYuv ?: run {
+                    InAppLogStore.e(TAG, "[3.2.0.2] latch 已唤醒但 lastCameraYuv 仍为 null")
+                    return@Thread
+                }
+                InAppLogStore.i(TAG, "[3.2.0.2] 已拿真实帧: ${yuv.size} 字节 (${wFinal}x${hFinal})")
+
+                // 2) start encoder
+                val baos = java.io.ByteArrayOutputStream()
+                var naluCount = 0
+                val encoder = H264Encoder()
+                val inputSurface = encoder.start(wFinal, hFinal, object : H264Encoder.NaluCallback {
+                    override fun onNalu(nalu: ByteArray, type: Int) {
+                        baos.write(nalu)
+                        naluCount++
+                        InAppLogStore.i(TAG, "[3.2.0.2] NALU #$naluCount type=$type size=${nalu.size}")
+                    }
+                })
+
+                // 3) EglRenderer 画真实帧
+                val renderer = EglRenderer(inputSurface)
+                renderer.drawYuv(yuv, wFinal, hFinal)
+                InAppLogStore.i(TAG, "[3.2.0.2] EGL 已画 1 帧真实摄像头到 Surface")
+
+                // 4) 通知编码器喂一帧
+                encoder.encodeFrame(yuv)
+                Thread.sleep(500)
+
+                // 5) 停
+                encoder.stop()
+                renderer.release()
+
+                // 6) 保存
+                val outDir = getExternalFilesDir(null)
+                if (outDir == null) {
+                    InAppLogStore.e(TAG, "[3.2.0.2] getExternalFilesDir(null) 返回 null")
+                    return@Thread
+                }
+                if (!outDir.exists()) outDir.mkdirs()
+                val outFile = java.io.File(outDir, "test_3_2_2_camera.h264")
+                java.io.FileOutputStream(outFile).use { fos ->
+                    fos.write(baos.toByteArray())
+                }
+                InAppLogStore.i(TAG, "[3.2.0.2] 已写入: ${outFile.absolutePath} (${baos.size()} 字节, $naluCount 个 NALU)")
+
+                runOnUiThread {
+                    Toast.makeText(this, "相机EGL OK: ${baos.size()}B / $naluCount NALU\n${outFile.absolutePath}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "[3.2.0.2] 异常", e)
+                runOnUiThread {
+                    Toast.makeText(this, "异常: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.apply { name = "CameraEGL-Test-Thread" }.start()
     }
 }

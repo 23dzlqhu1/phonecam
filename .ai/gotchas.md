@@ -50,7 +50,7 @@
 | [G-016](#g-016adb-自动化点击靠-uiautomator-dump-拿坐标直接-input-tap-盲点易错) | ADB 自动化点击靠 `uiautomator dump` 拿坐标（直接 `input tap` 盲点易错）| 2026-06-08 |
 | [G-017](#g-017powershell-gbk-控制台打印-utf-8-字符崩必须用-iotextiowrapper-强制-utf-8) | PowerShell GBK 控制台打印 ⏳ UTF-8 字符崩（必须用 `io.TextIOWrapper` 强制 UTF-8） | 2026-06-08 |
 | [G-018](#g-018android-4-层垂直布局比例相机-50--状态-8--推流按钮-12--设置-30--100-屏幕高度) | Android 4 层垂直布局比例（相机 50% + 状态 8% + 推流按钮 12% + 设置 30% = 100% 屏幕高度） | 2026-06-08 |
-| [G-019](#g-019yuv420flexible-底层-oppo-是-nv12pixelstride2-且-u-v-交织) | **YUV420Flexible 底层 OPPO 是 NV12**（pixelStride=2 + UV 交织，源 planar 写入会色相偏蓝）| 2026-06-08 |
+| [G-019](#g-019yuv420flexible-底层-oppo-是-nv12pixelstride2-且-u-v-交织) | **YUV420Flexible 底层 OPPO 是 NV12**（pixelStride=2 + UV 交织，源 planar 写入会色相偏蓝）| 2026-06-08 **已通过批次 3.2.0.1 EGL 零拷贝根治** |
 
 ---
 
@@ -690,4 +690,45 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 - ✅ MediaCodec 的 `KEY_COLOR_FORMAT` 用枚举值是"软提示"，**真格式得靠运行时读 `Image.Plane` 推断**
 - ✅ 真要避免这种坑：**直接走 `createInputSurface()`**（EGL/OpenGL shader 处理所有像素格式差异）— 批次 3.2 计划升级
 - ✅ 验证手段：编码后用 OpenCV `cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)` 检查 V 通道值是否与源数据吻合
+
+---
+
+## G-020：OPPO ColorOS 5 秒自动 swipe-up 把无交互 app 推到后台（调试期需绕开）
+
+**日期**：2026-06-09
+**场景**：批次 3.2.0.2 MainActivity 加 btnPush 触发真实摄像头 EGL 编码 + OPPO PLC110 真机调试
+**症状**：
+- 启动 app → preview 30fps 跑得好（SurfaceFlinger `BufferQueueProducer` 30 FPS）→ `dumpsys activity` 显示 app 是 fg TOP / OOM adj=-800
+- ✅ 但**用户/AI tap 一次后或 5s 后**，OS 自动发一个 `input_interaction: edge-swipe, swipe-up` 手势 → app 被 `wm_on_top_resumed_lost_called` → `wm_on_paused_called` → `wm_on_stop_called` → `am_kill` (from pid 27255)
+- 也就是说 **OS 主动把 activity 推到后台，AI 调试用 `input tap` 根本来不及触发业务逻辑**
+- `adb input tap` 触发的触摸事件被 OPPO 智能后台/AlwaysAliveManager 当作"用户离开"信号
+**根因**：
+- ColorOS 12+ 的 OplusAlwaysAliveManager 监控前台 app 的"无用户持续交互"时长
+- 默认阈值约 5s，触发后主动 swipe-up = "让用户去 launcher"
+- 调试用的 `adb input tap` 在 OS 看来不是"持续的人手交互"
+**解决**：
+- 改 MainActivity **onCreate 里 `Handler(Looper.getMainLooper()).postDelayed(3_000) { onEncodeOneFrameCameraEglTest() }`** —— 启动后 3s 自动跑（早于 5s swipe-up 阈值）
+- 这样不需要等用户 tap 也能完成端到端验证
+- 业务正式版（用户主动 tap）这个 postDelayed 应该删掉
+- ✅ 验证手段：`adb logcat -b events | grep input_interaction` 看到 `swipe-up` 行 → 说明是 OS 推的而不是用户
+
+---
+
+## G-021：CameraController.setOnImageAvailableListener 在 onCreate 调用时 cameraHandler 还是 null（open() 之后才能 setupImageReader）
+
+**日期**：2026-06-09
+**场景**：批次 3.2.0.2 给 CameraController 加 setOnImageAvailableListener + 内部 setupImageReaderInternal 把 ImageReader surface 加到 CaptureSession
+**症状**：
+- MainActivity onCameraPermissionGranted 流程：`cameraController.open()` 后立即 `setupCameraImageCallback()` 注册 listener
+- 但 `cameraController.open()` 内部**异步**创建 cameraThread/cameraHandler（HandlerThread.start() 后才有 looper）
+- 同步调用 setOnImageAvailableListener 时 cameraHandler == null → 旧代码 return，**listener 永远不 setup**
+- 表现：`cameraW=0, cameraH=0` 一直为 0；onEncodeOneFrameCameraEglTest 走到 `相机未 ready` 然后 return 不写文件
+**根因**：
+- 注册 listener 的时机 vs 相机 ready 是 race condition
+- 旧实现只检查一次 `currentPreviewSize` + `captureSession` —— 如果当时还没创建，就 early return
+**解决**：
+- 加 `pendingListenerRetry: Boolean` 字段，cameraHandler==null 时设置 flag = true，不直接 return
+- `open()` 创建完 cameraHandler 后检查 flag，如果 true 就 `startListenerRetryLoop(handler)`
+- 重试 loop：每 500ms 检查 `currentPreviewSize != null && captureSession != null && imageReader == null`，最多 12 次 (6s)，成功就 setupImageReaderInternal
+- ✅ 验证手段：logcat 看 `setOnImageAvailableListener retry #N ps=1280x720 cs=READY` 一直到 `preview+imageReader started`，然后看到 `onImageAvailable` 回调
 
