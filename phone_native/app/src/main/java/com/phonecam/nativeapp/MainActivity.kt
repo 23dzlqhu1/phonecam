@@ -139,9 +139,10 @@ class MainActivity : AppCompatActivity() {
             toggleLens()
         }
 
-        // 推流按钮 → 暂未实现, Toast 提示
+        // 推流按钮 → 批次 3.1 临时复用为"拍 1 帧 H.264 编码"调试入口
+        //  3.4 端到端闭环后会改回真正的"开始/停止推流"状态机
         btnPush.setOnClickListener {
-            Toast.makeText(this, "推流 — Phase Y 实现", Toast.LENGTH_SHORT).show()
+            onEncodeOneFrameTest()
         }
 
         // 重试按钮 → 重新申请权限
@@ -304,5 +305,62 @@ class MainActivity : AppCompatActivity() {
      */
     private fun hideError() {
         errorPlaceholder.visibility = View.GONE
+    }
+
+    /**
+     * 批次 3.1 调试入口: 拍 1 帧 H.264 编码 → 存到 App 私有目录
+     *
+     * 流程 (零基础版):
+     *   1) 不接 Camera2, 用 TestYuvFrames 生成一张"水平渐变灰度"测试图
+     *   2) 调 H264Encoder 把它压成 H.264 NALU 字节流
+     *   3) 写到 /sdcard/Android/data/com.phonecam.nativeapp/files/test.h264
+     *   4) Toast 告知路径, 用户用 adb pull + ffplay 验证
+     *
+     * 故意不接 Camera2 的原因 (批次 3.1 范围):
+     *   - 一次只做一件事, 减少变量
+     *   - 验证"MediaCodec 编码链路通"这件事, 而不是"YUV 帧来源对不对"
+     *   - 3.2 会换成 ImageReader 接 Camera2 的真实帧
+     */
+    private fun onEncodeOneFrameTest() {
+        try {
+            InAppLogStore.i(TAG, "[3.1] 拍 1 帧开始")
+
+            // 1) 生成 1280x720 YUV420 planar 测试图
+            val w = 1280
+            val h = 720
+            val yuv = TestYuvFrames.buildGradientYuv420(w, h)
+            InAppLogStore.i(TAG, "[3.1] 测试 YUV 已生成: ${yuv.size} 字节 (${w}x${h})")
+
+            // 2) 编码 (主线程里跑, 因为只编 1 帧, < 100ms, 不卡 UI)
+            val h264 = H264Encoder().encodeOneFrame(yuv, w, h)
+            if (h264 == null) {
+                Toast.makeText(this, "编码失败 (看 logcat)", Toast.LENGTH_LONG).show()
+                InAppLogStore.e(TAG, "[3.1] 编码失败, h264=null")
+                return
+            }
+
+            // 3) 写到 App 私有目录: /sdcard/Android/data/com.phonecam.nativeapp/files/
+            val outDir = getExternalFilesDir(null)
+            if (outDir == null) {
+                Toast.makeText(this, "无法访问 App 私有目录", Toast.LENGTH_LONG).show()
+                InAppLogStore.e(TAG, "[3.1] getExternalFilesDir(null) 返回 null")
+                return
+            }
+            if (!outDir.exists()) outDir.mkdirs()
+            val outFile = java.io.File(outDir, "test.h264")
+            java.io.FileOutputStream(outFile).use { fos ->
+                fos.write(h264)
+            }
+            InAppLogStore.i(TAG, "[3.1] 已写入: ${outFile.absolutePath} (${h264.size} 字节)")
+
+            // 4) Toast 提示 + 同时给 adb pull 命令
+            val hint = "test.h264 ${h264.size}B\n${outFile.absolutePath}\n\nadb pull 用"
+            Toast.makeText(this, hint, Toast.LENGTH_LONG).show()
+            Log.i(TAG, "[3.1] 保存成功: ${outFile.absolutePath}")
+            Log.i(TAG, "[3.1] 拉取命令: adb pull ${outFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "[3.1] 拍 1 帧异常", e)
+            Toast.makeText(this, "异常: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 }

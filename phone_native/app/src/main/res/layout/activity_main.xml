@@ -178,7 +178,7 @@
             android:textStyle="bold"
             android:letterSpacing="0.05"
             android:textAllCaps="false"
-            android:text="@string/layer_c_btn_start" />
+            android:text="@string/layer_c_btn_test_3_1" />
     </LinearLayout>
 
     <!-- 1px 分隔线 (Layer C / Layer D 之间) -->

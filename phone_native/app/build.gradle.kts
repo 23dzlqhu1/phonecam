@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 7                           // Phase Y: 4 屏完整 (Settings+Connect+About+Debug) + 推流按钮状态机
-        versionName = "0.2.5-mvp2-phaseY"
+        versionCode = 8                           // 批次 3.1: H264Encoder 单帧 H.264 验证通过 (Y 通道 0→255 水平渐变吻合)
+        versionName = "0.2.6-mvp2-batch3.1"
     }
 
     buildTypes {

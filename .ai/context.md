@@ -48,7 +48,7 @@
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
-| **MVP-2** 真实摄像头画面 | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ 2026-06-08（v0.2.5-mvp2-phaseY：phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 5 截图）| phone_native/ Kotlin App 已在 OPPO PLC110 真机跑通：MainActivity 真实摄像头预览（30.76 FPS） + SettingsActivity 4 分区 9 项 + ConnectActivity IP/Port + DebugActivity 实时日志 + AboutActivity 版本信息；详见 [phaseY_*.png](file:///d:/PhoneCam/phone_native/phaseY_main.png)。下一批次：批次 3 CameraController.kt MediaCodec 硬编 |
+| **MVP-2** 真实摄像头画面 | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ 2026-06-08（v0.2.6-mvp2-batch3.1：phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 5 截图 + H264Encoder 单帧 H.264 验证通过）| phone_native/ Kotlin App 已在 OPPO PLC110 真机跑通：MainActivity 真实摄像头预览（30.76 FPS） + SettingsActivity 4 分区 9 项 + ConnectActivity IP/Port + DebugActivity 实时日志 + AboutActivity 版本信息；详见 [phaseY_*.png](file:///d:/PhoneCam/phone_native/phaseY_main.png)。批次 3.1 加 H264Encoder.kt (MediaCodec ByteBuffer mode) + TestYuvFrames.kt + Layer C 调试入口"🎬 拍 1 帧 (3.1 调试)"，输出 442 字节 H.264 Annex-B 裸流 (SPS 19B + PPS 4B + IDR 407B)，OpenCV VideoCapture 解码出 1280×720 帧 Y 通道 0→255 水平渐变吻合。下一批次：批次 3.2 接 Camera2 ImageReader 真实帧 + 升级 createInputSurface() 零拷贝 |
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
@@ -184,4 +184,4 @@
 
 ---
 
-**最后更新**：2026-06-07
+**最后更新**：2026-06-08（Phase Y 收尾：4 屏完整 + 跨屏状态同步 + 真机验收 + 5 截图推送 commit 3c36458）

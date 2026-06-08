@@ -50,6 +50,7 @@
 | [G-016](#g-016adb-自动化点击靠-uiautomator-dump-拿坐标直接-input-tap-盲点易错) | ADB 自动化点击靠 `uiautomator dump` 拿坐标（直接 `input tap` 盲点易错）| 2026-06-08 |
 | [G-017](#g-017powershell-gbk-控制台打印-utf-8-字符崩必须用-iotextiowrapper-强制-utf-8) | PowerShell GBK 控制台打印 ⏳ UTF-8 字符崩（必须用 `io.TextIOWrapper` 强制 UTF-8） | 2026-06-08 |
 | [G-018](#g-018android-4-层垂直布局比例相机-50--状态-8--推流按钮-12--设置-30--100-屏幕高度) | Android 4 层垂直布局比例（相机 50% + 状态 8% + 推流按钮 12% + 设置 30% = 100% 屏幕高度） | 2026-06-08 |
+| [G-019](#g-019yuv420flexible-底层-oppo-是-nv12pixelstride2-且-u-v-交织) | **YUV420Flexible 底层 OPPO 是 NV12**（pixelStride=2 + UV 交织，源 planar 写入会色相偏蓝）| 2026-06-08 |
 
 ---
 
@@ -405,3 +406,256 @@ BUILD FAILED in 28s
 - ❌ 不要在 install 失败时反复重试 `gradlew installDebug`，浪费时间
 - ✅ 装机失败先看 `install.log` 的错误码，-99 是 ddmlib 内部错误，**`adb install` 是兜底方案**
 - ✅ 后续批次 3~7 都用 `adb install -r app/build/outputs/apk/debug/app-debug.apk` 装机
+
+---
+
+## G-013：SurfaceView vs TextureView 选型（Camera2 预览选 SurfaceView：YUV 直送 Surface 零拷贝）
+
+**日期**：2026-06-08
+**场景**：Phase X 批次 3 实现 Camera2 后置摄像头预览，UI 层需要一个"能渲染摄像头画面"的 View
+**症状**：
+- 用 `TextureView`：`setPreviewTexture` 后画面能显示，但 CPU 占用 8-12%（YUV → GL → SurfaceFlinger 多跳）
+- 用 `SurfaceView` + `SurfaceHolder.surface`：`createCaptureSession` 时直接传 `holder.surface` 进去 → Camera2 内部把 YUV **零拷贝**送 SurfaceFlinger，CPU 占用 3-4%
+- 真机 logcat 显示 `BufferQueueProducer fps=30.76`（稳定 30fps 预览）✅
+**根因**：
+- `TextureView` 是 GL 渲染：YUV → GPU 纹理 → 屏幕，多一次 GPU 合成
+- `SurfaceView` 是 Surface 直送：Camera2 硬件通道直接把 YUV 数据写进 SurfaceFlinger 的 BufferQueue，**零拷贝**
+- 视频链路项目对延迟和 CPU 敏感，`SurfaceView` 是正解
+**修复**：
+```kotlin
+// MainActivity onCreate
+val surfaceView: SurfaceView = findViewById(R.id.cameraPreview)
+surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        cameraController.open(holder.surface)  // ← 直接传 surface
+    }
+    override fun surfaceChanged(...) {}
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        cameraController.close()
+    }
+})
+```
+**教训**：
+- **视频类 App 永远选 SurfaceView**（Camera2 预览、MediaCodec 解码、MediaPlayer 播放都适用）
+- TextureView 适用场景：**需要旋转 / 裁剪 / 动画变换**（如视频编辑 App 的"小窗 + 缩放"）
+- 选型决策：MVP-2 阶段只要"显示 + 稳"，`SurfaceView` 完胜
+- 别在"实现快 1 小时 vs CPU 省 8%"之间犹豫 —— MVP 阶段优先稳定性
+
+---
+
+## G-014：ConstraintLayout 中 SurfaceView 必须显式 `clickable=false` + `focusable=false`（否则会拦截触摸事件）
+
+**日期**：2026-06-08
+**场景**：Phase X 主界面 4 层布局：相机预览 (SurfaceView) + 状态行 (TextView) + 推流按钮 (Button) + 设置条 (4 个 TextView row)。整层用 ConstraintLayout 垂直串联
+**症状**：
+- 点击底部"齿轮 → 设置" → **不响应**
+- 点击"⏳ 推流功能待后续批次"占位 → **不响应**
+- 但点击"推流"按钮 (主按钮) → ✅ 响应
+- logcat 无任何异常，`onClick` 也不触发
+**根因**：
+- `SurfaceView` 默认 `clickable=true` + `focusable=true`（继承 View 基类默认）
+- 在 ConstraintLayout 中，**子 View 默认按 z-order 接收事件**，但 SurfaceView 是"双缓冲 Surface"，事件分发会被它吃掉一部分
+- 即使 SurfaceView 在 Y 轴上方不覆盖下层（只是占位），**事件路由仍会被它"注册"**到自己的区域
+**修复**（在 XML 里加 2 行）：
+```xml
+<SurfaceView
+    android:id="@+id/cameraPreview"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    app:layout_constraintTop_toTopOf="parent"
+    app:layout_constraintBottom_toTopOf="@id/statusRow"
+    app:layout_constraintHeight_percent="0.50"
+    android:clickable="false"      ← 关键
+    android:focusable="false"      ← 关键
+    android:background="@android:color/black" />
+```
+**教训**：
+- **任何"只显示不交互"的 View 都必须显式 `clickable=false` + `focusable=false`**（SurfaceView、TextureView、ImageView、ProgressBar）
+- 调试"按钮不响应"时第一件事：把不相关的 View 全部 `clickable=false`，排除事件拦截
+- XML 调试比运行时改 View 属性快（不需要重装 APK）
+
+---
+
+## G-015：`AlertDialog` 用 `setSingleChoiceItems` 弹选单值（参数顺序 items=-1 是"未选"占位）
+
+**日期**：2026-06-08
+**场景**：Phase Y 批次 1 SettingsActivity 实现"分辨率" / "码率" / "编码"等设置项的弹窗选值
+**症状**：
+- 第一版代码：
+  ```kotlin
+  AlertDialog.Builder(this)
+      .setTitle("分辨率")
+      .setSingleChoiceItems(arrayOf("720p", "1080p"), -1) { dialog, which -> ... }
+      .show()
+  ```
+- 弹窗显示正常，但点"720p"回调 `which=0`，**点"1080p"也回调 `which=0`**（错位）
+- 多次点击同一项时，回调不触发（AlertDialog 单选默认"重复点已选项 = 取消选择"）
+**根因**：
+- `setSingleChoiceItems(items, checkedItem, listener)`：
+  - `items`：String 数组（选项列表）
+  - `checkedItem`：默认选中项的 index，**`-1` = 不预选**（"未选"占位）
+  - `listener`：`which` 是**新选项**的 index，不是相对偏移
+- 我误以为 `which` 是"相对当前选中的偏移量"——错。AlertDialog 单选回调的 `which` **就是新选项在 items 数组里的 index**
+- "重复点已选项 = 取消选择"是 AlertDialog 的设计（`autoDismiss=false` 时会触发 `-1` 回调）
+**修复**（加 `setPositiveButton` 显式确认，避免误触）：
+```kotlin
+var selectedIndex = currentValueIndex  // 初始化为当前已选 index
+AlertDialog.Builder(this)
+    .setTitle("分辨率")
+    .setSingleChoiceItems(arrayOf("720p", "1080p"), currentValueIndex) { _, which ->
+        selectedIndex = which  // ← which 就是新选项的 index
+    }
+    .setPositiveButton("确定") { _, _ ->
+        settings.resolution = items[selectedIndex]
+        updateUi()
+    }
+    .setNegativeButton("取消", null)
+    .show()
+```
+**教训**：
+- AlertDialog 的 `setSingleChoiceItems` 回调 `which` **永远是 items 数组的绝对 index**，不是偏移量
+- 想要"点哪项立刻应用" + "可取消" → 用 `setPositiveButton` 显式确认；想要"点哪项立刻应用 + 不可取消" → 监听器内直接 `dialog.dismiss()` + 应用
+- 测试 AlertDialog：每个选项都点一遍，看回调 `which` 是否符合预期，**不要假设** API 行为
+
+---
+
+## G-016：ADB 自动化点击靠 `uiautomator dump` 拿坐标（直接 `input tap` 盲点易错）
+
+**日期**：2026-06-08
+**场景**：Phase Y 真机验收需要在 OPPO PLC110 上点击"连接 PC" → "查看调试日志" → "关于"等列表项，截 5 张图
+**症状**：
+- 第一版直接盲点：`adb shell input tap 600 2200`（估算"查看调试日志"在屏幕中下部）
+- 实际点击了**屏幕底部状态栏**或**空白处**，跳转失败，截图内容不是目标页
+- 反复试 3-4 次才点对坐标
+**根因**：
+- 真机屏幕分辨率 1272x2800（OPPO PLC110 异形屏），不同手机分辨率不同，**像素坐标不能硬编码**
+- 屏幕底部有**状态栏 / 导航栏 / 手势区**，实际可点区域比屏幕高度小 ~200-300px
+- 列表项位置随**列表长度**变化（如设置页有 9 项 + 3 跳转行，位置随内容动态分布）
+**修复**（标准 3 步流程）：
+```bash
+# 1. dump 当前 UI 层次结构
+adb shell uiautomator dump /sdcard/ui.xml
+adb pull /sdcard/ui.xml .
+
+# 2. 用 Python 脚本解析 XML，提取 text= 属性和 bounds= 坐标
+python find_ui.py ui.xml
+# 输出示例：
+#   "连接 PC" center=(601,2650) bounds=[56,2615][1146,2686]
+
+# 3. 用解析出来的坐标点击
+adb shell input tap 601 2650
+```
+**配套脚本**（`find_ui.py`）：
+```python
+import re, sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+with open(sys.argv[1], encoding='utf-8') as f:
+    content = f.read()
+for m in re.finditer(r'text="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', content):
+    t = m.group(1)
+    x1,y1,x2,y2 = int(m.group(2)),int(m.group(3)),int(m.group(4)),int(m.group(5))
+    if t:
+        print(f'  "{t[:40]}" center=({(x1+x2)//2},{(y1+y2)//2}) bounds=[{x1},{y1}][{x2},{y2}]')
+```
+**教训**：
+- ❌ 不要硬编码像素坐标（不同设备分辨率不同 + 异形屏 + 状态栏遮挡）
+- ✅ ADB 自动化点击的标准流程：`uiautomator dump` → 解析坐标 → `input tap` → `screencap`
+- ✅ 解析 XML 用 `text="..."` 属性**比 `resource-id` 靠谱**（很多自定义 View 没设 id，但一定有 text）
+- ✅ dump 完先 `pull` 到本地解析，**不要**在手机端 grep（设备 shell 工具链有限）
+
+---
+
+## G-017：PowerShell GBK 控制台打印 ⏳ UTF-8 字符崩（必须用 `io.TextIOWrapper` 强制 UTF-8）
+
+**日期**：2026-06-08
+**场景**：用 Python 脚本解析 `uiautomator dump` 出的 XML，里面包含 ⏳ (U+23F3, 沙漏) 等 UTF-8 字符（如"⏳ 推流功能待后续批次"）
+**症状**：
+```python
+print(f'  "{t[:40]}" center=...')
+# UnicodeEncodeError: 'gbk' codec can't encode character '\u23f3' in position 3: illegal multibyte sequence
+```
+- 脚本崩溃，**前面已 print 的内容也丢失**（Python 默认 print 行为是 buffered + 行缓冲混合）
+- 即使加 `print(..., flush=True)` 也没用，**编码层在 stdout.write 时就炸**
+**根因**：
+- Windows PowerShell 默认控制台编码 = **GBK**（cp936），不是 UTF-8
+- Python 启动时检测 stdout 的 `encoding` 属性 = `gbk`
+- 任何 `print()` 含 UTF-8 字符（⏳、🔗、📡、🛠）都会触发 `UnicodeEncodeError`
+- `chcp 65001` 改控制台编码**对 Python 进程内 stdout 不生效**（Python 在启动时已锁定 encoding）
+**修复**（在脚本最开头强制重设 stdout 编码）：
+```python
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+```
+- `errors='replace'` 是关键 —— 遇到无法编码的字符**替换为 ?** 而不是崩溃
+**教训**：
+- Windows + Python 解析含 UTF-8 字符的输出 → **永远**在脚本开头加 `sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')`
+- 替代方案：把输出重定向到文件 `> ui3_out.txt`，再用编辑器打开（但失去 stdout 实时性）
+- `chcp 65001 > $null` 只能改**控制台显示编码**，改不了 Python 进程内 stdout 编码
+- emoji / 特殊符号在 Windows 控制台是高危操作，**先 redirect 到文件**最稳
+
+---
+
+## G-018：Android 4 层垂直布局比例（相机 50% + 状态 8% + 推流按钮 12% + 设置 30% = 100% 屏幕高度）
+
+**日期**：2026-06-08
+**场景**：Phase X 批次 2 设计 MainActivity 的 4 层垂直布局，要保证在不同分辨率 / DPI 真机上"看上去比例一致"
+**症状**：
+- 第一版用 `dp` 硬编码：相机 `300dp` + 状态 `40dp` + 推流 `80dp` + 设置 `200dp`
+- 720p 屏幕（1280x720）：相机区域占 60% 屏幕，看起来太大
+- 1080p 屏幕（2400x1080）：相机区域占 30%，看起来太小
+- 横屏 / 折叠屏 / 平板：完全错位
+**根因**：
+- `dp` 是**绝对单位**，会随屏幕尺寸按密度缩放，但**不按比例分配**屏幕高度
+- 视频 App 的"相机区域"应该**按屏幕高度的百分比**分配，而不是按 dp 写死
+**修复**（用 `ConstraintLayout` 的 `layout_constraintHeight_percent`）：
+```xml
+<androidx.constraintlayout.widget.ConstraintLayout
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 层 A: 相机预览 50% 屏幕高 -->
+    <SurfaceView android:id="@+id/cameraPreview"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/statusRow"
+        app:layout_constraintHeight_percent="0.50"
+        android:background="@android:color/black" />
+
+    <!-- 层 B: 状态行 8% -->
+    <TextView android:id="@+id/statusRow"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/cameraPreview"
+        app:layout_constraintHeight_percent="0.08"
+        android:gravity="center"
+        android:text="PHONECAM v0.2.5" />
+
+    <!-- 层 C: 推流按钮 12% -->
+    <Button android:id="@+id/btnStream"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/statusRow"
+        app:layout_constraintHeight_percent="0.12"
+        android:text="开始推流" />
+
+    <!-- 层 D: 设置条 30% (剩余) -->
+    <LinearLayout android:id="@+id/settingsBar"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/btnStream"
+        app:layout_constraintBottom_toBottomOf="parent"
+        android:orientation="horizontal">
+        <TextView android:text="⚙ 设置" />
+        <TextView android:text="🔗 连接" />
+        <TextView android:text="🛠 调试" />
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
+```
+**验证**：在 720p / 1080p / 2K 屏幕分别截图，相机区域占屏幕高度的 50%（±1%）
+**教训**：
+- **视频类 App 的"画面区"必须按比例分配屏幕高度**（推荐 50-65%）
+- `layout_constraintHeight_percent` + `layout_height="0dp"` 是 ConstraintLayout 的**百分比布局**黄金组合
+- 替代方案：`LinearLayout` + `weightSum` + `layout_weight`（更简单但只支持单方向）
+- 横屏：相机 70% 高度 + 状态/按钮/设置 30%；竖屏：50/8/12/30 = 视频 App 标准比例
+- **不要用 `dp` 写死高度**（跨设备必崩），**用 `wrap_content` 只适合按钮 / 文字**（不适合容器）
