@@ -23,7 +23,7 @@
 |------|------|-----------|------|
 | **MVP-0** | 项目骨架闭环（文档 + 最小可运行） | 1-2 天 | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | ⬜ 待开始 |
+| **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | 🟡 路线重置（ADR-006 2026-06-08） |
 | **MVP-3** | 虚拟摄像头闭环（可被会议软件识别） | 3-5 天 | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | ⬜ 待开始 |
 
@@ -161,8 +161,8 @@ desktop/phonecam.py
 - `docs/protocol.md`（PCP 协议规范）
 - `tests/README.md`（mock 工具说明）
 
-> ⚠️ **MVP-1 不碰 `phone/` 目录**。手机端在 MVP-2 才介入。
-> 不要参考 `phone/lib/stream_server.dart`（它是 WebSocket 旧实现，已冻结）。
+> ⚠️ **MVP-1 不碰 `phone/` 目录**。手机端在 MVP-2 才介入（旧 `phone/` Flutter 工程在 MVP-2 起冻结作 legacy，详见 ADR-006）。
+> 不要参考 `phone/lib/stream_server.dart`（它是 WebSocket 旧实现，MVP-2 重写为 TCP+PCP → 2026-06-08 路线重置后改为新建 `phone_native/` 重写）。
 
 ### 4.5 输出文件
 
@@ -263,25 +263,35 @@ MVP-1 已完成（2026-06-07）：mock 端 + 电脑端链路跑通，29.6 FPS。
 
 ## 5. MVP-2：真实摄像头画面闭环
 
+> ⚠️ **2026-06-08 路线重置（ADR-006）**：手机端从 Flutter 切到 **Kotlin 原生**。新建 `phone_native/` 目录（旧 `phone/` Flutter 工程冻结作 legacy，**不直接动**）。电脑端 Python + PCP 协议 + 链路图后端（`desktop/`）**全部不动**。详见 `.ai/decisions.md` ADR-006。
+>
+> 📦 **包名**：`com.phonecam.nativeapp`（不用 `com.phonecam.native` —— `native` 是 JNI 关键字）。
+
 ### 5.1 目标
 
-Android 端接入真实摄像头，**电脑端窗口能看到手机画面**。
-不接虚拟摄像头，不做音频，不做 WiFi。
+Android 端（`phone_native/` Kotlin 原生）接入真实摄像头，**电脑端窗口能看到手机画面**。
+不接虚拟摄像头，不做音频，不做 WiFi，不做漂亮 UI。
 
 ### 5.2 链路图
 
 ```
-phone/lib/camera_service.dart
-    Camera2 API → YUV 帧
-        ↓
-phone/android/.../H264EncoderPlugin.kt
-    MediaCodec H.264 硬编码
-        ↓
-phone/lib/stream_server.dart
-    PCP 协议封装
-        ↓
-    USB TCP（adb reverse）
-        ↓
+phone_native/app/src/main/java/com/phonecam/nativeapp/
+    MainActivity.kt
+        ↓ 启动
+    CameraController.kt
+        Camera2 API → YUV420 帧
+            ↓
+    H264Encoder.kt
+        MediaCodec H.264 硬编码（ByteBuffer mode）
+            ↓
+    PcpPacketWriter.kt
+        24 字节 PCP 头 + H.264 payload
+            ↓
+    TcpStreamServer.kt
+        监听 0.0.0.0:9999
+            ↓
+    USB TCP（adb reverse tcp:9999 tcp:9999）
+            ↓
 desktop/receiver.py
     TCP 接收 + PCP 解包
         ↓
@@ -298,75 +308,111 @@ desktop/phonecam.py
 - ❌ 不做音频
 - ❌ 不做 WiFi（只走 USB adb reverse）
 - ❌ 不做 mDNS（手动配置 IP）
-- ❌ 不做 GUI
+- ❌ 不做漂亮 GUI（Kotlin 原生 + TextView + Button 够用）
 - ❌ 不做关键帧请求（容忍花屏）
+- ❌ 不动旧 `phone/` Flutter 工程（已冻结作 legacy）
+- ❌ 不动 `desktop/` 电脑端（PCP 接收 + PyAV 解码已跑通）
+- ❌ 不改 PCP 协议（`docs/protocol.md` 不动）
+- ❌ 不做 1080p60（MVP-2 阶段先 640x480 跑通链路）
+- ❌ 不做后台保活 / 唤醒锁
+- ❌ 不做 mDNS / 自动发现 / WiFi
 
 ### 5.4 输入文件
 
-- MVP-1 完成的协议和电脑端接收（✅ 2026-06-07：`tests/mock_phone/mock_phone_server.py` + `desktop/receiver.py`）
-- `phone/lib/stream_server.dart`（已有，需要适配 PCP）
-- `phone/android/.../H264EncoderPlugin.kt`（已有，需要调试）
-- `phone/lib/camera_service.dart`（已有，需要验证）
+- MVP-1 完成的协议和电脑端接收（✅ 2026-06-07：`tests/mock_phone/mock_phone_server.py` + `desktop/receiver.py` + `desktop/h264_decoder.py` + `desktop/phonecam.py`）
+- 旧 `phone/` 下的 `H264EncoderPlugin.kt`（**仅作编码逻辑参考**，不直接复用，因为它是 MethodChannel 入口，新版是纯 Kotlin 自调用）
+- 旧 `phone/` 下的 Gradle 阿里云镜像 + daemon 防火墙配置（**直接复用**到 `phone_native/`）
 
 ### 5.5 输出文件
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `phone/lib/camera_service.dart` | 完善 | 摄像头采集回调 |
-| `phone/lib/h264_encoder.dart` | 完善 | Dart 侧调 Kotlin |
-| `phone/android/.../H264EncoderPlugin.kt` | 完善 | MediaCodec 编码 |
-| `phone/lib/stream_server.dart` | 重构 | 发送 PCP 协议包 |
-| `phone/lib/main.dart` | 修改 | 加"开始推流"按钮 |
-| `desktop/receiver.py` | 修改 | 支持 H.264 通道 |
-| `desktop/h264_decoder.py` | 完善 | PyAV 硬解码 |
-| `docs/connection-usb.md` | 新建 | USB 调试模式开启说明 |
+| `phone_native/settings.gradle.kts` | 新建 | Gradle 配置（含阿里云镜像） |
+| `phone_native/build.gradle.kts` | 新建 | 全局仓库 |
+| `phone_native/gradle.properties` | 新建 | JDK 17 + IPv4 绑定 + 禁用 daemon |
+| `phone_native/app/build.gradle.kts` | 新建 | 引入 Camera2、MediaCodec 依赖 |
+| `phone_native/app/src/main/AndroidManifest.xml` | 新建 | 摄像头 + 网络权限 |
+| `phone_native/app/src/main/java/com/phonecam/nativeapp/MainActivity.kt` | 新建 | 极简 UI：开始 / 停止 / 状态 TextView |
+| `phone_native/app/src/main/java/com/phonecam/nativeapp/CameraController.kt` | 新建 | Camera2 打开后置摄像头，YUV 回调 |
+| `phone_native/app/src/main/java/com/phonecam/nativeapp/H264Encoder.kt` | 新建 | MediaCodec 编码 H.264 NALU |
+| `phone_native/app/src/main/java/com/phonecam/nativeapp/PcpPacketWriter.kt` | 新建 | 24 字节 PCP 头打包 |
+| `phone_native/app/src/main/java/com/phonecam/nativeapp/TcpStreamServer.kt` | 新建 | ServerSocket 监听 9999 |
+| `phone_native/app/src/main/res/layout/activity_main.xml` | 新建 | 1 个 TextView + 2 个 Button |
+| `phone_native/app/src/main/res/values/strings.xml` | 新建 | App 名 |
+| `phone/` 旧 Flutter 工程 | **不动** | 冻结作 legacy，等 `phone_native/` 跑通后加 deprecation 注释 |
+| `desktop/` | **不动** | 电脑端 PCP + OpenCV 显示链路已跑通 |
+| `docs/protocol.md` | **不动** | PCP 协议规范不变 |
 
-### 5.6 验收标准
+### 5.6 验收标准（MVP-2 Kotlin 原生最小标准）
 
-- [ ] 手机端 App 启动后显示"准备就绪"
-- [ ] 开启手机 USB 调试，`adb reverse tcp:9999 tcp:9999` 建立
-- [ ] 点击"开始推流"，电脑端能收到画面
-- [ ] 电脑端 OpenCV 窗口显示**手机摄像头实时画面**（延迟 < 300ms 可接受）
-- [ ] 分辨率至少 720p
-- [ ] FPS 至少 20
-- [ ] 不接虚拟摄像头，能在 OpenCV 窗口里看到就行
-- [ ] `docs/connection-usb.md` 写明新手怎么开 USB 调试
+- [ ] `phone_native/` 目录创建，Gradle 同步通过
+- [ ] Android 真机 App（包名 `com.phonecam.nativeapp`）能 `gradlew.bat installDebug` 装到 OPPO PLC110
+- [ ] App 启动后 TextView 显示"PhoneCam MVP-2 ready"（批次 2 验收）
+- [ ] 摄像头权限弹窗通过（批次 3）
+- [ ] Camera2 能打开后置摄像头（批次 3）
+- [ ] MediaCodec 能输出 H.264 NALU（批次 4）
+- [ ] TcpStreamServer 监听 9999 端口（批次 5）
+- [ ] PcpPacketWriter 打包 24 字节头（`codec=0x02` H.264）（批次 5）
+- [ ] `adb reverse tcp:9999 tcp:9999` 可用（批次 5）
+- [ ] `desktop/phonecam.py --connect 127.0.0.1:9999 --preview` 能收到 `codec=0x02` 的 PCP 包（批次 5）
+- [ ] OpenCV 窗口显示**手机摄像头实时画面**（批次 5，延迟 < 300ms 可接受）
+- [ ] 分辨率 640x480（首批次）
+- [ ] FPS 至少 15（首批次）
 
-### 5.7 给 AI 的任务提示词
+**暂不要求**：
+- ❌ 1080p60
+- ❌ 虚拟摄像头（MVP-3 才做）
+- ❌ 音频
+- ❌ WiFi
+- ❌ GUI 美观
+- ❌ 后台运行
+- ❌ 自动发现
+- ❌ 唤醒锁
+
+### 5.7 分步骤开发计划（批次 2+）
+
+| 批次 | 目标 | 关键文件 | 验收 |
+|------|------|---------|------|
+| **批次 2** | Kotlin 最小骨架 App 跑通 | `phone_native/` 全部配置文件 + `MainActivity.kt` + `activity_main.xml` | 真机启动显示"PhoneCam MVP-2 ready" |
+| **批次 3** | Camera2 打开后置摄像头 | `CameraController.kt` | logcat 显示 "Camera opened: 640x480" |
+| **批次 4** | MediaCodec 编码 H.264 | `H264Encoder.kt` | logcat 显示 "Encoded N NALU, type=X" |
+| **批次 5** | PCP 打包 + TCP 发送 + 链路串联 | `PcpPacketWriter.kt` + `TcpStreamServer.kt` + `MainActivity.kt` | `desktop/phonecam.py` 看到真实画面 |
+
+### 5.8 给 AI 的任务提示词（批次 2）
 
 ```markdown
-你正在实现 MVP-2：真实摄像头画面闭环。
+你正在实现 MVP-2 批次 2：创建 phone_native/ Kotlin 原生最小 App。
 
 约束：
-- 必须使用 Android MediaCodec 硬编码（不用软编码）
-- 必须使用 PyAV h264_d3d11va 硬解码（Windows）
-- 只能走 USB（adb reverse tcp:9999 tcp:9999）
-- 电脑端还是用 OpenCV imshow 显示，**不接虚拟摄像头**
+- 不复用旧 phone/ Flutter 工程的任何 Dart 代码
+- 不动 desktop/ 电脑端
+- 不改 PCP 协议
+- 包名：com.phonecam.nativeapp（不是 com.phonecam.native）
+- 目标：真机启动后 TextView 显示"PhoneCam MVP-2 ready"
 
 任务步骤：
-1. 完善 `phone/lib/camera_service.dart`：
-   - 启动后置摄像头
-   - 回调 YUV 帧到 encoder
-2. 完善 `phone/android/.../H264EncoderPlugin.kt`：
-   - 接受 Dart 侧的 YUV 输入
-   - MediaCodec 硬编码为 H.264 NALU
-   - 回调 H.264 数据到 Dart
-3. 修改 `phone/lib/stream_server.dart`：
-   - 监听 0.0.0.0:9999
-   - 接受 H.264 NALU
-   - 按 PCP 协议头打包发送（type=0x01 video）
-4. 修改 `desktop/h264_decoder.py`：
-   - 解析 NALU 边界
-   - PyAV 硬解码 → RGB 帧
-5. 验证：
-   - 用真手机 + USB 调试
-   - 电脑端能看实时画面
-   - 截图证明
+1. 创建 phone_native/ 目录结构：
+   - phone_native/settings.gradle.kts（含阿里云镜像）
+   - phone_native/build.gradle.kts
+   - phone_native/gradle.properties（指定 Microsoft JDK 17 + 禁用 daemon）
+   - phone_native/app/build.gradle.kts（Camera2 依赖）
+   - phone_native/app/src/main/AndroidManifest.xml（摄像头 + 网络权限）
+   - phone_native/app/src/main/java/com/phonecam/nativeapp/MainActivity.kt
+   - phone_native/app/src/main/res/layout/activity_main.xml
+   - phone_native/app/src/main/res/values/strings.xml
+2. 复用 phone/ 的 Gradle 阿里云镜像配置（settings.gradle.kts + build.gradle.kts）
+3. 复用 phone/ 的 daemon 防火墙解决方案（gradle.properties）
+4. MainActivity.kt 极简：onCreate 里 setContentView 一个 TextView，文字"PhoneCam MVP-2 ready"
+
+验收：
+- cd d:\PhoneCam\phone_native && gradlew.bat installDebug
+- adb shell am start -n com.phonecam.nativeapp/.MainActivity
+- 真机 OPPO PLC110 屏幕显示"PhoneCam MVP-2 ready"
 
 注意：
-- YUV 格式：Camera2 默认是 YUV_420_888，MediaCodec 接受 NV12/YUV420Flexible
-- H.264 关键帧：每隔 ~30 帧插一个 SPS/PPS/IDR
-- NALU 边界：用 0x00000001 起始码分隔
+- 用户是新手，多用中文注释
+- 复用 phone/ 已有踩坑经验（G-007/008/009）
+- 任务结束前跑一次完整流程并截图
 ```
 
 ---

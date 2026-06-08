@@ -1,4 +1,4 @@
-# AI 项目上下文
+﻿# AI 项目上下文
 
 > 🤖 **给 AI 的项目记忆**：当你（AI）打开这个项目时，先读这份文件。它告诉你：
 > - 这是什么项目
@@ -48,11 +48,11 @@
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
-| **MVP-2** 真实摄像头画面 | 🟡 进行中（Step 1 ✅ 2026-06-08） | Step 1 真机 Flutter 联调通过：APK 装到 OPPO PLC110 启动正常，摄像头权限弹窗通过，状态文字"摄像头就绪 (H.264)"。下一步 Step 2：USB TCP 链路确认 + Step 3 重写 stream_server.dart 为 TCP+PCP |
+| **MVP-2** 真实摄像头画面 | 🟡 路线重置（ADR-006 2026-06-08） | MVP-2 路线变更：手机端从 Flutter 切到 Kotlin 原生（新建 `phone_native/`，包名 `com.phonecam.nativeapp`），电脑端 Python + PCP 协议不动。详见 `.ai/decisions.md` ADR-006。下一步：批次 2 创建 `phone_native/` Kotlin 最小骨架 App |
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 Step 1 ✅（2026-06-08）**。下一步：Step 2 USB TCP 链路确认（`adb reverse tcp:9999 tcp:9999` + 电脑端 `nc 127.0.0.1 9999`）+ Step 3 重写 `phone/lib/stream_server.dart` 为 TCP+PCP 24 字节头。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 路线重置（ADR-006 2026-06-08）**。下一步：批次 2 创建 `phone_native/` Kotlin 原生最小 App（MainActivity + TextView + 状态显示），真机跑通"Hello PhoneCam MVP-2"。
 
 ---
 
@@ -64,11 +64,11 @@
 | 协议 | 状态 | 关键文件 | 计划 |
 |------|------|---------|------|
 | HTTP MJPEG | ❌ 已废弃 | 原 `desktop/receiver.py::MjpegReceiver` 已删除 | — |
-| WebSocket + H.264 | ⚠️ MVP-2 重写 | `phone/lib/stream_server.dart`、`desktop/h264_receiver.py` 顶部有 deprecation 警告 | MVP-2 重写为 TCP+PCP |
+| WebSocket + H.264 | ⚠️ 已废弃 | `phone/lib/stream_server.dart` 已冻结（旧 `phone/` Flutter 整体作 legacy，ADR-006）；`desktop/h264_receiver.py` 顶部有 deprecation 警告 | MVP-2 改为新建 `phone_native/` Kotlin 原生重写为 TCP+PCP |
 | **PCP (TCP + 二进制)** | ✅ 当前 | `desktop/receiver.py::PcpReceiver`（24 字节头 + payload） | MVP-1 启用 |
 
 **AI 工作流提醒**：
-- 看到 phone/lib/stream_server.dart 不要"修复"它，它已冻结
+- 看到 `phone/lib/stream_server.dart` 不要"修复"它（旧 `phone/` 整体冻结作 legacy，详见 ADR-006）
 - 不要建议 MJPEG 或 WebSocket 方案
 - 涉及协议的问题先看 docs/protocol.md
 
@@ -83,7 +83,7 @@
 3. **Android + Windows 双端**（不做 iOS / Linux / Mac）
 4. **USB + WiFi 热点**两种连接（用户切换）
 5. **pyvirtualcam 做虚拟摄像头**（免驱动，依赖 OBS 虚拟摄像头）
-6. **Python 电脑端**（快速开发）；**Flutter 手机端**（跨平台、生态成熟）
+6. **手机端 MVP-2 切到 Kotlin 原生**（ADR-006 2026-06-08，详见 decisions.md）—— 旧 Flutter `phone/` 冻结作 legacy，新建 `phone_native/`（包名 `com.phonecam.nativeapp`）；电脑端 Python 不动，PCP 协议不动
 
 ---
 

@@ -93,6 +93,87 @@
 
 ---
 
+## ADR-006：MVP-2 手机端从 Flutter 迁移到 Kotlin 原生
+
+**日期**：2026-06-08
+**状态**：✅ 已确定（手机端 Kotlin 原生，电脑端 Python 不动，PCP 协议不动）
+
+### 背景
+
+MVP-2 目标：手机端采集真实摄像头画面 → 硬编码 H.264 → PCP TCP 发送 → 电脑端 OpenCV 显示。
+
+旧路线（2026-06-07 ~ 06-08 试行）：基于现有 `phone/` Flutter 工程。
+- Flutter UI 框架（Material 3）+ camera 插件 + shelf + web_socket_channel
+- H.264 编码走 MethodChannel 调 Kotlin MediaCodec 插件（`H264EncoderPlugin.kt`）
+- TCP/PCP 发送在 Dart 侧（`stream_server.dart`）
+
+试行结果（2026-06-08 MVP-2 Step 1）：
+- ✅ 真机 Flutter 联调通过：APK 装到 OPPO PLC110 启动正常，摄像头权限通过，状态文字"摄像头就绪 (H.264)"
+- ⚠️ 但发现**端到端链路 Flutter 是冗余包装**：
+  - `stream_server.dart`（MVP-1 旧实现 WebSocket+12 字节头）**本身就要重写**为 TCP+PCP 24 字节头
+  - `camera_service.dart` 拿 CameraImage → Dart 侧处理 YUV420 → MethodChannel 调 Kotlin，存在**数据跨层拷贝**（对低延迟视频链路不优）
+  - `h264_encoder.dart` 是 MethodChannel 壳，**核心编码逻辑（MediaCodec）仍在 Kotlin**
+  - 实际数据流：Dart YUV → Kotlin MediaCodec → Dart → Socket，**跨 3 层语言**
+
+### 备选方案
+
+| 方案 | 描述 | 利 | 弊 |
+|------|------|----|----|
+| A. 继续 Flutter + Kotlin Plugin | 保留 phone/ Flutter，写完整 PCP TCP 链路 | 已有 UI 框架 + 编码插件 | 跨层复杂，4 跳数据流，UI 升级 / 视频调参要改两套语言 |
+| B. 直接重写 phone/ 为 Kotlin 原生 | 推倒 Flutter 改 Kotlin | 链路最短，性能最优 | 切换栈工程量大；旧 phone/ 记录需迁移 |
+| **C. 新建 phone_native/，保留 phone/ legacy** | 新建独立 Kotlin 原生项目，旧 phone/ 冻结 | 旧代码可对照；新链路最干净 | 双目录维护成本（phone/ 已冻结，实际不维护）|
+| D. 用 ffmpeg-android / libx264 | 跳过 MediaCodec 直接软编 | 上手快 | 背离"硬编码"选型；APK 体积爆炸 |
+
+### 决策
+
+**采用方案 C**：新建 `phone_native/` 目录，Kotlin 原生最小 Android App，**不**直接动旧 `phone/`（保留作 legacy/frozen 对照）。
+
+**包名**：`com.phonecam.nativeapp`（不用 `com.phonecam.native` —— `native` 是 JNI 关键字，做包名会有命名冲突警告）。
+
+### 理由
+
+1. **MVP-2 本质是 Android 原生能力**：Camera2 + MediaCodec + TCP，三者都是 Android 系统 API，Kotlin 直接调最干净
+2. **数据流最短**：Camera2 → MediaCodec → Socket，**3 跳同语言同进程**（无 Dart ↔ Kotlin 跨层）
+3. **性能最优**：避免 YUV 字节在 Dart/Kotlin 之间拷贝、MethodChannel 序列化开销
+4. **APK 体积小**：Kotlin 原生 APK 2-5 MB（vs Flutter 15-25 MB），符合工具 App"下载即用"体验
+5. **调试直观**：栈跟踪、logcat、Profiler 都是 Android 原生工具链
+6. **保留 Flutter 工程可对照**：旧 phone/ 冻结后，新 phone_native/ 开发时仍可参考 Gradle 镜像配置、H264EncoderPlugin.kt 编码逻辑、Gradle daemon 防火墙踩坑经验
+7. **MVP-1 desktop Python 端不动**：PCP 协议 + PcpReceiver + OpenCV 已跑通（29.6 FPS 联调 2026-06-07），MVP-2 瓶颈只在手机端采集/编码/发送
+
+### 已知代价
+
+1. **失去 Flutter 跨平台红利**：未来要做 iOS 需学 Swift 重写（参考 ADR-004 当前不做 iOS，代价可接受）
+2. **phone_native/ 骨架从 0 搭建**：MVP-2 阶段预计 3-5 天
+3. **UI 简陋**：MVP-2 只做 TextView 显示状态，不做 Material 3 漂亮 UI（MVP-4 再说）
+4. **双目录心理负担**：phone/ 和 phone_native/ 同存，新人 onboarding 要先看 ADR-006 才知道用哪个
+
+### 不做什么（MVP-2 范围限定）
+
+- ❌ 不追求 Flutter 漂亮 UI（Kotlin 原生 + 单 TextView 够用）
+- ❌ 不做 WiFi（仍走 USB adb reverse）
+- ❌ 不做音频
+- ❌ 不做后台保活
+- ❌ 不做 1080p60（先 640x480 跑通链路）
+- ❌ 不做 mDNS / 自动发现
+- ❌ 不做 iOS / 跨平台
+- ❌ 不重写 desktop/ 电脑端
+- ❌ 不改 PCP 协议
+
+### 后续行动
+
+- [x] ADR-006 写入 .ai/decisions.md（2026-06-08 批次 1）
+- [x] 同步更新 .ai/context.md / specs/MVP路线图.md / specs/技术栈.md / .ai/gotchas.md
+- [ ] **批次 2**：创建 `phone_native/` Kotlin 原生最小 App（MainActivity + TextView + 状态显示），真机跑通"Hello PhoneCam MVP-2"
+- [ ] **批次 3+**：按 MVP-2 验收标准逐步实现
+  - Step A：CameraController.kt 打开后置摄像头
+  - Step B：H264Encoder.kt MediaCodec 编码（ByteBuffer mode）
+  - Step C：PcpPacketWriter.kt 24 字节头
+  - Step D：TcpStreamServer.kt 监听 9999
+  - Step E：链路串联 + desktop PcpReceiver 看到真实画面
+- [ ] **收尾**：phone_native/ 跑通后，统一给旧 phone/ 加 deprecation 注释（"MVP-2 起请用 phone_native/"），更新 README.md / specs/项目结构.md
+
+---
+
 ## 待决策（TODO）
 
 - [ ] H.264 码率默认值（建议 4 Mbps for 1080p60）

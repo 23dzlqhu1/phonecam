@@ -41,6 +41,7 @@
 | [G-007](#g-007windows-防火墙拦截-gradle-daemon-127001-通信) | Windows 防火墙拦截 Gradle daemon 127.0.0.1 通信 | 2026-06-08 |
 | [G-008](#g-008flutter-启动时扫微信小程序字体缓存路径会报错但用默认字体兜底) | Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底） | 2026-06-08 |
 | [G-009](#g-009stream_serverdart临时占位-避免-shelfrequest--httprequest-类型冲突) | `stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突） | 2026-06-08 |
+| [G-010](#g-010mvp-2-手机端从-flutter-切到-kotlin-原生的路线重置adr-006) | **MVP-2 手机端从 Flutter 切到 Kotlin 原生**（路线重置 ADR-006，旧 `phone/` 冻结 + 新建 `phone_native/`） | 2026-06-08 |
 
 ---
 
@@ -322,3 +323,36 @@ shelf.Response _handleRequest(shelf.Request request) {
 - 冻结文件遇到编译错误：**最小修复**，不优化、不重构
 - 判断"最小修复"是否安全：调用方是否真用了这个方法？查 main.dart 的引用
 - 类型冲突调试时先看 `package:xxx/src/yyy.dart` 找根类层级关系，别直接 cast（cast 可能在运行时崩）
+
+
+---
+
+## G-010：MVP-2 手机端从 Flutter 切到 Kotlin 原生（路线重置 ADR-006）
+
+**日期**：2026-06-08
+**场景**：MVP-1 完成、PCP 协议 + 电脑端 OpenCV 跑通后，准备进入 MVP-2 实现真实摄像头画面链路
+**症状**：
+- 旧 `phone/lib/stream_server.dart` 顶部已写明"MVP-2 要完全重写为 TCP+PCP 24 字节头"（即本身就要删/大改）
+- `camera_service.dart` 走 Dart Camera 插件拿 YUV → MethodChannel 调 Kotlin 编码器，跨语言数据拷贝
+- `h264_encoder.dart` 是 MethodChannel 壳，**核心 MediaCodec 编码逻辑在 Kotlin**
+- 实际数据流：Dart YUV420 → Kotlin MediaCodec → Dart → Socket，**跨 3 层语言**（Dart → Kotlin → Dart → TCP）
+- 旧 phone/ 路线与"链路跑通"目标有冗余：MVP-2 UI 只 1 屏（开始/停止 + 状态），Dart 包装 UI 价值低
+
+**根因**：
+MVP-2 的核心能力（Camera2 API、MediaCodec 硬编码、PCP TCP 发送）**都是 Android 系统 API**，用 Kotlin 直接调就是 3 跳（Camera2 → MediaCodec → Socket），引入 Flutter/Dart 是为了 UI 跨平台，但 MVP-2 阶段不需要漂亮 UI（只需"开始/停止 + 状态文字"）。
+
+**修复**：
+采用 ADR-006 方案 C：
+- 新建 `phone_native/` 目录，Kotlin 原生 Android 工程
+- 包名 `com.phonecam.nativeapp`（避免 Java/Kotlin 关键字 `native`）
+- 旧 `phone/` 冻结作 legacy，**不删除**（保留对照、Gradle 镜像/JBR 防火墙踩坑经验、`H264EncoderPlugin.kt` 编码逻辑参考）
+- 旧 `phone/` 等 `phone_native/` 跑通后再统一加 deprecation 注释
+- 电脑端（`desktop/`）Python 不动，PCP 协议不动
+- 复用 `phone/` 的 Gradle 阿里云镜像 + daemon 防火墙配置
+
+**教训**：
+- **链路选型要看本质**：MVP-2 本质 = Android 视频采集编码项目，不是"App + UI 项目"。当 UI 需求 ≤ 1 屏时，原生 Kotlin 链路更短更优
+- **跨层代价要算清**：Dart ↔ Kotlin 跨层每次 MethodChannel 调用都有序列化/反序列化，对 30fps 视频流影响虽小但累积
+- **不要在新栈没跑通时删旧栈**：旧 `phone/` 保留作对照，新 `phone_native/` 跑通后再统一标 legacy
+- **包名避开关键字**：`native` 是 JNI 关键字，做包名会有命名冲突警告（`com.phonecam.native` → `com.phonecam.nativeapp`）
+- **MVP 阶段不要追求产品化 UI**：MVP-2 阶段 TextView 够用，省下的时间专注链路跑通
