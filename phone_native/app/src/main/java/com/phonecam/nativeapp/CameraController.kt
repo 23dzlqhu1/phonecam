@@ -325,35 +325,32 @@ class CameraController(
     }
 
     /**
-     * 把 TextureView 渲染成"letterbox"（保持预览宽高比，剩余区域用黑边填充）
-     * 不修这个：16:9 预览会被拉伸到 9:19.5 屏，画面里的人都变瘦子了。
+     * 把 TextureView 渲染成"center crop"（保持预览宽高比，把画面铺满整个 view，多的那边裁掉）
+     *
+     * 为什么不留黑边 (letterbox)？
+     *  - PLC110 后置 sensor 物理方向是 landscape (横置 1280x960)，
+     *    设备竖屏时 SurfaceTexture 会自动把相机帧旋转 90°。
+     *  - 这导致 letterbox 算法的 dx/dy 算不准，画面会偏到下方（实测偏 300px）。
+     *  - 改成 "center crop / FILL"：scaleX = viewW/previewW, scaleY = viewH/previewH，
+     *    取较大者保证两边都填满，多余那边被裁掉。
+     *  - 相机预览场景下，FILL 比 FIT 更自然（不浪费屏幕、无黑边）。
      *
      * 注意：setTransform 必须在 UI 线程调用，所以这里用 textureView.post 跨线程调度。
      * 无论是被 onSurfaceTextureAvailable（UI 线程）还是 openInternal（相机线程）调用，都安全。
      */
     private fun applyTransform(previewW: Int, previewH: Int, viewW: Int, viewH: Int) {
         if (previewW <= 0 || previewH <= 0 || viewW <= 0 || viewH <= 0) return
-        val previewRatio = previewW.toFloat() / previewH.toFloat()
-        val viewRatio = viewW.toFloat() / viewH.toFloat()
-        val scale: Float
-        val dx: Float
-        val dy: Float
-        if (previewRatio > viewRatio) {
-            // 预览比 view 更宽 → 上下黑边
-            scale = viewW.toFloat() / previewW.toFloat()
-            dx = 0f
-            dy = (viewH - previewH * scale) / 2f
-        } else {
-            // 预览比 view 更窄 → 左右黑边
-            scale = viewH.toFloat() / previewH.toFloat()
-            dx = (viewW - previewW * scale) / 2f
-            dy = 0f
-        }
+        // 算两个方向的缩放比, 取较大者 (保证两边都填满, 多的那边被裁)
+        val scaleX = viewW.toFloat() / previewW.toFloat()
+        val scaleY = viewH.toFloat() / previewH.toFloat()
+        val scale = maxOf(scaleX, scaleY)
+        val dx = (viewW - previewW * scale) / 2f
+        val dy = (viewH - previewH * scale) / 2f
         val matrix = Matrix().apply {
             setScale(scale, scale)
             postTranslate(dx, dy)
         }
-        Log.d(TAG, "applyTransform: preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
+        Log.d(TAG, "applyTransform (FILL): preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
         textureView.post { textureView.setTransform(matrix) }
     }
 
