@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- strings.xml — 字符串资源 -->
+<resources>
+    <string name="app_name">PhoneCam MVP-2</string>
+</resources>

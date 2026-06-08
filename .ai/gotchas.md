@@ -42,6 +42,8 @@
 | [G-008](#g-008flutter-启动时扫微信小程序字体缓存路径会报错但用默认字体兜底) | Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底） | 2026-06-08 |
 | [G-009](#g-009stream_serverdart临时占位-避免-shelfrequest--httprequest-类型冲突) | `stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突） | 2026-06-08 |
 | [G-010](#g-010mvp-2-手机端从-flutter-切到-kotlin-原生的路线重置adr-006) | **MVP-2 手机端从 Flutter 切到 Kotlin 原生**（路线重置 ADR-006，旧 `phone/` 冻结 + 新建 `phone_native/`） | 2026-06-08 |
+| [G-011](#g-011gradle-813-wrapper-缓存不完整-gradlewrapperdistsgradle-813-bin-只有-lck--part-没有解压目录) | **Gradle 8.13 wrapper 缓存不完整**（`~/.gradle/wrapper/dists/` 只有 .lck + .part） | 2026-06-08 |
+| [G-012](#g-012agp-installdebug-在-oppo-真机报-installexception--99绕路-adb-install--r) | **AGP `installDebug` 在 OPPO 真机报 `InstallException: -99`**（绕路 `adb install -r`） | 2026-06-08 |
 
 ---
 
@@ -356,3 +358,44 @@ MVP-2 的核心能力（Camera2 API、MediaCodec 硬编码、PCP TCP 发送）**
 - **不要在新栈没跑通时删旧栈**：旧 `phone/` 保留作对照，新 `phone_native/` 跑通后再统一标 legacy
 - **包名避开关键字**：`native` 是 JNI 关键字，做包名会有命名冲突警告（`com.phonecam.native` → `com.phonecam.nativeapp`）
 - **MVP 阶段不要追求产品化 UI**：MVP-2 阶段 TextView 够用，省下的时间专注链路跑通
+
+## G-011：Gradle 8.13 wrapper 缓存不完整（`~/.gradle/wrapper/dists/gradle-8.13-bin/` 只有 `.lck` + `.part` 没有解压目录）
+
+**日期**：2026-06-08
+**场景**：新建 phone_native/ 工程前，想复用旧 phone/ 工程的 Gradle 8.13 发行版缓存，省去重新下载 ~150MB
+**症状**：
+- `~/.gradle/wrapper/dists/gradle-8.13-bin/5xuhj0ry160q40clulazy9h7d/` 下只有 `gradle-8.13-bin.zip.lck` 和 `gradle-8.13-bin.zip.part` 两个文件
+- 没有 `gradle-8.13/` 目录（即 zip 没解压）
+- 说明之前 phone/ 工程的 Gradle 8.13 下载**被中断**（可能网络抖动 / 用户取消）
+**根因**：Gradle wrapper 用 .lck + .part 实现"分片下载 + 加锁 + 续传"，下载未完成会留下这些半成品文件
+**修复**：
+1. 用**本地已有的 Gradle 8.9** 跑 `gradle wrapper --gradle-version 8.13 --distribution-type bin --no-daemon`（19 秒完成）
+2. 生成的 wrapper 指向 8.13，首次 `./gradlew.bat` 启动时会**重新下载** 8.13 完整发行版（受 `distributionUrl` 直连 services.gradle.org 网络状况影响）
+3. 阿里云镜像只对 Maven 依赖（AGP/Kotlin 库）有效，对 Gradle 发行版本身**不生效**
+**教训**：
+- ❌ 不要假设 wrapper 缓存里的 zip 一定解压完整 —— 总是先 `ls ~/.gradle/wrapper/dists/<dist>/<hash>/` 看有没有完整目录
+- ✅ 跨工程复用 Gradle 发行版**不省事**（被中断过就废了），直接用本地任意版本生成 wrapper 更稳
+- ✅ `gradle wrapper --gradle-version X` 只需要本地有一个**能跑**的 Gradle，**不要求版本匹配**
+
+---
+
+## G-012：AGP `installDebug` 在 OPPO 真机报 `InstallException: -99`，但 `adb install -r` 成功
+
+**日期**：2026-06-08
+**场景**：phone_native/ 批次 2 装机阶段，第一次 `./gradlew.bat installDebug` 失败
+**症状**：
+```
+> Task :app:installDebug FAILED
+> com.android.builder.testing.api.DeviceException: com.android.ddmlib.InstallException: -99
+BUILD FAILED in 28s
+```
+- 设备：`OPPO PLC110`，Android 16（API 36），ABI arm64-v8a，已开启 USB 调试，`adb devices` 能识别
+- 后续直接 `adb install -r app-debug.apk` → `Performing Streamed Install` → `Success` ✅
+**根因**（疑似）：AGP 8.11.1 的 install task 在某些 OEM 设备上调用 ddmlib 的 `installRemotePackage` 失败（错误码 -99 = `INTERNAL_ERROR` / `GENERIC_FAILURE`），可能是 OEM 定制 adbd 协议不兼容 / AGP 内部状态机问题
+**修复**：
+- ❌ 暂时无法在 AGP 层面修复（可能升级 AGP 到 8.12+ 或回退到 8.5.x 解决）
+- ✅ **绕路**：用 `adb install -r <apk>` 代替 `gradlew installDebug`，效果一样（APK 装到设备）
+**教训**：
+- ❌ 不要在 install 失败时反复重试 `gradlew installDebug`，浪费时间
+- ✅ 装机失败先看 `install.log` 的错误码，-99 是 ddmlib 内部错误，**`adb install` 是兜底方案**
+- ✅ 后续批次 3~7 都用 `adb install -r app/build/outputs/apk/debug/app-debug.apk` 装机

@@ -48,11 +48,11 @@
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
-| **MVP-2** 真实摄像头画面 | 🟡 路线重置（ADR-006 2026-06-08） | MVP-2 路线变更：手机端从 Flutter 切到 Kotlin 原生（新建 `phone_native/`，包名 `com.phonecam.nativeapp`），电脑端 Python + PCP 协议不动。详见 `.ai/decisions.md` ADR-006。下一步：批次 2 创建 `phone_native/` Kotlin 最小骨架 App |
+| **MVP-2** 真实摄像头画面 | 🟡 批次 2 ✅ 2026-06-08（App 骨架）| phone_native/ Kotlin 最小 App 已在 OPPO PLC110 真机跑通（显示 "PhoneCam MVP-2 ready"），详见 `phone_native/ready.png`。下一批次：批次 3 CameraController.kt 打开后置摄像头 |
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 路线重置（ADR-006 2026-06-08）**。下一步：批次 2 创建 `phone_native/` Kotlin 原生最小 App（MainActivity + TextView + 状态显示），真机跑通"Hello PhoneCam MVP-2"。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ 2026-06-08**（phone_native/ Kotlin 最小 App 跑通）。下一批次：批次 3 CameraController.kt 打开后置摄像头。
 
 ---
 

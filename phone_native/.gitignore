@@ -1,0 +1,31 @@
+# .gitignore — phone_native/ Gradle/Android 工程
+# 作用：避免把构建产物 / IDE 临时文件提交到 git
+
+# Gradle
+.gradle/
+build/
+out/
+*.gradle
+
+# Android 构建产物
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.navigation/
+captures/
+
+# 截图验证产物（不要 commit，验证用）
+ready.png
+screenshot.png
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db

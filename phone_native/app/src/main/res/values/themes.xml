@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  themes.xml — 使用 AppCompat 主题（androidx.appcompat:appcompat 依赖自带的）
+  MVP-2 批次 2 不用 Material3，避免引入额外依赖
+-->
+<resources>
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar" />
+</resources>
