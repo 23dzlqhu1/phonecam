@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.TextureView
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -35,6 +36,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var textureView: TextureView
     private lateinit var statusView: TextView
+    private lateinit var modeButton: Button
     private var cameraController: CameraController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,10 +78,41 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(statusView)
 
+        // 子 3：右上角"填满/全貌"切换按钮（半透明黑底白字）
+        //   - FILL: 画面铺满屏幕, 多的那边被裁 (无黑边, 看起来"放大"了)
+        //   - FIT : 画面保持比例, 留黑边, 看到完整画面 (不放大)
+        // 注: button 创建在 controller 之后才能正确读取 isFillMode()
+        modeButton = Button(this).apply {
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(160, 0, 0, 0))
+            textSize = 14f
+            isAllCaps = false
+            val pad = (10 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+            val params = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            params.gravity = Gravity.TOP or Gravity.END
+            val margin = (16 * resources.displayMetrics.density).toInt()
+            params.setMargins(margin, margin, margin, margin)
+            layoutParams = params
+            setOnClickListener {
+                val current = cameraController?.isFillMode() ?: true
+                val next = !current
+                cameraController?.setFillMode(next)
+                text = if (next) "FILL" else "FIT"
+                Log.i(TAG, "mode switched: ${if (next) "FILL" else "FIT"}")
+            }
+        }
+        rootLayout.addView(modeButton)
+
         setContentView(rootLayout)
 
         // 实例化 CameraController（仅持有引用 + 挂监听器，不开相机）
         cameraController = CameraController(this, textureView)
+        // button 在 controller 之后才能正确读到 isFillMode()
+        modeButton.text = if (cameraController?.isFillMode() == true) "FILL" else "FIT"
 
         // 1. 先看有没有相机权限
         // 使用 Android 原生 API：checkSelfPermission / requestPermissions（不引入 androidx.core）
