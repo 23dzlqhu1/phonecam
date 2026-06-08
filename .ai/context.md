@@ -48,11 +48,11 @@
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
-| **MVP-2** 真实摄像头画面 | ⬜ 待开始 | Android 端 MediaCodec 硬编码 + USB adb reverse + PyAV 硬解码 + OpenCV 窗口看真画面 |
+| **MVP-2** 真实摄像头画面 | 🟡 进行中（Step 1 ✅ 2026-06-08） | Step 1 真机 Flutter 联调通过：APK 装到 OPPO PLC110 启动正常，摄像头权限弹窗通过，状态文字"摄像头就绪 (H.264)"。下一步 Step 2：USB TCP 链路确认 + Step 3 重写 stream_server.dart 为 TCP+PCP |
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + **MVP-1 ✅ 完成**（2026-06-07）。下一步进入 MVP-2：真实摄像头画面（MediaCodec 硬编 + PyAV 硬解）。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 Step 1 ✅（2026-06-08）**。下一步：Step 2 USB TCP 链路确认（`adb reverse tcp:9999 tcp:9999` + 电脑端 `nc 127.0.0.1 9999`）+ Step 3 重写 `phone/lib/stream_server.dart` 为 TCP+PCP 24 字节头。
 
 ---
 

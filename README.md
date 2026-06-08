@@ -77,11 +77,11 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 |------|------|------|
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面（MediaCodec 硬编 + PyAV 硬解） | ⬜ 待开始 |
+| **MVP-2** | 真实摄像头画面（MediaCodec 硬编 + PyAV 硬解） | 🟡 进行中（Step 1 ✅ 真机 Flutter 环境确认 2026-06-08）|
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
-**当前正在做**：MVP-0 ✅ + **MVP-1 ✅ 完成**（2026-06-07）：`tests/mock_phone/mock_phone_server.py` 已交付，端到端 29.6 FPS 联调通过，0 丢帧。下一步进入 MVP-2 真实摄像头。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 Step 1 ✅（2026-06-08 真机 Flutter 联调通过）**。下一步 MVP-2 Step 2：USB TCP 链路确认（`adb devices` + `adb reverse` + 电脑连手机 9999）。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---

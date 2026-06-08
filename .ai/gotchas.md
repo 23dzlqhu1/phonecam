@@ -38,6 +38,9 @@
 | [G-004](#g-004hsv到rgb-手写公式的-2d-mask-坑) | HSV→RGB 手写公式的 2D mask 坑 | 2026-06-07 |
 | [G-005](#g-005ai-edit-工具有时会静默回退文件) | AI Edit 工具有时会静默回退文件 | 2026-06-07 |
 | [G-006](#g-006任何更新都要同步全部文档元规则) | **元规则**：任何更新都要同步全部文档 | 2026-06-07 |
+| [G-007](#g-007windows-防火墙拦截-gradle-daemon-127001-通信) | Windows 防火墙拦截 Gradle daemon 127.0.0.1 通信 | 2026-06-08 |
+| [G-008](#g-008flutter-启动时扫微信小程序字体缓存路径会报错但用默认字体兜底) | Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底） | 2026-06-08 |
+| [G-009](#g-009stream_serverdart临时占位-避免-shelfrequest--httprequest-类型冲突) | `stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突） | 2026-06-08 |
 
 ---
 
@@ -201,3 +204,121 @@ AI 的常见默认行为是"修一个 bug / 改一个状态，完事" —— 但
 - 写代码时把"哪个文档需要同步"作为 todo 列表的第一项
 - 完成任务报告固定包含"同步更新文档清单"段
 - 切换模型后第一步：扫 `git log --oneline -5` 看最近 commit 信息里有没有"同步更新了..."，没写就追查
+
+---
+
+## G-007：Windows 防火墙拦截 Gradle daemon 127.0.0.1 通信
+
+**日期**：2026-06-08
+**场景**：在 Windows 上跑 `flutter build apk` / `flutter run`，Gradle daemon 启动后客户端连不上。
+**症状**：
+- `gradle.properties` 设了 `org.gradle.daemon=false` 没用（AGP 8.x 强制启用 daemon）
+- 加上 `org.gradle.daemon.transport=pipe` 也没用（Gradle 8.13 已废弃 named pipe，只支持 TCP）
+- daemon 日志显示 `Listening on [... port:63365, addresses:[localhost/127.0.0.1]]` + `Daemon server started`，但客户端报：
+  ```
+  Could not connect to the Gradle daemon.
+  Connection timed out: getsockopt
+  ```
+- 控制端 `Test-NetConnection 127.0.0.1 -Port 63365` 也是 TcpTestSucceeded : False
+
+**根因**：
+- Gradle daemon 监听 `127.0.0.1:<random_port>` 等客户端连接
+- Windows Defender 防火墙（Domain/Private/Public 三个 profile）默认**拦截了 Java 进程接收 127.0.0.1 入站连接**
+- `gradle.properties` 加 `org.gradle.daemon.host=127.0.0.1` 强制绑定 IPv4 loopback 也无用，问题是 OS 层面
+- `--no-daemon` / `transport=pipe` 都被 Gradle 8.13 忽略
+
+**修复**（以管理员身份 PowerShell 执行）：
+```powershell
+# 1. 允许 Microsoft JDK 17 的 java.exe 入站
+netsh advfirewall firewall add rule name="Java Daemon Allow Loopback" dir=in action=allow program="C:\Program Files\Microsoft\jdk-17.0.11.9-hotspot\bin\java.exe" enable=yes profile=any
+
+# 2. 允许 Android Studio 自带 JBR 的 java.exe 入站（如有）
+netsh advfirewall firewall add rule name="JBR Daemon Allow Loopback" dir=in action=allow program="D:\Program Files\Android\Android Studio\jbr\bin\java.exe" enable=yes profile=any
+
+# 3. 按端口范围兜底（最稳）
+netsh advfirewall firewall add rule name="Gradle Daemon Port Range" dir=in action=allow protocol=TCP localport=1024-65535 remoteip=127.0.0.1 program=any enable=yes profile=any
+```
+
+**验证**：
+```powershell
+netsh advfirewall firewall show rule name="Java Daemon Allow Loopback"
+# 看到 "已启用: 是 / 方向: 入" 即生效
+```
+
+**教训**：
+- Windows + Gradle daemon = **必须**先配防火墙，否则会无限 `Connection timed out`
+- 加规则前先 `Get-NetFirewallProfile` 看三档是否都是 True（默认是）
+- 加规则**必须**用管理员 PowerShell（`Start-Process powershell -Verb RunAs`），普通权限报"请求的操作需要提升"
+- 验证手段：跑 `gradlew.bat assembleDebug --debug 2>&1` 几秒内能看到 daemon greeting 而不是超时
+
+---
+
+## G-008：Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底）
+
+**日期**：2026-06-08
+**场景**：在装了微信 / 微信小程序的 Android 设备上跑 Flutter App
+**症状**（logcat 大量重复）：
+```
+E/flutter (xxx): [ERROR:flutter/txt/src/txt/fontmgr_default_android.cc(429)] value OnePlus
+E/flutter (xxx): [ERROR:flutter/txt/src/txt/fontmgr_default_android.cc(431)] fontXmlName /data/user/999/com.tencent.mm/code_cache/flutter_PLC110/com.tencent.mm:appbrand0/flutter_custom_fonts2.xml
+E/flutter (xxx): [ERROR:flutter/txt/src/txt/fontmgr_default_android.cc(599)] use default font mgr
+```
+日志中还能看到 `value OnePlus`（即使手机是 OPPO）和 `com.tencent.mm:appbrand0` 路径。
+
+**根因**：
+- Flutter 引擎启动时扫描 `/data/user/*/*/code_cache/flutter_*/` 下所有 xml 字体配置
+- `com.tencent.mm`（微信）`appbrand0`（小程序）`flutter_custom_fonts2.xml` 路径残留
+- 微信小程序引擎用过 Flutter，把自定义字体配置写到了这路径，格式与原生 Flutter 不兼容 → 解析报错
+- **关键**：Flutter 不会因此 crash，会 `use default font mgr` 兜底用系统默认字体
+
+**修复**：
+**不用修**。日志报错但不影响 App 业务功能，文字照样显示。
+如果实在太吵：
+```bash
+# 卸载微信（最直接）/ 清掉微信小程序缓存（部分机型）
+adb shell pm clear com.tencent.mm
+```
+但通常**不建议**为这点日志清微信数据。
+
+**教训**：
+- 看到 `com.tencent.mm:appbrand0` 字体错误 = 用户装过微信小程序，**不是 PhoneCam 的 bug**
+- 判断标准：App 业务是否正常。状态文字、按钮、摄像头预览都正常 → 字体错误可忽略
+- 真要消除：清微信数据（重装微信即可）
+
+---
+
+## G-009：`stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突）
+
+**日期**：2026-06-08
+**场景**：MVP-1 写过的 `phone/lib/stream_server.dart` 用了 `package:shelf` + `package:web_socket_channel`，但 `WebSocketTransformer.upgrade()` 接收的是 `dart:io.HttpRequest`，shelf 库传入的是 `shelf.Request`（封装类型），Dart 2.18+ 类型系统**严格**不兼容。
+
+**症状**：
+```
+Error: The argument type 'Request' can't be assigned to the parameter type 'HttpRequest'.
+  - 'Request' is from 'package:shelf/src/request.dart'
+  - 'HttpRequest' is from 'dart:_http'
+```
+
+**根因**：
+- shelf 1.4.2 的 `Request` 是 `dart:io.HttpRequest` 的封装类型（不是子类，是 has-a）
+- `WebSocketTransformer.upgrade(HttpRequest)` 是 `dart:io` 的 API，**不接收** shelf 的 `Request`
+- `shelf.Request` 内部通过 `request.context['io.http_request']` 暴露原始 `HttpRequest`，但键名可能因 shelf 版本不同
+
+**修复**（临时，因为 stream_server.dart 已冻结，MVP-2 Step 3 才完整重写为 TCP+PCP）：
+```dart
+shelf.Response _handleRequest(shelf.Request request) {
+  // ⚠️ 临时修复：MVP-1 frozen 文件，仅消除编译错误
+  // 真实功能在 MVP-2 重写为 TCP + PCP 时实现（见 stream_server.dart 顶部 deprecation 警告）
+  return shelf.Response.notFound('Stream server is frozen, MVP-2 will rewrite to TCP+PCP');
+}
+```
+
+**为什么这样改是安全的**：
+- `main.dart` 调 `_server.sendH264Frame(frame)` 但**不调** `_server.start()`（`start()` 才需要 `_handleRequest`）
+- 所以 `_handleRequest` 永远不会被调用，**保留 404 兜底即可**
+- Step 3 会完全重写整个文件，删除 shelf / web_socket_channel 依赖，换成 `dart:io.Socket` + 自写 PCP 24 字节头
+
+**教训**：
+- 冻结文件遇到编译错误：**最小修复**，不优化、不重构
+- 判断"最小修复"是否安全：调用方是否真用了这个方法？查 main.dart 的引用
+- 类型冲突调试时先看 `package:xxx/src/yyy.dart` 找根类层级关系，别直接 cast（cast 可能在运行时崩）
