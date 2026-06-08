@@ -1,5 +1,9 @@
 allprojects {
     repositories {
+        // 阿里云镜像优先，避免 google() / mavenCentral() 直连超时
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         google()
         mavenCentral()
     }

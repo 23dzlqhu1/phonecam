@@ -71,34 +71,9 @@ class StreamServer {
   }
 
   shelf.Response _handleRequest(shelf.Request request) {
-    if (request.url.path == 'stream') {
-      // WebSocket 升级
-      final ws = WebSocketTransformer.upgrade(request).then((ws) {
-        _wsClient = ws;
-        _sequence = 0;
-        _totalBytes = 0;
-
-        ws.listen(
-          (data) {
-            if (data is String) {
-              _handleMessage(data);
-            }
-          },
-          onDone: () => _wsClient = null,
-          onError: (_) => _wsClient = null,
-        );
-      });
-      return shelf.Response.ok('WebSocket upgrade');
-    }
-
-    if (request.url.path == 'info') {
-      return shelf.Response.ok(
-        '{"device_name":"PhoneCam","codec":"h264","protocol":"websocket"}',
-        headers: {'Content-Type': 'application/json'},
-      );
-    }
-
-    return shelf.Response.notFound('Not Found');
+    // ⚠️ 临时修复：MVP-1 frozen 文件，仅消除编译错误
+    // 真实功能在 MVP-2 重写为 TCP + PCP 时实现（见 stream_server.dart 顶部 deprecation 警告）
+    return shelf.Response.notFound('Stream server is frozen, MVP-2 will rewrite to TCP+PCP');
   }
 
   void _handleMessage(String message) {
