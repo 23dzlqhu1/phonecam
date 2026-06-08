@@ -347,7 +347,7 @@ desktop/phonecam.py
 
 - [ ] `phone_native/` 目录创建，Gradle 同步通过
 - [ ] Android 真机 App（包名 `com.phonecam.nativeapp`）能 `gradlew.bat installDebug` 装到 OPPO PLC110
-- [ ] App 启动后 TextView 显示"PhoneCam MVP-2 ready"（批次 2 验收）
+- [x] App 启动后 TextView 显示"PhoneCam MVP-2 ready"（批次 2 验收 ✅ 2026-06-08）
 - [ ] 摄像头权限弹窗通过（批次 3）
 - [ ] Camera2 能打开后置摄像头（批次 3）
 - [ ] MediaCodec 能输出 H.264 NALU（批次 4）
@@ -373,7 +373,7 @@ desktop/phonecam.py
 
 | 批次 | 目标 | 关键文件 | 验收 |
 |------|------|---------|------|
-| **批次 2** | Kotlin 最小骨架 App 跑通 | `phone_native/` 全部配置文件 + `MainActivity.kt` + `activity_main.xml` | 真机启动显示"PhoneCam MVP-2 ready" |
+| **批次 2** | Kotlin 最小骨架 App 跑通 ✅ 2026-06-08 | `phone_native/` 全部配置文件 + `MainActivity.kt` | 真机启动显示"PhoneCam MVP-2 ready"（OPPO PLC110 已验证）|
 | **批次 3** | Camera2 打开后置摄像头 | `CameraController.kt` | logcat 显示 "Camera opened: 640x480" |
 | **批次 4** | MediaCodec 编码 H.264 | `H264Encoder.kt` | logcat 显示 "Encoded N NALU, type=X" |
 | **批次 5** | PCP 打包 + TCP 发送 + 链路串联 | `PcpPacketWriter.kt` + `TcpStreamServer.kt` + `MainActivity.kt` | `desktop/phonecam.py` 看到真实画面 |

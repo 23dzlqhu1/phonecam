@@ -31,7 +31,8 @@
 | [`docs/`](docs/) | 📖 普通用户/新人 | 使用手册、安装指南、架构图 |
 | [`specs/`](specs/) | 👥 人 + AI 共用 | 产品概述、技术选型、项目结构 |
 | [`desktop/`](desktop/) | 💻 开发者（电脑端）| Windows 端 Python 代码 |
-| [`phone/`](phone/) | 📱 开发者（手机端）| Android 端 Flutter 代码 |
+| [`phone/`](phone/) | 📱 旧 Flutter 工程（legacy）| 已冻结，详见 ADR-006；`phone_native/` 是替代品 |
+| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin 最小 App 骨架（批次 2 ✅ 2026-06-08 跑通）|
 | [`tests/`](tests/) | 🧪 测试工程师 | Mock 设备、性能测试工具 |
 | [`scripts/`](scripts/) | 🔧 所有人 | 构建、安装脚本 |
 
@@ -77,11 +78,11 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 |------|------|------|
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面（MediaCodec 硬编 + PyAV 硬解） | 🟡 进行中（Step 1 ✅ 真机 Flutter 环境确认 2026-06-08）|
+| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ 2026-06-08（phone_native/ 最小 App 真机跑通）|
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 Step 1 ✅（2026-06-08 真机 Flutter 联调通过）**。下一步 MVP-2 Step 2：USB TCP 链路确认（`adb devices` + `adb reverse` + 电脑连手机 9999）。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅（2026-06-08 phone_native/ Kotlin 最小 App 真机跑通）**。下一批次：批次 3 CameraController.kt 打开后置摄像头。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---
