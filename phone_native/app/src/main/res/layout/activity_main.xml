@@ -165,17 +165,19 @@
             android:visibility="gone"
             android:contentDescription="@string/layer_c_btn_streaming" />
 
-        <!-- 推流按钮 (60% 宽, 64dp 高, 居中) -->
+        <!-- 推流按钮 (占满宽度, 左右各留 48dp, 64dp 高) -->
         <Button
             android:id="@+id/btnPush"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="@dimen/btn_push_height"
+            android:layout_marginHorizontal="48dp"
             android:layout_marginTop="6dp"
             android:background="@drawable/btn_push_background"
             android:textSize="@dimen/text_size_button"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
             android:letterSpacing="0.05"
+            android:textAllCaps="false"
             android:text="@string/layer_c_btn_start" />
     </LinearLayout>
 
