@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  btn_pill_primary.xml — Connect 页 "连接" 按钮
+  brand_cyan 底 + 28dp 圆角 (pill) + 轻微按下态
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand_cyan_pressed" />
+            <corners android:radius="28dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand_cyan" />
+            <corners android:radius="28dp" />
+        </shape>
+    </item>
+</selector>

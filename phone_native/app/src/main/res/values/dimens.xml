@@ -43,4 +43,13 @@
     <!-- ============== 图标 ============== -->
     <dimen name="icon_size_action">24dp</dimen>         <!-- Layer B 右上角图标 (⚙ 🔄) -->
     <dimen name="icon_size_error">64dp</dimen>          <!-- 错误占位图标 -->
+
+    <!-- ============== Settings 页 (Phase Y-1) ============== -->
+    <dimen name="settings_row_height">56dp</dimen>     <!-- 单行高度 (含触摸区) -->
+    <dimen name="settings_row_padding">16dp</dimen>     <!-- 行左右内边距 -->
+    <dimen name="settings_section_padding">12dp</dimen> <!-- 分区标题上下间距 -->
+    <dimen name="settings_text_title">15sp</dimen>      <!-- 设置项标题 -->
+    <dimen name="settings_text_value">14sp</dimen>      <!-- 设置项当前值 -->
+    <dimen name="settings_text_placeholder">12sp</dimen><!-- ⏳ 标记字号 -->
+    <dimen name="settings_text_footer">12sp</dimen>     <!-- 底部版本号 -->
 </resources>

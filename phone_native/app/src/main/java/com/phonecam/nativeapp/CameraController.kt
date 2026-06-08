@@ -46,7 +46,20 @@ class CameraController(
         private const val TARGET_HEIGHT = 720
         private const val FALLBACK_WIDTH = 640
         private const val FALLBACK_HEIGHT = 480
+
+        // 1080p 目标 (Phase Y-1 加, 从设置里读)
+        private const val TARGET_1080_WIDTH = 1920
+        private const val TARGET_1080_HEIGHT = 1080
     }
+
+    // ======================== 设置 (Phase Y-1 加) ========================
+    // 由 MainActivity 在 open() 之前调 setter 注入, 避免构造器参数膨胀
+
+    /** "back" (默认) / "front" */
+    @Volatile private var lensFacingPref: String = "back"
+
+    /** "480p" (640x480) / "720p" (1280x720, 默认) / "1080p" (1920x1080) */
+    @Volatile private var targetResolutionPref: String = "720p"
 
     // 相机资源（运行时由 open() 赋值，close() 释放）
     private var cameraDevice: CameraDevice? = null
@@ -179,6 +192,30 @@ class CameraController(
      */
     fun getCameraId(): String? = backCameraId
 
+    // ======================== 设置注入 (Phase Y-1 加) ========================
+
+    /**
+     * 设置默认摄像头: "back" (后置) / "front" (前置)
+     * 必须在 close() 状态下调用 (下次 open() 生效)
+     */
+    fun setLensFacing(facing: String) {
+        lensFacingPref = if (facing == "front") "front" else "back"
+        Log.d(TAG, "setLensFacing: $lensFacingPref")
+    }
+
+    /**
+     * 设置目标分辨率: "480p" / "720p" (默认) / "1080p"
+     * 必须在 close() 状态下调用 (下次 open() 生效)
+     */
+    fun setTargetResolution(res: String) {
+        targetResolutionPref = when (res) {
+            "480p" -> "480p"
+            "1080p" -> "1080p"
+            else -> "720p"
+        }
+        Log.d(TAG, "setTargetResolution: $targetResolutionPref")
+    }
+
     // ===================== 内部实现 =====================
 
     /**
@@ -212,10 +249,10 @@ class CameraController(
         val cm = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val handler = cameraHandler ?: return
 
-        // 1. 选后置 camera
-        val targetId = findBackFacingCamera(cm)
+        // 1. 选指定方向的 camera (back / front)
+        val targetId = findCameraByFacing(cm)
         if (targetId == null) {
-            Log.e(TAG, "open failed: no back-facing camera found")
+            Log.e(TAG, "open failed: no $lensFacingPref-facing camera found")
             return
         }
         backCameraId = targetId
@@ -242,7 +279,7 @@ class CameraController(
 
         try {
             // 4. 打开 camera
-            Log.i(TAG, "camera opened: id=$targetId")
+            InAppLogStore.i(TAG, "camera opened: id=$targetId")
             cm.openCamera(targetId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     // 如果在 openCamera 异步过程中用户已 close 释放，这里就不再把 camera 存起来
@@ -307,7 +344,7 @@ class CameraController(
                         captureSession = session
                         try {
                             session.setRepeatingRequest(requestBuilder.build(), null, handler)
-                            Log.i(TAG, "preview started")
+                            InAppLogStore.i(TAG, "preview started")
                         } catch (e: CameraAccessException) {
                             Log.e(TAG, "setRepeatingRequest failed: ${e.message}", e)
                         }
@@ -354,25 +391,30 @@ class CameraController(
     }
 
     /**
-     * 选后置摄像头 ID
+     * 选指定方向的摄像头 (back / front)
      */
-    private fun findBackFacingCamera(cm: CameraManager): String? {
+    private fun findCameraByFacing(cm: CameraManager): String? {
+        val targetFacing = if (lensFacingPref == "front")
+            CameraCharacteristics.LENS_FACING_FRONT
+        else
+            CameraCharacteristics.LENS_FACING_BACK
+
         return try {
             cm.cameraIdList.firstOrNull { id ->
                 val c = cm.getCameraCharacteristics(id)
-                c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+                c.get(CameraCharacteristics.LENS_FACING) == targetFacing
             }
         } catch (e: CameraAccessException) {
-            Log.e(TAG, "findBackFacingCamera failed: ${e.message}", e)
+            Log.e(TAG, "findCameraByFacing failed: ${e.message}", e)
             null
         }
     }
 
     /**
      * 从 StreamConfigurationMap 选预览尺寸：
-     *   1) 最接近 1280x720
-     *   2) 没有就最接近 640x480
-     *   3) 再不行就第一个
+     *   1) 优先用 targetResolutionPref 对应的目标 (480p=640x480 / 720p=1280x720 / 1080p=1920x1080)
+     *   2) 找不到该尺寸就降级: 720p→480p→第一个
+     *   3) 都不行就用第一个
      */
     private fun choosePreviewSize(cm: CameraManager, cameraId: String): Size {
         val characteristics = cm.getCameraCharacteristics(cameraId)
@@ -384,20 +426,15 @@ class CameraController(
             return Size(TARGET_WIDTH, TARGET_HEIGHT)
         }
 
-        // 策略 1：最接近 1280x720
-        val best720 = pickClosest(supported, TARGET_WIDTH, TARGET_HEIGHT)
-        if (best720 != null && best720.width == TARGET_WIDTH && best720.height == TARGET_HEIGHT) {
-            return best720
+        // 根据设置选目标尺寸
+        val (targetW, targetH) = when (targetResolutionPref) {
+            "480p" -> FALLBACK_WIDTH to FALLBACK_HEIGHT
+            "1080p" -> TARGET_1080_WIDTH to TARGET_1080_HEIGHT
+            else -> TARGET_WIDTH to TARGET_HEIGHT  // 720p 默认
         }
 
-        // 策略 2：最接近 640x480
-        val best480 = pickClosest(supported, FALLBACK_WIDTH, FALLBACK_HEIGHT)
-        if (best480 != null) {
-            return best480
-        }
-
-        // 策略 3：第一个
-        return supported[0]
+        val best = pickClosest(supported, targetW, targetH)
+        return best ?: supported[0]
     }
 
     /**

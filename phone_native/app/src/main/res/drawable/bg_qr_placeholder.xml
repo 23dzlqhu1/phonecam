@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  bg_qr_placeholder.xml — QR 占位背景
+  240x240 区域用 surface_2 + 8dp 圆角 + 虚线效果 (用 stroke dashed)
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/surface_2" />
+    <corners android:radius="8dp" />
+    <stroke
+        android:width="2dp"
+        android:color="@color/hairline"
+        android:dashWidth="6dp"
+        android:dashGap="4dp" />
+</shape>

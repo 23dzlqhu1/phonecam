@@ -66,6 +66,10 @@ class MainActivity : AppCompatActivity() {
     // --- 业务引用 ---
     private var cameraController: CameraController? = null
 
+    // --- 设置 (Phase Y-1 加) ---
+    private lateinit var settings: SettingsStore
+    private var currentLensPref: String = "back"  // 用于 Layer B 状态显示
+
     // --- 双击退出 ---
     private var lastBackPressedMs: Long = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -82,6 +86,10 @@ class MainActivity : AppCompatActivity() {
 
         // 3. 实例化 CameraController (批次 3 逻辑, 仍接 TextureView)
         cameraController = CameraController(this, textureView)
+
+        // 3.5. 读取设置 (Phase Y-1 加)
+        settings = SettingsStore(this)
+        applySettingsToController()
 
         // 4. 设置 Layer D 底部状态
         updateFooter()
@@ -126,9 +134,9 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        // 切换按钮 → 暂未实现, Toast 提示
+        // 切换按钮 → 切换前后摄像头 (Phase Y-1 加, 不再 Toast)
         btnToggle.setOnClickListener {
-            Toast.makeText(this, "切换摄像头 — Phase Y 实现", Toast.LENGTH_SHORT).show()
+            toggleLens()
         }
 
         // 推流按钮 → 暂未实现, Toast 提示
@@ -140,6 +148,45 @@ class MainActivity : AppCompatActivity() {
         btnRetry.setOnClickListener {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
         }
+    }
+
+    /**
+     * 切换前后摄像头 (Phase Y-1 加)
+     * 1) 把 settings.lens 翻转
+     * 2) 把新值注入 CameraController
+     * 3) close + open 重启相机
+     */
+    private fun toggleLens() {
+        val newLens = if (currentLensPref == "back") "front" else "back"
+        currentLensPref = newLens
+        settings.lens = newLens
+        cameraController?.setLensFacing(newLens)
+
+        Toast.makeText(
+            this,
+            if (newLens == "back") "→ 后置摄像头" else "→ 前置摄像头",
+            Toast.LENGTH_SHORT
+        ).show()
+        Log.d(TAG, "toggleLens: $newLens")
+
+        // 重启相机
+        cameraController?.close()
+        cameraController?.open()
+    }
+
+    /**
+     * 把 SettingsStore 里的设置注入 CameraController (Phase Y-1 加)
+     * 也在 onResume 里调, 这样从 Settings 页返回后会用新设置
+     */
+    private fun applySettingsToController() {
+        currentLensPref = settings.lens
+        cameraController?.setLensFacing(settings.lens)
+        cameraController?.setTargetResolution(settings.resolution)
+
+        // 调试信息显隐
+        debugText.visibility = if (settings.showDebug) View.VISIBLE else View.GONE
+
+        InAppLogStore.d(TAG, "applySettings: lens=${settings.lens} res=${settings.resolution} showDebug=${settings.showDebug}")
     }
 
     /**
@@ -171,14 +218,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        Log.d(TAG, "onResume")
+        InAppLogStore.d(TAG, "onResume")
+        // 重新读取设置 (从 Settings 页返回后会用新设置)
+        if (::settings.isInitialized) {
+            applySettingsToController()
+        }
         cameraController?.open()
         startFooterTick()
     }
 
     override fun onPause() {
         super.onPause()
-        Log.d(TAG, "onPause")
+        InAppLogStore.d(TAG, "onPause")
         cameraController?.close()
         stopFooterTick()
     }

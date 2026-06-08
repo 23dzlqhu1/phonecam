@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  activity_debug.xml — Debug 页 (Phase Y-4)
+  来源: specs/features/app-architecture-B-multiscreen.md §4.5
+  范围: 仅"日志" tab, PCP/质量 tab 标 "敬请期待"
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_oled">
+
+    <!-- ============== Tab 行 ============== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:background="@color/surface_1"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tabLogs"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:background="?attr/selectableItemBackground"
+            android:text="日志" />
+
+        <TextView
+            android:id="@+id/tabPcp"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="@color/text_disabled"
+            android:textAllCaps="false"
+            android:text="PCP" />
+
+        <TextView
+            android:id="@+id/tabQuality"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="@color/text_disabled"
+            android:textAllCaps="false"
+            android:text="质量" />
+    </LinearLayout>
+
+    <!-- Tab 下划线指示器 (Phase Y-4 简化, 固定在"日志"下) -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:background="@color/brand_cyan" />
+
+    <!-- ============== 日志区 (ScrollView 装 TextView) ============== -->
+    <ScrollView
+        android:id="@+id/logScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="12dp"
+        android:scrollbars="vertical">
+
+        <TextView
+            android:id="@+id/logText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:textAllCaps="false" />
+    </ScrollView>
+
+    <!-- ============== 底部操作行 ============== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/surface_1"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="12dp">
+
+        <Button
+            android:id="@+id/btnClear"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_input"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            android:text="@string/debug_btn_clear" />
+
+        <Button
+            android:id="@+id/btnShare"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_input"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            android:text="@string/debug_btn_copy" />
+
+        <Button
+            android:id="@+id/btnPause"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_input"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            android:text="暂停滚动" />
+    </LinearLayout>
+</LinearLayout>

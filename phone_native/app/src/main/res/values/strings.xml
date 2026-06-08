@@ -72,10 +72,103 @@
     <string name="settings_value_4mbps">4 Mbps</string>
     <string name="settings_value_h264">H.264</string>
 
-    <!-- ============== Connect 页 (占位) ============== -->
-    <string name="connect_hint">扫描 PC 端二维码或在下方输入 IP</string>
-    <string name="connect_ip_hint">PC IP:PORT</string>
+    <!-- ============== Settings 页 (Phase Y-1 完整) ============== -->
+    <!-- 4 个分区标题 -->
+    <string name="settings_section_camera">📷  相机</string>
+    <string name="settings_section_stream">📡  推流</string>
+    <string name="settings_section_connect">🔗  连接</string>
+    <string name="settings_section_debug">🛠  调试</string>
+
+    <!-- 9 个设置项标题 -->
+    <string name="settings_title_lens">默认摄像头</string>
+    <string name="settings_title_resolution">分辨率</string>
+    <string name="settings_title_fps">目标帧率</string>
+    <string name="settings_title_bitrate">码率</string>
+    <string name="settings_title_codec">编码</string>
+    <string name="settings_title_transport">传输方式</string>
+    <string name="settings_title_pcdiscovery">PC 发现</string>
+    <string name="settings_title_debug">显示调试信息</string>
+    <string name="settings_title_about">关于</string>
+
+    <!-- 跳转行 (Phase Y-2/Y-4 加) -->
+    <string name="settings_title_connect">连接 PC</string>
+    <string name="settings_title_debugpage">查看调试日志</string>
+
+    <!-- 默认摄像头选项 -->
+    <string-array name="settings_opt_lens">
+        <item>后置</item>
+        <item>前置</item>
+    </string-array>
+
+    <!-- 分辨率选项 -->
+    <string-array name="settings_opt_resolution">
+        <item>480p</item>
+        <item>720p</item>
+        <item>1080p</item>
+    </string-array>
+
+    <!-- 帧率选项 -->
+    <string-array name="settings_opt_fps">
+        <item>15 fps</item>
+        <item>30 fps</item>
+        <item>60 fps</item>
+    </string-array>
+
+    <!-- 码率选项 -->
+    <string-array name="settings_opt_bitrate">
+        <item>1 Mbps</item>
+        <item>2 Mbps</item>
+        <item>4 Mbps</item>
+        <item>8 Mbps</item>
+    </string-array>
+
+    <!-- 编码选项 -->
+    <string-array name="settings_opt_codec">
+        <item>H.264</item>
+        <item>H.265</item>
+        <item>VP9</item>
+    </string-array>
+
+    <!-- 传输方式选项 -->
+    <string-array name="settings_opt_transport">
+        <item>自动</item>
+        <item>WiFi 优先</item>
+        <item>USB 优先</item>
+    </string-array>
+
+    <!-- 未实现项标记 -->
+    <string name="settings_placeholder_stream">⏳  推流功能待后续批次</string>
+
+    <!-- 行点击弹窗标题 -->
+    <string name="settings_dialog_title">选择</string>
+
+    <!-- ============== Connect 页 (Phase Y-2 完整) ============== -->
+    <string name="connect_status_indicator">当前状态</string>
+    <string name="connect_status_disconnected">●  未连接</string>
+    <string name="connect_status_disconnected_hint">等待 PC 端 PhoneCam 启动</string>
+    <string name="connect_status_connecting">●  连接中</string>
+    <string name="connect_status_connected">●  已连接</string>
+
+    <string name="connect_method_qr_title">方式 A: 扫码</string>
+    <string name="connect_qr_placeholder">QR</string>
+    <string name="connect_qr_hint">PC 端打开 PhoneCam → 扫码自动连接</string>
+    <string name="connect_qr_ip_unknown">IP 未获取</string>
+    <string name="connect_qr_not_implemented">⏳  真实 QR 生成待 Phase Z (需 zxing)</string>
+
+    <string name="connect_method_manual_title">方式 B: 手动输入</string>
+    <string name="connect_field_ip">IP 地址</string>
+    <string name="connect_field_port">端口</string>
     <string name="connect_btn">连接</string>
+    <string name="connect_btn_connecting">连接中…</string>
+
+    <string name="connect_devices_title">已连接设备</string>
+    <string name="connect_devices_empty">(空 — 尚无 PC 连接)</string>
+
+    <string name="connect_toast_no_ip">请输入 IP</string>
+    <string name="connect_toast_no_port">请输入端口</string>
+    <string name="connect_toast_not_implemented">⏳  真实连接待 Phase Z (TCP/PCP)</string>
+    <string name="connect_toast_connecting">正在连接 %1$s:%2$s …</string>
+    <string name="connect_toast_invalid_ip">IP 格式不正确</string>
 
     <!-- ============== About 页 (占位) ============== -->
     <string name="about_version">版本</string>
