@@ -35,8 +35,8 @@
     <string name="layer_c_btn_stop">■  停止推流</string>
     <string name="layer_c_btn_streaming">推流中断</string>
     <string name="layer_c_btn_disabled">请先打开摄像头</string>
-    <!-- 批次 3.1 临时文案: 复用 Layer C 按钮为"拍 1 帧 H.264 编码"调试入口, 3.4 闭环后改回 layer_c_btn_start -->
-    <string name="layer_c_btn_test_3_1">🎬  拍 1 帧 (3.1 调试)</string>
+    <!-- 批次 3.2.0.1 临时文案: 复用 Layer C 按钮为"拍 1 帧 EGL 零拷贝 H.264 编码"调试入口, 3.2.0.3 闭环后改回 layer_c_btn_start -->
+    <string name="layer_c_btn_test_3_1">🎬  拍 1 帧 (3.2 EGL)</string>
 
     <!-- ============== Layer D: 底部状态 ============== -->
     <string name="layer_d_format">PHONECAM %1$s · CAM%2$s · %3$s</string>

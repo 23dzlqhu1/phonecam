@@ -32,7 +32,7 @@
 | [`specs/`](specs/) | 👥 人 + AI 共用 | 产品概述、技术选型、项目结构 |
 | [`desktop/`](desktop/) | 💻 开发者（电脑端）| Windows 端 Python 代码 |
 | [`phone/`](phone/) | 📱 旧 Flutter 工程（legacy）| 已冻结，详见 ADR-006；`phone_native/` 是替代品 |
-| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y ✅ 2026-06-08, v0.2.5-mvp2-phaseY) |
+| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 ✅ 2026-06-08, v0.2.7-mvp2-batch3.2.0.1) |
 | [`tests/`](tests/) | 🧪 测试工程师 | Mock 设备、性能测试工具 |
 | [`scripts/`](scripts/) | 🔧 所有人 | 构建、安装脚本 |
 
@@ -82,7 +82,7 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅（2026-06-08 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 5 截图）**。下一批次：批次 3 CameraController.kt MediaCodec 硬编 H.264。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅（2026-06-08 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 5 截图 + H264Encoder 单帧 H.264 验证通过，OpenCV 解码 Y 通道 0→255 水平渐变吻合）**。下一批次：批次 3.2 接 Camera2 ImageReader 真实帧 + 升级 InputSurface 零拷贝。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---

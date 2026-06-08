@@ -659,3 +659,35 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 - 替代方案：`LinearLayout` + `weightSum` + `layout_weight`（更简单但只支持单方向）
 - 横屏：相机 70% 高度 + 状态/按钮/设置 30%；竖屏：50/8/12/30 = 视频 App 标准比例
 - **不要用 `dp` 写死高度**（跨设备必崩），**用 `wrap_content` 只适合按钮 / 文字**（不适合容器）
+
+---
+
+## G-019：YUV420Flexible 底层 OPPO 是 NV12（pixelStride=2 + UV 交织）
+
+**日期**：2026-06-08
+**场景**：批次 3.1 H264Encoder.kt 用 `MediaCodec` + `COLOR_FormatYUV420Flexible` + `getInputImage()` 喂 YUV 源数据（源是 I420/YUV420 planar: Y 平面 + U 平面 + V 平面 顺序排列）
+**症状**：
+- H.264 编码链路通：SPS 19B + PPS 4B + IDR 407B = 442 字节 Annex-B 裸流
+- OpenCV VideoCapture 解码出 1280×720 帧，**Y 通道水平渐变完全正确**（0→255 吻合 col & 0xFF）
+- ❌ **但画面色相偏蓝**：用 U=128, V=128 中性灰源，渲染出来偏蓝紫
+- logcat 报：`U 平面 pixelStride=2, 走了慢路径 (性能下降)` + `V 平面 pixelStride=2, 走了慢路径 (性能下降)`
+**根因**：
+- `COLOR_FormatYUV420Flexible` 是个"伞形"常量，**底层实际格式由设备决定**：
+  - 老 MTK / 部分高通：YUV420Planar (I420) — 3 plane 独立，每个 pixelStride=1
+  - **OPPO PLC110 / 多数现代设备：NV12** — 1 个 Y plane + 1 个 UV 交织 plane (U V U V U V...)，pixelStride=2
+- 我代码 `fillPlane` 的慢路径按 `pixelStride=2` 写 U 平面时，只在偶数列写入了源 U 数据；**奇数列（V 数据位置）保持默认 0**
+- 也就是说，**V 通道没被写入**，导致色相从中性灰 (U=V=128) 变成 U=128, V=0 = 偏蓝
+**修复**（**批次 3.2.0.1 已通过 EGL 零拷贝根治**，不再需要下面 ByteBuffer NV12 兼容代码）：
+```kotlin
+// 批次 3.2.0.1 解法: 走 createInputSurface() 零拷贝 + EglRenderer.kt YUV shader
+//   EGL 路径自动处理 NV12 / I420 / YV12 差异, 我们只管"画一帧"
+//   OpenCV 解码验证: 同样 U=128, V=128 源, 解码后 R-G-B 色差 < 4 (不再是 4 以上色偏)
+//   G-019 验证状态: ✅ 已修复, 见 H264Encoder.kt + EglRenderer.kt
+```
+**教训**：
+- ❌ **不要假设** `YUV420Flexible` 底层就是 planar I420 → 现代设备大概率是 NV12 (semi-planar)
+- ✅ 写 YUV 适配代码**第一步**：拿 `planes[].pixelStride` + `planes[].rowStride` 判断实际格式
+- ✅ MediaCodec 的 `KEY_COLOR_FORMAT` 用枚举值是"软提示"，**真格式得靠运行时读 `Image.Plane` 推断**
+- ✅ 真要避免这种坑：**直接走 `createInputSurface()`**（EGL/OpenGL shader 处理所有像素格式差异）— 批次 3.2 计划升级
+- ✅ 验证手段：编码后用 OpenCV `cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)` 检查 V 通道值是否与源数据吻合
+

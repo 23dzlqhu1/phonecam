@@ -7,25 +7,39 @@ import android.media.MediaFormat
 import android.util.Log
 
 /**
- * H264Encoder —— phone_native/ 批次 3.1 H.264 硬件编码器
+ * H264Encoder —— phone_native/ 批次 3.1 + 3.2 H.264 硬件编码器
  *
- * 作用: 把一帧 YUV420 planar 数据用 MediaCodec 硬件编码成 H.264 NALU 字节流
- *       (含 SPS + PPS + IDR 帧, 可直接 ffplay / VLC 播放)
+ * 作用 (3.1 单帧): 把一帧 YUV420 planar 用 MediaCodec 编码成 H.264 NALU 字节流
+ * 作用 (3.2 长期): 持有 MediaCodec, 拿到 InputSurface 供 EglRenderer 画, 持续吐 NALU
  *
- * 范围 (批次 3.1):
- *   - 单帧编码 (encodeOneFrame)
- *   - 1280x720 固定分辨率 (跟 CameraController 默认对齐)
- *   - 4 Mbps / 30fps / 1s 关键帧间隔
- *   - 每次 encodeOneFrame 内部 configure → start → encode → release
- *     (简化生命周期, 3.2 接 Camera2 时改为长期持有 codec)
+ * 范围 (批次 3.2.0.1 EGL 路径):
+ *   - start(w, h, naluCb) → 配置 codec, 返回 InputSurface (EglRenderer 用)
+ *   - encodeFrame(yuv, ptsUs) → 喂一帧 (实际把 eglSwapBuffers 时机丢给编码器)
+ *   - stop() → 释放 codec + Surface
+ *   - NaluCallback 接口: 编码器持续吐 NALU 给上层
+ *
+ * 范围 (3.1 ByteBuffer 路径, @Deprecated, 保留调试用):
+ *   - encodeOneFrame(yuv, w, h) → 单帧编码返回 ByteArray
  *
  * 不做 (后续批次):
- *   - 3.2: 长期持有 codec, 接收 Camera2 的连续帧
- *   - 3.2: 升级到 createInputSurface() 零拷贝
+ *   - 3.2.0.2: 接 Camera2 ImageReader 真实连续帧
+ *   - 3.2.0.3: 长时连拍 + 状态机
  *   - 3.3: 套 TCP socket 发到电脑
  *   - 3.4: 套 PCP 24 字节头
  */
 class H264Encoder {
+
+    /**
+     * NALU 回调接口 (3.2 引入)
+     * MediaCodec 编码器每吐一帧 NALU, 都会调用 onNalu
+     */
+    interface NaluCallback {
+        /**
+         * @param nalu  H.264 裸 NALU 字节 (含 00 00 00 01 start code)
+         * @param type  NALU type (1=non-IDR slice, 5=IDR slice, 7=SPS, 8=PPS)
+         */
+        fun onNalu(nalu: ByteArray, type: Int)
+    }
 
     companion object {
         private const val TAG = "H264Encoder"
@@ -42,6 +56,145 @@ class H264Encoder {
 
         // 拉输出循环的最大重试次数 (10ms × 50 = 500ms 兜底, 避免无限循环)
         private const val MAX_DEQUEUE_RETRIES = 50
+
+        // 30 FPS 单帧时长 (微秒) = 1_000_000 / 30 = 33_333
+        private const val FRAME_DURATION_US = 33_333L
+
+        // 30 FPS 编码器输出 NALU 的 pts 起始值
+        private const val PTS_BASE_US = 0L
+    }
+
+    // ====== 3.2 长生命周期状态 ======
+    private var codec: MediaCodec? = null
+    private var inputSurface: android.view.Surface? = null
+    private var callback: NaluCallback? = null
+    private var running: Boolean = false
+    private var frameIndex: Long = 0
+
+    // ====== 3.2 EGL 路径 API (start / encodeFrame / stop) ======
+
+    /**
+     * 启动编码器 (持有 codec + 拿到 InputSurface + 注册 NALU 回调)
+     * 调用 EglRenderer(inputSurface).drawYuv() 即可零拷贝喂帧
+     *
+     * @param width  帧宽
+     * @param height 帧高
+     * @param naluCb NALU 回调 (编码器每吐一帧 NALU 都会调)
+     * @return MediaCodec 的 InputSurface (EglRenderer 绑这个)
+     */
+    fun start(width: Int = WIDTH, height: Int = HEIGHT, naluCb: NaluCallback): android.view.Surface {
+        if (running) {
+            throw IllegalStateException("H264Encoder 已 start, 需先 stop()")
+        }
+        callback = naluCb
+        frameIndex = 0
+
+        val mime = MediaFormat.MIMETYPE_VIDEO_AVC
+        val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
+            setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
+        }
+        codec = MediaCodec.createEncoderByType(mime)
+        codec!!.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        // ★ 关键: createInputSurface() 拿到 Surface, EGL 在这上面画 = 零拷贝给编码器
+        //     EglRenderer 内部 EGL14.eglCreateWindowSurface(display, config, inputSurface, ...)
+        inputSurface = codec!!.createInputSurface()
+        codec!!.start()
+        running = true
+        Log.d(TAG, "MediaCodec start (Surface 模式): ${width}x${height} @ ${BIT_RATE / 1_000_000}Mbps")
+
+        // 起后台线程拉 NALU 输出 (持续 dequeueOutputBuffer)
+        startOutputLoop()
+
+        return inputSurface!!
+    }
+
+    /**
+     * 喂一帧 (EGL 路径: 实际数据由 EglRenderer 在 eglSwapBuffers 时给编码器)
+     * 这里只更新 pts 计数 (供上层做帧率统计 / 调试日志)
+     *
+     * @param yuv420planar 任意字节数组 (内容不会读, 仅为了 API 对称性, 3.2.0.2 接 Camera2 时可传 YUV_420_888 数据)
+     * @param ptsUs 帧时间戳 (微秒), 留空则按 30fps 自动算
+     */
+    fun encodeFrame(yuv420planar: ByteArray, ptsUs: Long = frameIndex * FRAME_DURATION_US) {
+        if (!running) {
+            throw IllegalStateException("H264Encoder 未 start, 无法 encodeFrame")
+        }
+        // EGL 路径: 数据已通过 eglSwapBuffers 进了 codec.inputSurface
+        // 这里只更新内部 pts 计数
+        frameIndex++
+    }
+
+    /**
+     * 停止编码器 (释放 codec + Surface + 后台线程)
+     * 调用后 codec / inputSurface 句柄全部清空, 可重新 start()
+     */
+    fun stop() {
+        if (!running) return
+        running = false
+        try {
+            codec?.signalEndOfInputStream()  // 通知编码器: EOS, 把最后缓存的帧全吐出来
+        } catch (e: Exception) {
+            Log.w(TAG, "signalEndOfInputStream 异常: ${e.message}")
+        }
+        // 等输出循环自然退出 (signal EOS 后 dequeueOutputBuffer 会拿到 BUFFER_END_OF_STREAM)
+        // 实际: 我们的 startOutputLoop 看 running flag, signal EOS 后再过 1~2 帧就停
+        Thread.sleep(300)  // 给编码器 300ms 吐完 NALU
+        try {
+            codec?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "codec.stop 异常: ${e.message}")
+        }
+        try {
+            codec?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "codec.release 异常: ${e.message}")
+        }
+        try {
+            inputSurface?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "inputSurface.release 异常: ${e.message}")
+        }
+        Log.d(TAG, "MediaCodec stop + release 完成 (累计 $frameIndex 帧)")
+        codec = null
+        inputSurface = null
+        callback = null
+    }
+
+    /**
+     * 后台线程: 持续 dequeueOutputBuffer, 通过 NaluCallback 吐 NALU
+     * 用 while(running) 简单实现, 不引入 Handler/Executor
+     */
+    private fun startOutputLoop() {
+        Thread {
+            val bufferInfo = MediaCodec.BufferInfo()
+            while (running) {
+                val outIndex = codec?.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US) ?: -1
+                when {
+                    outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                        // 暂时无输出, 继续轮询
+                    }
+                    outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        Log.d(TAG, "output format changed: ${codec?.outputFormat}")
+                    }
+                    outIndex >= 0 -> {
+                        val outBuffer = codec?.getOutputBuffer(outIndex)
+                        if (outBuffer != null && bufferInfo.size > 0) {
+                            val outBytes = ByteArray(bufferInfo.size)
+                            outBuffer.position(bufferInfo.offset)
+                            outBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                            outBuffer.get(outBytes)
+                            // 解析 NALU type (第 1 字节低 5 位)
+                            val naluType = outBytes[0].toInt() and 0x1F
+                            callback?.onNalu(outBytes, naluType)
+                        }
+                        codec?.releaseOutputBuffer(outIndex, false)
+                    }
+                }
+            }
+            Log.d(TAG, "输出循环退出")
+        }.apply { name = "H264Encoder-OutputLoop" }.start()
     }
 
     /**
@@ -53,6 +206,7 @@ class H264Encoder {
      * @param height 帧高 (默认 720,  批次 3.1 写死)
      * @return 含 SPS + PPS + IDR 帧的 H.264 裸流字节数组, 失败返回 null
      */
+    @Deprecated("3.1 ByteBuffer 单帧路径, 仅调试用; 3.2 EGL 路径用 start/encodeFrame/stop")
     fun encodeOneFrame(
         yuv420planar: ByteArray,
         width: Int = WIDTH,

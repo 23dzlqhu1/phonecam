@@ -277,11 +277,59 @@ Phase Y 实施 SettingsActivity 时，9 个设置项中有 3 项（码率 / 编�
 
 ---
 
-## 待决策（TODO）
+## ADR-009：MediaCodec 喂数据走 `createInputSurface()` 零拷贝（vs ByteBuffer + NV12 软件适配）
 
-- [ ] H.264 码率默认值（建议 4 Mbps for 1080p60）
-- [ ] 关键帧间隔（建议 2 秒）
-- [ ] 音频采样率（建议 44.1kHz，AAC 编码）
+**日期**：2026-06-08
+**状态**：✅ 已确定（批次 3.2.0.1 实施完毕，OPPO PLC110 真机跑通）
+
+### 背景
+
+批次 3.1 走了 `MediaCodec.dequeueInputBuffer()` + `getInputImage().planes[].buffer` 的 ByteBuffer 路径：
+- 优点：实现简单，CPU 拷贝 YUV 数据给 MediaCodec
+- 缺点（OPPO 暴露）：OPPO PLC110 的 `COLOR_FormatYUV420Flexible` 底层是 **NV12 (semi-planar)**，不是 I420 (planar)
+  - U 平面 `pixelStride=2`，V 平面 `pixelStride=2`，UV 数据共享一个交织 plane
+  - 我代码 `fillPlane` 慢路径按 planar 写时，V 通道没被写入 → **画面色相偏蓝紫**（G-019）
+  - 修复办法：先检测 `pixelStride` 然后按 NV12 交叉写 U/V（30+ 行胶水代码）
+
+### 决策
+
+**批次 3.2 升级到 `createInputSurface()` 零拷贝方案**：
+- MediaCodec 创建一个 GPU 输入 Surface
+- EGL 初始化 + OpenGL ES 2.0 + YUV shader
+- CPU 只"喂" YUV byte array（不管 pixelStride/格式）
+- shader 内部做 YUV→RGB 转换 + 写帧到 InputSurface
+- `eglSwapBuffers` 后 MediaCodec 自动编码 → NALU 回调
+
+### 理由
+
+1. **彻底解决 G-019（NV12 适配）**：shader 不管 NV12/I420/YV12 差异，CPU 端永远喂 planar 即可
+2. **零拷贝性能更好**：YUV 数据在 GPU 上流转，CPU 只负责喂数据 + 收 NALU
+3. **为批次 3.2.0.2（接 Camera2 ImageReader）铺路**：Camera2 的 Image 也得转 YUV 喂编码器，shader 路径代码更一致
+4. **教育价值**：用户和 AI 都学到"GPU 媒体处理"这套现代 Android 范式
+
+### 已知代价
+
+1. **代码复杂度上升**：新增 EglRenderer.kt（~220 行），涉及 EGL/GLES 状态机、shader 编译、纹理上传
+2. **单帧编码延迟略高**：EGL 初始化是耗时的（首次 ~100ms），单帧测试下"1 帧 H.264"耗时比 ByteBuffer 路径长
+3. **调试更难**：EGL 错误往往是 EGL_BAD_* 枚举值，得查 `eglGetError()` 日志
+
+### 验证结果（OPPO PLC110 真机）
+
+- ✅ EGL 初始化：Display/Config/Context/Surface 全通
+- ✅ OpenGL shader 编译 + 链接：program=3
+- ✅ Y/U/V 三个 LUMINANCE 纹理：Y=1, U=2, V=3
+- ✅ eglSwapBuffers → MediaCodec 编码 → NALU 回调：1 帧 → 1138 字节 H.264
+- ✅ OpenCV 解码 3 判据：单色 R-G-B 色差 < 4 + 周期 256 Y 渐变差值 0 + 关键点 col%256 max diff 3
+- ✅ G-019 自动消失：色差 < 4 证明 NV12 shader 适配正确
+
+### 后续行动
+
+- [x] 批次 3.2.0.1 实施完毕
+- [ ] 批次 3.2.0.2：EglRenderer 接收 Camera2 ImageReader 真实帧（替换 TestYuvFrames）
+- [ ] 批次 3.2.0.3：长时连拍（start→encodeFrame 循环→stop 手动）
+- [ ] 批次 3.3：NALU → TCP 发送到 desktop
+
+---
 - [ ] 电脑端是否做 GUI（先 CLI + 简单 tkinter）
 - [ ] 错误重连策略（断连后 1s / 2s / 5s 重试？）
 

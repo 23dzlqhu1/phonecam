@@ -139,10 +139,10 @@ class MainActivity : AppCompatActivity() {
             toggleLens()
         }
 
-        // 推流按钮 → 批次 3.1 临时复用为"拍 1 帧 H.264 编码"调试入口
-        //  3.4 端到端闭环后会改回真正的"开始/停止推流"状态机
+        // 推流按钮 → 批次 3.2.0.1 临时复用为"拍 1 帧 EGL 零拷贝 H.264 编码"调试入口
+        //  3.2.0.3 端到端闭环后会改回真正的"开始/停止推流"状态机
         btnPush.setOnClickListener {
-            onEncodeOneFrameTest()
+            onEncodeOneFrameEglTest()
         }
 
         // 重试按钮 → 重新申请权限
@@ -308,59 +308,79 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 批次 3.1 调试入口: 拍 1 帧 H.264 编码 → 存到 App 私有目录
+     * 批次 3.2.0.1 调试入口: EGL 零拷贝渲染验证 → 1 帧 H.264
      *
      * 流程 (零基础版):
-     *   1) 不接 Camera2, 用 TestYuvFrames 生成一张"水平渐变灰度"测试图
-     *   2) 调 H264Encoder 把它压成 H.264 NALU 字节流
-     *   3) 写到 /sdcard/Android/data/com.phonecam.nativeapp/files/test.h264
-     *   4) Toast 告知路径, 用户用 adb pull + ffplay 验证
+     *   1) TestYuvFrames 生成水平渐变 YUV (跟 3.1 一样的源数据)
+     *   2) H264Encoder.start() 拿到 InputSurface
+     *   3) EglRenderer 把 YUV 通过 GPU shader 画到 InputSurface
+     *   4) EGL swap → MediaCodec 自动编码 → NaluCallback 拿到 NALU
+     *   5) 写到 /sdcard/Android/data/com.phonecam.nativeapp/files/test_3_2_egl.h264
      *
-     * 故意不接 Camera2 的原因 (批次 3.1 范围):
-     *   - 一次只做一件事, 减少变量
-     *   - 验证"MediaCodec 编码链路通"这件事, 而不是"YUV 帧来源对不对"
-     *   - 3.2 会换成 ImageReader 接 Camera2 的真实帧
+     * 验证目标:
+     *   - EGL 初始化通 (Display + Config + Context + WindowSurface + MakeCurrent)
+     *   - YUV shader 通 (3 个 LUMINANCE 纹理 + BT.601 YUV→RGB)
+     *   - 编码链路通 (跟 3.1 一样的 SPS + PPS + IDR NALU 字节)
+     *   - G-019 自动消失: shader 处理 NV12 适配, 不需要 CPU 拷贝 YUV
      */
-    private fun onEncodeOneFrameTest() {
-        try {
-            InAppLogStore.i(TAG, "[3.1] 拍 1 帧开始")
+    private fun onEncodeOneFrameEglTest() {
+        Thread {
+            try {
+                InAppLogStore.i(TAG, "[3.2.0.1] EGL 渲染验证开始")
+                val w = 1280
+                val h = 720
+                val yuv = TestYuvFrames.buildGradientYuv420(w, h)
+                InAppLogStore.i(TAG, "[3.2.0.1] 测试 YUV 已生成: ${yuv.size} 字节 (${w}x${h})")
 
-            // 1) 生成 1280x720 YUV420 planar 测试图
-            val w = 1280
-            val h = 720
-            val yuv = TestYuvFrames.buildGradientYuv420(w, h)
-            InAppLogStore.i(TAG, "[3.1] 测试 YUV 已生成: ${yuv.size} 字节 (${w}x${h})")
+                // 1) 准备 NALU 收集器
+                val baos = java.io.ByteArrayOutputStream()
+                var naluCount = 0
 
-            // 2) 编码 (主线程里跑, 因为只编 1 帧, < 100ms, 不卡 UI)
-            val h264 = H264Encoder().encodeOneFrame(yuv, w, h)
-            if (h264 == null) {
-                Toast.makeText(this, "编码失败 (看 logcat)", Toast.LENGTH_LONG).show()
-                InAppLogStore.e(TAG, "[3.1] 编码失败, h264=null")
-                return
+                // 2) start encoder (拿到 inputSurface)
+                val encoder = H264Encoder()
+                val inputSurface = encoder.start(w, h, object : H264Encoder.NaluCallback {
+                    override fun onNalu(nalu: ByteArray, type: Int) {
+                        baos.write(nalu)
+                        naluCount++
+                        InAppLogStore.i(TAG, "[3.2.0.1] NALU #$naluCount type=$type size=${nalu.size}")
+                    }
+                })
+
+                // 3) 用 EglRenderer 画一帧 YUV 到 inputSurface
+                val renderer = EglRenderer(inputSurface)
+                renderer.drawYuv(yuv, w, h)
+                InAppLogStore.i(TAG, "[3.2.0.1] EGL 已画 1 帧到 Surface")
+
+                // 4) 通知编码器喂一帧 (EGL 路径: encodeFrame 只更新 pts 计数, 实际数据已 swap)
+                encoder.encodeFrame(yuv)
+                Thread.sleep(500)  // 等编码器把 1 帧压完吐出来
+
+                // 5) 停 encoder + 释放 EGL
+                encoder.stop()
+                renderer.release()
+
+                // 6) 保存到 App 私有目录
+                val outDir = getExternalFilesDir(null)
+                if (outDir == null) {
+                    InAppLogStore.e(TAG, "[3.2.0.1] getExternalFilesDir(null) 返回 null")
+                    return@Thread
+                }
+                if (!outDir.exists()) outDir.mkdirs()
+                val outFile = java.io.File(outDir, "test_3_2_egl.h264")
+                java.io.FileOutputStream(outFile).use { fos ->
+                    fos.write(baos.toByteArray())
+                }
+                InAppLogStore.i(TAG, "[3.2.0.1] 已写入: ${outFile.absolutePath} (${baos.size()} 字节, $naluCount 个 NALU)")
+
+                runOnUiThread {
+                    Toast.makeText(this, "EGL OK: ${baos.size()}B / $naluCount NALU\n${outFile.absolutePath}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "[3.2.0.1] EGL 渲染异常", e)
+                runOnUiThread {
+                    Toast.makeText(this, "异常: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
-
-            // 3) 写到 App 私有目录: /sdcard/Android/data/com.phonecam.nativeapp/files/
-            val outDir = getExternalFilesDir(null)
-            if (outDir == null) {
-                Toast.makeText(this, "无法访问 App 私有目录", Toast.LENGTH_LONG).show()
-                InAppLogStore.e(TAG, "[3.1] getExternalFilesDir(null) 返回 null")
-                return
-            }
-            if (!outDir.exists()) outDir.mkdirs()
-            val outFile = java.io.File(outDir, "test.h264")
-            java.io.FileOutputStream(outFile).use { fos ->
-                fos.write(h264)
-            }
-            InAppLogStore.i(TAG, "[3.1] 已写入: ${outFile.absolutePath} (${h264.size} 字节)")
-
-            // 4) Toast 提示 + 同时给 adb pull 命令
-            val hint = "test.h264 ${h264.size}B\n${outFile.absolutePath}\n\nadb pull 用"
-            Toast.makeText(this, hint, Toast.LENGTH_LONG).show()
-            Log.i(TAG, "[3.1] 保存成功: ${outFile.absolutePath}")
-            Log.i(TAG, "[3.1] 拉取命令: adb pull ${outFile.absolutePath}")
-        } catch (e: Exception) {
-            Log.e(TAG, "[3.1] 拍 1 帧异常", e)
-            Toast.makeText(this, "异常: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        }.apply { name = "EGL-Test-Thread" }.start()
     }
 }

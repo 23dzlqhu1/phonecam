@@ -52,7 +52,7 @@
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ 2026-06-08**（phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收）。下一批次：批次 3 CameraController.kt MediaCodec 硬编 H.264。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ 2026-06-08**（phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 + EGL 零拷贝 H.264 验证）。下一批次：3.2.0.2 接 Camera2 ImageReader 真实帧。
 
 ---
 
@@ -184,4 +184,4 @@
 
 ---
 
-**最后更新**：2026-06-08（Phase Y 收尾：4 屏完整 + 跨屏状态同步 + 真机验收 + 5 截图推送 commit 3c36458）
+**最后更新**：2026-06-08（批次 3.1 收尾：H264Encoder 单帧 H.264 验证 + OpenCV 解码 Y 渐变吻合 + G-019 记录 NV12 像素填充坑）
