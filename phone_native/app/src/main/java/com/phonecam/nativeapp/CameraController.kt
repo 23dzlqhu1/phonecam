@@ -71,22 +71,11 @@ class CameraController(
     // 当前选中的预览尺寸（用于做 TextureView 的 letterbox transform）
     @Volatile private var currentPreviewSize: Size? = null
 
-    // 当前 TextureView 尺寸（surface 变化时更新，用于切换 fill 模式时重算 transform）
-    @Volatile private var currentViewWidth: Int = 0
-    @Volatile private var currentViewHeight: Int = 0
-
-    // 预览渲染模式：true = FILL (center crop, 填满屏幕, 多的那边裁掉)；
-    //              false = FIT (letterbox, 留黑边, 看到完整画面)
-    // 默认 FILL, 跟手机原生相机 viewfinder 行为一致 (无黑边)
-    @Volatile private var fillMode: Boolean = true
-
     // TextureView 监听器：等 surface ready 后才调 open()
     private val surfaceTextureListener = object : TextureView.SurfaceTextureListener {
         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
             Log.d(TAG, "onSurfaceTextureAvailable: ${width}x$height")
             surfaceAvailable.set(true)
-            currentViewWidth = width
-            currentViewHeight = height
             // 如果已知预览尺寸，立刻算一次 letterbox transform
             currentPreviewSize?.let { applyTransform(it.width, it.height, width, height) }
             // 如果已经有权限了，surface 一就绪就打开相机
@@ -95,8 +84,6 @@ class CameraController(
 
         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
             Log.d(TAG, "onSurfaceTextureSizeChanged: ${width}x$height")
-            currentViewWidth = width
-            currentViewHeight = height
             // 视图尺寸变了（横竖屏切换等），重算 letterbox transform
             currentPreviewSize?.let { applyTransform(it.width, it.height, width, height) }
         }
@@ -338,52 +325,33 @@ class CameraController(
     }
 
     /**
-     * 把 TextureView 渲染成"FILL (center crop)"或"FIT (letterbox)"
+     * 把 TextureView 渲染成"顶对齐 FIT (letterbox)"
      *
-     * FILL: scale = max(viewW/previewW, viewH/previewH) → 画面铺满 view, 多的那边裁掉, 无黑边
-     * FIT : scale = min(viewW/previewW, viewH/previewH) → 画面保持比例, 短边方向留黑边
+     * 行为：
+     *  - scale = min(viewW/previewW, viewH/previewH)  → 画面保持原始宽高比, 不会变形
+     *  - dx = (viewW - previewW * scale) / 2  → 水平居中 (通常为 0, 因为 16:9 预览正好填满 9:19.5 屏宽)
+     *  - dy = 0                                → 画面顶对齐 (相机画面在屏幕上方, 下方留空)
      *
-     * 切换 fillMode 由 MainActivity 调 setFillMode() 触发, 这里每次都重新读 fillMode 决定走哪个分支。
+     * 为什么要顶对齐而不是居中？
+     *  - phone_native 是 "phone cam" (手机当摄像头用), 用户看手机屏幕找画面 / 框定场景
+     *  - 画面贴在屏幕顶部符合 "viewfinder" 习惯 (相机应用都用顶对齐)
+     *  - 屏幕下方留空可以后续放控制按钮 / 信息条
      *
      * 注意：setTransform 必须在 UI 线程调用，所以这里用 textureView.post 跨线程调度。
      * 无论是被 onSurfaceTextureAvailable（UI 线程）还是 openInternal（相机线程）调用，都安全。
      */
     private fun applyTransform(previewW: Int, previewH: Int, viewW: Int, viewH: Int) {
         if (previewW <= 0 || previewH <= 0 || viewW <= 0 || viewH <= 0) return
-        val scaleX = viewW.toFloat() / previewW.toFloat()
-        val scaleY = viewH.toFloat() / previewH.toFloat()
-        val scale = if (fillMode) maxOf(scaleX, scaleY) else minOf(scaleX, scaleY)
+        val scale = minOf(viewW.toFloat() / previewW.toFloat(), viewH.toFloat() / previewH.toFloat())
         val dx = (viewW - previewW * scale) / 2f
-        val dy = (viewH - previewH * scale) / 2f
+        val dy = 0f  // 顶对齐: 画面贴在屏幕顶部
         val matrix = Matrix().apply {
             setScale(scale, scale)
             postTranslate(dx, dy)
         }
-        val mode = if (fillMode) "FILL" else "FIT"
-        Log.d(TAG, "applyTransform ($mode): preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
+        Log.d(TAG, "applyTransform (FIT, top): preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
         textureView.post { textureView.setTransform(matrix) }
     }
-
-    /**
-     * 由 MainActivity 调用, 切换预览渲染模式。
-     * fill = true  → FILL (center crop, 铺满屏幕, 多的裁掉)
-     * fill = false → FIT  (letterbox, 留黑边, 看到完整画面)
-     *
-     * 切换时只需重算 transform, 相机流不需要重启 (textureView.setTransform 只改绘制矩阵, 不动 SurfaceTexture 缓冲)。
-     */
-    fun setFillMode(fill: Boolean) {
-        Log.d(TAG, "setFillMode: $fill")
-        fillMode = fill
-        val ps = currentPreviewSize
-        if (ps != null && currentViewWidth > 0 && currentViewHeight > 0) {
-            applyTransform(ps.width, ps.height, currentViewWidth, currentViewHeight)
-        }
-    }
-
-    /**
-     * 给 MainActivity 用来显示当前模式 (按钮文字 "FILL" / "FIT")
-     */
-    fun isFillMode(): Boolean = fillMode
 
     /**
      * 选后置摄像头 ID

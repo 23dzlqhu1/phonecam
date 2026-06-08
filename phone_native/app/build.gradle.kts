@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 4                           // 批次 3 hotfix v2: 加填满/全貌切换按钮
-        versionName = "0.2.2-mvp2-batch3-toggle"
+        versionCode = 5                           // 批次 3 hotfix v3: 删 FILL/FIT 切换, 固定顶对齐 FIT
+        versionName = "0.2.3-mvp2-batch3-topfit"
     }
 
     buildTypes {
