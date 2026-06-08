@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AndroidManifest.xml — phone_native/ 最小 App 清单
-  MVP-2 批次 2 范围：只声明 MainActivity，不加 CAMERA / INTERNET / RECORD_AUDIO 权限
+  AndroidManifest.xml — phone_native/ App 清单
+  MVP-2 批次 3 范围：加 CAMERA 权限 + MainActivity 入口
   不实现 Service / Receiver / ContentProvider
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 批次 3：申请相机权限以打开后置摄像头预览 -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <application
         android:label="@string/app_name"

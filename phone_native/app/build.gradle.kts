@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 1
-        versionName = "0.1.0-mvp2-batch2"
+        versionCode = 2                           // 批次 3 bump 1→2
+        versionName = "0.2.0-mvp2-batch3"
     }
 
     buildTypes {
@@ -38,8 +38,9 @@ android {
 }
 
 dependencies {
-    // MVP-2 批次 2 只需要 AndroidX core + AppCompat（让 themes.xml 不报错）
-    // 不加 Material3 依赖（避免版本兼容问题）
+    // MVP-2 批次 3：Camera2 来自 Android Framework 自带（android.hardware.camera2.*），
+    // 不引入 androidx.camera；权限申请用原生 checkSelfPermission / requestPermissions
+    // 不引入 androidx.core（用 AppCompatActivity 自带的 Activity 基类即可）
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 }
