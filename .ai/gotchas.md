@@ -44,6 +44,12 @@
 | [G-010](#g-010mvp-2-手机端从-flutter-切到-kotlin-原生的路线重置adr-006) | **MVP-2 手机端从 Flutter 切到 Kotlin 原生**（路线重置 ADR-006，旧 `phone/` 冻结 + 新建 `phone_native/`） | 2026-06-08 |
 | [G-011](#g-011gradle-813-wrapper-缓存不完整-gradlewrapperdistsgradle-813-bin-只有-lck--part-没有解压目录) | **Gradle 8.13 wrapper 缓存不完整**（`~/.gradle/wrapper/dists/` 只有 .lck + .part） | 2026-06-08 |
 | [G-012](#g-012agp-installdebug-在-oppo-真机报-installexception--99绕路-adb-install--r) | **AGP `installDebug` 在 OPPO 真机报 `InstallException: -99`**（绕路 `adb install -r`） | 2026-06-08 |
+| [G-013](#g-013surfaceview-vs-textureview-选型camera2-预览选-surfaceviewyuv-直送-surface-零拷贝) | SurfaceView vs TextureView 选型（Camera2 预览选 SurfaceView：YUV 直送 Surface 零拷贝） | 2026-06-08 |
+| [G-014](#g-014constraintlayout-中-surfaceview-必须显式-clickablefalse--focusablefalse否则会拦截触摸事件) | ConstraintLayout 中 SurfaceView 必须显式 `clickable=false` + `focusable=false`（否则会拦截触摸事件） | 2026-06-08 |
+| [G-015](#g-015alertdialog-用-setsinglechoiceitems-弹选单值参数顺序-itemsitemsitems--1-是未选占位) | `AlertDialog` 用 `setSingleChoiceItems` 弹选单值（参数顺序 items=-1 是"未选"占位） | 2026-06-08 |
+| [G-016](#g-016adb-自动化点击靠-uiautomator-dump-拿坐标直接-input-tap-盲点易错) | ADB 自动化点击靠 `uiautomator dump` 拿坐标（直接 `input tap` 盲点易错）| 2026-06-08 |
+| [G-017](#g-017powershell-gbk-控制台打印-utf-8-字符崩必须用-iotextiowrapper-强制-utf-8) | PowerShell GBK 控制台打印 ⏳ UTF-8 字符崩（必须用 `io.TextIOWrapper` 强制 UTF-8） | 2026-06-08 |
+| [G-018](#g-018android-4-层垂直布局比例相机-50--状态-8--推流按钮-12--设置-30--100-屏幕高度) | Android 4 层垂直布局比例（相机 50% + 状态 8% + 推流按钮 12% + 设置 30% = 100% 屏幕高度） | 2026-06-08 |
 
 ---
 

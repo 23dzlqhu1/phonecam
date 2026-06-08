@@ -417,6 +417,93 @@ desktop/phonecam.py
 
 ---
 
+## 5.9 阶段 X：4 层布局 + 资源 + Activity 壳
+
+**目标**：把批次 2 的"最小 App"扩展到"完整的多屏 App 骨架"，为批次 3-5 提供：
+- 完整的 4 层垂直布局（相机预览 50% + 状态行 8% + 推流按钮 12% + 设置条 30%）
+- 全套资源（colors / dimens / strings）
+- 4 个 Activity 壳子（Settings / Connect / Debug / About）
+
+**状态**：✅ 完成（2026-06-08）
+
+**分批次**：
+
+| 批次 | 目标 | 关键文件 | 验收 |
+|------|------|---------|------|
+| **X-1** | 资源准备（colors / dimens / strings + 4 个 activity_*.xml 空壳）| `res/values/{colors,dimens,strings}.xml` + 4 个 `activity_*.xml` | `./gradlew.bat assembleDebug` 通过 |
+| **X-2** | MainActivity 4 层布局 + 主题（OLED 黑色背景）| `activity_main.xml` + `MainActivity.kt` + `themes.xml` | 真机启动显示"PHONECAM v0.2.5" + 推流按钮可点 |
+| **X-3** | Camera2 后置预览接入（SurfaceView + 30.76 FPS 稳定）| `CameraController.kt` + 权限申请 | logcat `BufferQueueProducer fps=30.76` |
+| **X-4** | 4 个 Activity 壳子（AndroidManifest 注册 + theme）| `SettingsActivity.kt` / `ConnectActivity.kt` / `DebugActivity.kt` / `AboutActivity.kt` | `adb shell am start -n com.phonecam.nativeapp/.SettingsActivity` 直接进入目标页 |
+
+**验收结果**（2026-06-08）：
+- ✅ 4 个 activity_*.xml 资源 + 4 个 Kotlin Activity 全部到位
+- ✅ MainActivity 真实摄像头预览（30.76 FPS 稳定）
+- ✅ 5 个 Activity 跳转 / 返回 / 参数传递正常
+- ⚠️ 设置项 UI 暂为空（X 阶段只做壳子，内容在 Y 阶段填）
+
+## 5.10 阶段 Y：4 屏完整 + 跨屏状态同步 + 真机验收
+
+**目标**：把 4 个 Activity 壳子填上实际功能，让 App 在真机上"看起来完整、能用、可验收"。
+
+**状态**：✅ 完成（2026-06-08，v0.2.5-mvp2-phaseY）
+
+**分批次**：
+
+| 批次 | 目标 | 关键文件 | 验收 |
+|------|------|---------|------|
+| **Y-1** | SettingsActivity 列表 (相机/推流/连接/调试) + AlertDialog 弹窗选值 | `SettingsActivity.kt` + `activity_settings.xml` | 9 项设置能弹窗选值 + 保存 |
+| **Y-2** | ConnectActivity QR + 输入框 + 状态显示 + IP/Port 回填 | `ConnectActivity.kt` + `activity_connect.xml` | IP/Port 自动回填上次输入 |
+| **Y-3** | AboutActivity (版本/许可证/联系) | `AboutActivity.kt` + `activity_about.xml` | 滚动显示版本 v0.2.5 + 仓库/许可 |
+| **Y-4** | DebugActivity (Logcat 日志 Tab) | `DebugActivity.kt` + `activity_debug.xml` + `InAppLogStore.kt` | 实时刷新应用内日志（500 行环形缓冲）|
+| **Y-5** | 跨屏状态同步（SettingsStore 9+2 键）| `SettingsStore.kt` | 主页推流按钮读设置项 / 5 屏数据同步 |
+| **Y-6** | 真机验证 + 截图 + 提交推送 | 5 张 `phaseY_*.png` | 推流按钮状态机 + 5 屏截图 commit |
+
+**关键决策**（详见 [.ai/decisions.md](../.ai/decisions.md)）：
+- **ADR-007**：多 Activity 方案（vs Fragment / Compose）— 5 屏内零依赖最简方案
+- **ADR-008**：推流按钮 UI 占位（"⏳ 推流功能待后续批次"）但状态机已完整，Phase Z 填逻辑
+
+**验收结果**（2026-06-08）：
+- ✅ 5 张真机截图（[phaseY_main.png](../phone_native/phaseY_main.png) + settings + connect + debug + about）
+- ✅ SettingsStore 9+2 键（9 个设置项 + 2 个连接信息 lastIp / lastPort）
+- ✅ InAppLogStore 环形缓冲 500 行日志
+- ✅ 推流按钮状态机（空闲 → 推流中 → 已暂停 → 错误）
+- ✅ 跨屏状态同步（主页推流按钮读取 settings 实时更新）
+- ✅ 摄像头权限申请 + 30.76 FPS 稳定预览
+- ⚠️ 推流按钮按下的实际链路（Camera2 → MediaCodec → TCP）待 Phase Z（批次 3-5）填入
+
+**新增踩坑**（详见 [.ai/gotchas.md](../.ai/gotchas.md)）：
+- G-013 SurfaceView vs TextureView 选型
+- G-014 ConstraintLayout SurfaceView 事件拦截
+- G-015 AlertDialog setSingleChoiceItems 参数顺序
+- G-016 ADB 自动化点击靠 uiautomator dump 拿坐标
+- G-017 PowerShell GBK 控制台打印 UTF-8 字符
+- G-018 Android 4 层垂直布局比例
+
+## 5.11 阶段 Z：批次 3-5（真推流链路：Camera2 → MediaCodec → TCP）
+
+**目标**：把 Phase Y 留空的推流按钮接入真链路，让电脑端 OpenCV 看到手机画面。
+这是 MVP-2 验收的"最后 1 公里"。
+
+**状态**：⬜ 待开始
+
+**分批次**（接 5.7 批次 3-5）：
+
+| 批次 | 目标 | 关键文件 | 验收 |
+|------|------|---------|------|
+| **Z-1（批次 3）** | Camera2 → ImageReader YUV420 帧 | `CameraController.kt` 扩展 | logcat "YUV frame received: WxH" |
+| **Z-2（批次 4）** | MediaCodec 硬编 H.264 ByteBuffer mode | `H264Encoder.kt` | logcat "Encoded N NALU, type=X, size=Y" |
+| **Z-3（批次 5）** | PcpPacketWriter 24 字节头（codec=0x02）+ TcpStreamServer 监听 9999 | `PcpPacketWriter.kt` + `TcpStreamServer.kt` + `MainActivity.kt` 接线 | `desktop/phonecam.py --connect 127.0.0.1:9999 --preview` 看到手机画面 |
+
+**不在本阶段做**：
+- ❌ 关键帧请求优化（容忍花屏）
+- ❌ 1080p60（先 640x480 跑通）
+- ❌ 音频
+- ❌ WiFi
+- ❌ 虚拟摄像头（MVP-3）
+- ❌ GUI 美化（MVP-4）
+
+---
+
 ## 6. MVP-3：虚拟摄像头闭环
 
 ### 6.1 目标

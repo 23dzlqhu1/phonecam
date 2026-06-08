@@ -3,7 +3,9 @@
 > 🗺️ **本文档作用**：PhoneCam App 的**多屏架构** + **导航流**。
 > viewfinder 单屏设计见 [`viewfinder-screen-A-layout.md`](viewfinder-screen-A-layout.md)。
 > viewfinder 视觉风格见 [`viewfinder-screen-C-theme.md`](viewfinder-screen-C-theme.md)。
-> **当前状态**：B 阶段，待用户确认。
+>
+> **当前状态**：✅ **Phase X + Y 已实施**（2026-06-08，v0.2.5-mvp2-phaseY），详见 [`.ai/decisions.md`](../../../.ai/decisions.md) ADR-007 / ADR-008。
+> OnboardingActivity 暂未实施（MVP-4 阶段再做），MainActivity 直接作启动器入口。
 
 ---
 

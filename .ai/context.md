@@ -1,4 +1,4 @@
-﻿# AI 项目上下文
+# AI 项目上下文
 
 > 🤖 **给 AI 的项目记忆**：当你（AI）打开这个项目时，先读这份文件。它告诉你：
 > - 这是什么项目
@@ -48,11 +48,11 @@
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
-| **MVP-2** 真实摄像头画面 | 🟡 批次 2 ✅ 2026-06-08（App 骨架）| phone_native/ Kotlin 最小 App 已在 OPPO PLC110 真机跑通（显示 "PhoneCam MVP-2 ready"），详见 `phone_native/ready.png`。下一批次：批次 3 CameraController.kt 打开后置摄像头 |
+| **MVP-2** 真实摄像头画面 | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ 2026-06-08（v0.2.5-mvp2-phaseY：phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 5 截图）| phone_native/ Kotlin App 已在 OPPO PLC110 真机跑通：MainActivity 真实摄像头预览（30.76 FPS） + SettingsActivity 4 分区 9 项 + ConnectActivity IP/Port + DebugActivity 实时日志 + AboutActivity 版本信息；详见 [phaseY_*.png](file:///d:/PhoneCam/phone_native/phaseY_main.png)。下一批次：批次 3 CameraController.kt MediaCodec 硬编 |
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ 2026-06-08**（phone_native/ Kotlin 最小 App 跑通）。下一批次：批次 3 CameraController.kt 打开后置摄像头。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ 2026-06-08**（phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收）。下一批次：批次 3 CameraController.kt MediaCodec 硬编 H.264。
 
 ---
 
