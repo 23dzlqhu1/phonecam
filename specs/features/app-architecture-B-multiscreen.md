@@ -392,11 +392,14 @@ And 推流按钮从 "未连接" 灰色变 "可推流" 青色边
 ## 7. 范围 (Scope)
 
 ### B 阶段做
-- ✅ 6 屏地图 (Onboarding / Main / Settings / Connect / About / Debug)
+- ✅ 4 屏地图 (Main / Settings / Connect / About / Debug)
+- ✅ 1 步启动 (MainActivity 启动时直接调 requestPermissions, 无独立引导页)
+- ✅ 双击退出 (Toast 1.5s 窗口)
+- ✅ Settings 单层列表 (弹窗选值, 不拆子页)
 - ✅ 5 个 Activity 的清单 + Manifest 模板
-- ✅ 4 套主题变体 (Onboarding / NoActionBar / WithActionBar / 基础)
+- ✅ 3 套主题变体 (基础 / NoActionBar / WithActionBar)
 - ✅ 各屏布局速览
-- ✅ 11 条导航/状态同步 AC
+- ✅ 11 条导航/状态同步 AC (含 AC-APP-009 双击退出)
 
 ### B 阶段不做
 - ❌ 各屏详细控件设计 (设置项细节 / 连接页交互细节 → 后续阶段)

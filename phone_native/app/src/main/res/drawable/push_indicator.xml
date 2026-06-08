@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  push_indicator.xml — 推流指示点 (Layer C 按钮上方)
+  内圆 6dp brand_cyan, 通过缩放 animation 模拟脉冲
+  Phase X: 静态显示, 推流中时 visibility=VISIBLE
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16">
+    <!-- 外圈: 30% 透明 brand_cyan (光晕) -->
+    <path
+        android:fillColor="#4D00E5FF"
+        android:pathData="M8,0 C12.42,0 16,3.58 16,8 C16,12.42 12.42,16 8,16 C3.58,16 0,12.42 0,8 C0,3.58 3.58,0 8,0 Z" />
+    <!-- 内圆: 实心 brand_cyan -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M8,5 C9.66,5 11,6.34 11,8 C11,9.66 9.66,11 8,11 C6.34,11 5,9.66 5,8 C5,6.34 6.34,5 8,5 Z" />
+</vector>

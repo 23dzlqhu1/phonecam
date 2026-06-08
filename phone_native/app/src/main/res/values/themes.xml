@@ -1,8 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  themes.xml — 使用 AppCompat 主题（androidx.appcompat:appcompat 依赖自带的）
-  MVP-2 批次 2 不用 Material3，避免引入额外依赖
+  themes.xml — PhoneCam 主题 (C 阶段: 强制深色 + NoActionBar)
+  来源：specs/features/viewfinder-screen-C-theme.md §6 / §8
+  3 套变体:
+    1. AppTheme              — 默认深色 + NoActionBar (MainActivity 用)
+    2. AppTheme.NoActionBar  — 同上别名 (各 Activity 显式声明)
+    3. AppTheme.WithActionBar — Settings / About / Debug 用 (带 ActionBar 留白)
 -->
-<resources>
-    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar" />
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 1. 基础深色主题: MainActivity 用 -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <!-- 窗口背景: OLED 黑 -->
+        <item name="android:windowBackground">@color/bg_oled</item>
+        <!-- 状态栏: 透明 + 浅色图标 (深色背景下白图标) -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <!-- AppCompat 主题色: 电光青 -->
+        <item name="colorPrimary">@color/brand_cyan</item>
+        <item name="colorPrimaryDark">@color/bg_oled</item>
+        <item name="colorAccent">@color/brand_cyan</item>
+        <item name="colorControlNormal">@color/text_secondary</item>
+        <item name="colorControlActivated">@color/brand_cyan</item>
+        <item name="colorControlHighlight">@color/hairline</item>
+        <!-- 文字默认色 -->
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:textColorHint">@color/text_disabled</item>
+    </style>
+
+    <!-- 2. 显式声明: NoActionBar 变体 (语义同 AppTheme, 显式>隐式) -->
+    <style name="AppTheme.NoActionBar" parent="AppTheme" />
+
+    <!-- 3. 带 ActionBar 变体: Settings / About / Debug 用 -->
+    <style name="AppTheme.WithActionBar" parent="Theme.AppCompat">
+        <item name="android:windowBackground">@color/bg_oled</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="colorPrimary">@color/bg_oled</item>
+        <item name="colorPrimaryDark">@color/bg_oled</item>
+        <item name="colorAccent">@color/brand_cyan</item>
+        <item name="colorControlNormal">@color/text_secondary</item>
+        <item name="colorControlActivated">@color/brand_cyan</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <!-- ActionBar 主题 -->
+        <item name="actionBarStyle">@style/AppTheme.ActionBar</item>
+        <item name="actionBarTheme">@style/AppTheme.ActionBar</item>
+    </style>
+
+    <!-- 4. ActionBar 样式: 透明背景 + 电光青返回箭头 -->
+    <style name="AppTheme.ActionBar" parent="Widget.AppCompat.ActionBar">
+        <item name="background">@color/bg_oled</item>
+        <item name="titleTextStyle">@style/AppTheme.ActionBar.Title</item>
+        <item name="homeAsUpIndicator">@drawable/ic_back</item>
+    </style>
+
+    <style name="AppTheme.ActionBar.Title" parent="TextAppearance.AppCompat.Title">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">18sp</item>
+    </style>
+
 </resources>

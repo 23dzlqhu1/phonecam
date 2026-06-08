@@ -1,88 +1,95 @@
 package com.phonecam.nativeapp
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import android.view.Gravity
 import android.view.TextureView
-import android.view.ViewGroup
-import android.widget.FrameLayout
+import android.view.View
+import android.widget.Button
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * MainActivity —— phone_native/ 批次 3 主界面
+ * MainActivity —— phone_native/ Phase X 主界面
  *
- * 作用：
- *  - 用 programmatic 方式创建 UI（不用 XML 布局）
- *  - 运行时申请 CAMERA 权限
- *  - 创建 TextureView 并接入 CameraController
- *  - 把生命周期 onResume / onPause 转给 Controller
+ * 4 层垂直布局 (activity_main.xml):
+ *   Layer A: 相机画面 (TextureView + 错误占位)
+ *   Layer B: 状态 + 设置行 (状态点 / 调试 / 设置 / 切换按钮)
+ *   Layer C: 推流按钮 (60% 宽, pill 圆角)
+ *   Layer D: 底部状态文字 (等宽字体)
  *
- * 范围内：
- *  - 仅显示后置摄像头预览 + 一行状态文字
- *  - 不做 H.264、不做 TCP、不出帧
+ * 范围 (Phase X):
+ *   - 4 层布局落地 (用 XML, 不再用 programmatic)
+ *   - 4 个 Activity 导航入口 (Layer B 设置 / 切换按钮)
+ *   - 运行时 CAMERA 权限申请
+ *   - CameraController 接入 (批次 3 逻辑保留)
+ *   - 双击退出 (Toast 1.5s 窗口)
+ *
+ * 不做 (Phase Y):
+ *   - 推流按钮状态机 (本阶段只显示 Toast)
+ *   - 相机前后切换逻辑 (按钮占位)
+ *   - 错误占位显示逻辑 (XML 中默认 hidden, 等状态机接入)
+ *   - 跨屏状态同步
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_CAMERA = 1001
+        private const val EXIT_TOAST_WINDOW_MS = 1500L
     }
 
+    // --- 视图引用 (从 activity_main.xml 查找) ---
     private lateinit var textureView: TextureView
-    private lateinit var statusView: TextView
+    private lateinit var statusDot: View
+    private lateinit var statusText: TextView
+    private lateinit var debugText: TextView
+    private lateinit var btnSettings: ImageButton
+    private lateinit var btnToggle: ImageButton
+    private lateinit var btnPush: Button
+    private lateinit var footerText: TextView
+    private lateinit var errorPlaceholder: LinearLayout
+    private lateinit var errorTitle: TextView
+    private lateinit var errorHint: TextView
+    private lateinit var btnRetry: Button
+
+    // --- 业务引用 ---
     private var cameraController: CameraController? = null
+
+    // --- 双击退出 ---
+    private var lastBackPressedMs: Long = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        // 根布局：黑色背景，让预览更容易看到
-        val rootLayout = FrameLayout(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.BLACK)
-        }
+        // 1. 绑定视图 (从新 XML 布局)
+        bindViews()
 
-        // 子 1：TextureView（占满全屏，用于显示后置摄像头预览）
-        textureView = TextureView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
-        rootLayout.addView(textureView)
+        // 2. 设置导航监听 (Layer B 设置 / 切换按钮)
+        setupNavigation()
 
-        // 子 2：底部状态栏（半透明黑底，白字）
-        statusView = TextView(this).apply {
-            text = "PhoneCam MVP-2 batch3\n等待相机权限..."
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(160, 0, 0, 0))
-            textSize = 14f
-            gravity = Gravity.CENTER
-            val params = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            params.gravity = Gravity.BOTTOM
-            layoutParams = params
-            val pad = (12 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-        rootLayout.addView(statusView)
-
-        setContentView(rootLayout)
-
-        // 实例化 CameraController（仅持有引用 + 挂监听器，不开相机）
+        // 3. 实例化 CameraController (批次 3 逻辑, 仍接 TextureView)
         cameraController = CameraController(this, textureView)
 
-        // 1. 先看有没有相机权限
-        // 使用 Android 原生 API：checkSelfPermission / requestPermissions（不引入 androidx.core）
+        // 4. 设置 Layer D 底部状态
+        updateFooter()
+
+        // 5. 启动 1Hz 定时器更新 Layer D 时间
+        startFooterTick()
+
+        // 6. 申请 CAMERA 权限
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "CAMERA permission already granted")
             onCameraPermissionGranted()
@@ -92,23 +99,113 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 从 activity_main.xml 绑定所有视图引用
+     */
+    private fun bindViews() {
+        textureView = findViewById(R.id.textureView)
+        statusDot = findViewById(R.id.statusDot)
+        statusText = findViewById(R.id.statusText)
+        debugText = findViewById(R.id.debugText)
+        btnSettings = findViewById(R.id.btnSettings)
+        btnToggle = findViewById(R.id.btnToggle)
+        btnPush = findViewById(R.id.btnPush)
+        footerText = findViewById(R.id.footerText)
+        errorPlaceholder = findViewById(R.id.errorPlaceholder)
+        errorTitle = findViewById(R.id.errorTitle)
+        errorHint = findViewById(R.id.errorHint)
+        btnRetry = findViewById(R.id.btnRetry)
+    }
+
+    /**
+     * 设置导航监听: Layer B 右上角 2 个按钮 + Layer C 推流按钮 + 重试按钮
+     */
+    private fun setupNavigation() {
+        // 设置按钮 → SettingsActivity
+        btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        // 切换按钮 → 暂未实现, Toast 提示
+        btnToggle.setOnClickListener {
+            Toast.makeText(this, "切换摄像头 — Phase Y 实现", Toast.LENGTH_SHORT).show()
+        }
+
+        // 推流按钮 → 暂未实现, Toast 提示
+        btnPush.setOnClickListener {
+            Toast.makeText(this, "推流 — Phase Y 实现", Toast.LENGTH_SHORT).show()
+        }
+
+        // 重试按钮 → 重新申请权限
+        btnRetry.setOnClickListener {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
+        }
+    }
+
+    /**
+     * 更新 Layer D 底部状态: PHONECAM v0.2.4 — CAM0 — 00:00:00
+     */
+    private fun updateFooter() {
+        val camId = cameraController?.getCameraId() ?: getString(R.string.layer_d_cam_unknown)
+        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        footerText.text = getString(R.string.layer_d_format, "v0.2.4-x", camId, time)
+    }
+
+    /**
+     * 启动 1Hz 定时器: 每秒更新 Layer D 时间戳
+     */
+    private val footerTickRunnable = object : Runnable {
+        override fun run() {
+            updateFooter()
+            mainHandler.postDelayed(this, 1000L)
+        }
+    }
+
+    private fun startFooterTick() {
+        mainHandler.post(footerTickRunnable)
+    }
+
+    private fun stopFooterTick() {
+        mainHandler.removeCallbacks(footerTickRunnable)
+    }
+
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "onResume")
-        // 注意：如果用户刚从权限弹窗回来，cameraController 可能还没开线程
-        // 但如果权限已授权（无论是 onCreate 时还是 onRequestPermissionsResult 后），
-        // 这里在 onResume 里再保险地调一次 open() 是幂等的（Controller 内部有去重）
         cameraController?.open()
+        startFooterTick()
     }
 
     override fun onPause() {
         super.onPause()
         Log.d(TAG, "onPause")
         cameraController?.close()
+        stopFooterTick()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopFooterTick()
     }
 
     /**
-     * 权限回调（API 23+，原生 onRequestPermissionsResult）
+     * 双击退出: 1.5s 窗口内再次按返回才真正退出
+     */
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        val now = System.currentTimeMillis()
+        if (now - lastBackPressedMs < EXIT_TOAST_WINDOW_MS) {
+            // 第二次按: 真正退出
+            super.onBackPressed()
+            return
+        }
+        // 第一次按: 显示 Toast
+        lastBackPressedMs = now
+        Toast.makeText(this, R.string.toast_press_again_to_exit, Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 权限回调 (API 23+, 原生 onRequestPermissionsResult)
      */
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -122,18 +219,39 @@ class MainActivity : AppCompatActivity() {
                 onCameraPermissionGranted()
             } else {
                 Log.w(TAG, "user denied CAMERA permission")
-                statusView.text = "PhoneCam MVP-2 batch3\n相机权限被拒绝，无法预览\n请到 设置 → 应用 → PhoneCam → 权限 开启相机"
                 cameraController?.onPermissionDenied()
+                showError(
+                    title = getString(R.string.err_no_permission_title),
+                    hint = getString(R.string.err_no_permission_hint)
+                )
             }
         }
     }
 
     /**
-     * 权限通过：通知 Controller + 更新状态栏
+     * 权限通过: 通知 Controller + 更新 Layer B 状态
      */
     private fun onCameraPermissionGranted() {
         cameraController?.onPermissionGranted()
+        hideError()
         val camId = cameraController?.getCameraId() ?: "?"
-        statusView.text = "PhoneCam MVP-2 batch3\n后置相机: $camId\n预览中..."
+        statusText.text = getString(R.string.layer_b_status_idle)
+        debugText.text = "CAM$camId — 等待推流"
+    }
+
+    /**
+     * 显示错误占位 (Layer A 中央)
+     */
+    private fun showError(title: String, hint: String) {
+        errorTitle.text = title
+        errorHint.text = hint
+        errorPlaceholder.visibility = View.VISIBLE
+    }
+
+    /**
+     * 隐藏错误占位
+     */
+    private fun hideError() {
+        errorPlaceholder.visibility = View.GONE
     }
 }

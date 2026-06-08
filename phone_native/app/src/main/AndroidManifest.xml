@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   AndroidManifest.xml — phone_native/ App 清单
-  MVP-2 批次 3 范围：加 CAMERA 权限 + MainActivity 入口
-  不实现 Service / Receiver / ContentProvider
+  MVP-2 批次 3 + Phase X 范围：
+    - CAMERA 权限
+    - MainActivity (LAUNCHER, NoActionBar 主题)
+    - Settings / Connect / About / Debug 4 个 Activity 壳 (WithActionBar 主题)
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -14,14 +16,44 @@
         android:theme="@style/AppTheme"
         android:allowBackup="false">
 
+        <!-- MainActivity: App 入口 -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/AppTheme.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- SettingsActivity: 设置页 (Phase X 占位) -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.WithActionBar"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- ConnectActivity: 连接 PC 页 (Phase X 占位) -->
+        <activity
+            android:name=".ConnectActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.WithActionBar"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- AboutActivity: 关于页 (Phase X 占位) -->
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.WithActionBar"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- DebugActivity: 调试日志页 (Phase X 占位) -->
+        <activity
+            android:name=".DebugActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.WithActionBar"
+            android:parentActivityName=".MainActivity" />
 
     </application>
 

@@ -1,5 +1,89 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- strings.xml — 字符串资源 -->
+<!--
+  strings.xml — PhoneCam 字符串资源
+  范围: viewfinder 4 层 (Layer A-D) + 4 个 Activity 文案 + 错误占位
+-->
 <resources>
-    <string name="app_name">PhoneCam MVP-2</string>
+    <!-- ============== App ============== -->
+    <string name="app_name">PhoneCam</string>
+
+    <!-- ============== Layer A: 相机画面 ============== -->
+    <string name="layer_a_init">等待相机权限…</string>
+    <string name="layer_a_opened">后置相机已打开</string>
+    <string name="layer_a_preview_started">预览中…</string>
+
+    <!-- 异常占位 -->
+    <string name="err_no_permission_title">未授权相机权限</string>
+    <string name="err_no_permission_hint">请到 系统设置 → 应用 → PhoneCam → 权限 开启相机</string>
+    <string name="err_camera_busy_title">相机被占用</string>
+    <string name="err_camera_busy_hint">请关闭其他使用相机的 App 后重试</string>
+    <string name="err_open_failed_title">打开相机失败</string>
+    <string name="err_open_failed_hint">未知错误，请重启 App</string>
+    <string name="action_retry">重新申请</string>
+
+    <!-- ============== Layer B: 状态 + 设置行 ============== -->
+    <string name="layer_b_status_idle">空闲</string>
+    <string name="layer_b_status_connected">PC 已连接</string>
+    <string name="layer_b_status_reconnecting">重连中</string>
+    <string name="layer_b_status_streaming">推流中</string>
+    <string name="layer_b_debug_format">%1$dfps · %2$s · %3$dKbps</string>
+    <string name="layer_b_action_settings">设置</string>
+    <string name="layer_b_action_toggle">切换</string>
+
+    <!-- ============== Layer C: 推流按钮 ============== -->
+    <string name="layer_c_btn_start">▶  开始推流</string>
+    <string name="layer_c_btn_stop">■  停止推流</string>
+    <string name="layer_c_btn_streaming">推流中断</string>
+    <string name="layer_c_btn_disabled">请先打开摄像头</string>
+
+    <!-- ============== Layer D: 底部状态 ============== -->
+    <string name="layer_d_format">PHONECAM %1$s · CAM%2$s · %3$s</string>
+    <string name="layer_d_cam_unknown">?</string>
+
+    <!-- ============== 通用 ============== -->
+    <string name="toast_press_again_to_exit">再按一次退出</string>
+    <string name="toast_streaming_started">推流已启动</string>
+    <string name="toast_streaming_stopped">推流已停止</string>
+    <string name="toast_settings_saved">设置已保存</string>
+
+    <!-- ============== 4 Activity 标题 ============== -->
+    <string name="title_main">PhoneCam</string>
+    <string name="title_settings">设置</string>
+    <string name="title_connect">连接 PC</string>
+    <string name="title_about">关于</string>
+    <string name="title_debug">调试日志</string>
+
+    <!-- ============== Settings 页 (占位) ============== -->
+    <string name="settings_header_video">视频</string>
+    <string name="settings_header_stream">推流</string>
+    <string name="settings_header_about">关于</string>
+
+    <string name="settings_item_resolution">分辨率</string>
+    <string name="settings_item_fps">帧率</string>
+    <string name="settings_item_bitrate">码率</string>
+    <string name="settings_item_codec">编码器</string>
+    <string name="settings_item_format">协议格式</string>
+
+    <string name="settings_value_1080p">1080p</string>
+    <string name="settings_value_720p">720p</string>
+    <string name="settings_value_30fps">30 fps</string>
+    <string name="settings_value_60fps">60 fps</string>
+    <string name="settings_value_2mbps">2 Mbps</string>
+    <string name="settings_value_4mbps">4 Mbps</string>
+    <string name="settings_value_h264">H.264</string>
+
+    <!-- ============== Connect 页 (占位) ============== -->
+    <string name="connect_hint">扫描 PC 端二维码或在下方输入 IP</string>
+    <string name="connect_ip_hint">PC IP:PORT</string>
+    <string name="connect_btn">连接</string>
+
+    <!-- ============== About 页 (占位) ============== -->
+    <string name="about_version">版本</string>
+    <string name="about_copyright">© 2026 PhoneCam</string>
+    <string name="about_intro">把手机变成 PC 的高清摄像头</string>
+
+    <!-- ============== Debug 页 (占位) ============== -->
+    <string name="debug_btn_clear">清空</string>
+    <string name="debug_btn_copy">复制</string>
+    <string name="debug_log_empty">暂无日志</string>
 </resources>

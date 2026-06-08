@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  dimens.xml — viewfinder 屏尺寸规范
+  来源：specs/features/viewfinder-screen-A-layout.md §3 / viewfinder-screen-C-theme.md §5
+  4 层高度 + 圆角 + 间距
+-->
+<resources>
+    <!-- ============== 4 层高度 ============== -->
+    <!-- Layer A: 相机画面 (layout_weight=1 占剩余空间, 占比 ~40-50%) -->
+    <!-- Layer B: 状态+设置行 -->
+    <dimen name="layer_b_height">80dp</dimen>
+    <!-- Layer C: 推流按钮区 (按钮 64dp + 上下内边距) -->
+    <dimen name="layer_c_height">120dp</dimen>
+    <!-- Layer D: 底部状态文字 -->
+    <dimen name="layer_d_height">40dp</dimen>
+
+    <!-- ============== 推流按钮 (Layer C) ============== -->
+    <dimen name="btn_push_height">64dp</dimen>
+    <dimen name="btn_push_width_percent">60%</dimen>   <!-- 实际用 layout_width=0dp + weight=60 实现 -->
+    <dimen name="btn_push_corner">16dp</dimen>          <!-- pill 圆角 -->
+
+    <!-- ============== 状态点 (Layer B) ============== -->
+    <dimen name="status_dot_size">8dp</dimen>
+    <dimen name="status_dot_glow">4dp</dimen>           <!-- 外发光模糊半径 -->
+
+    <!-- ============== 推流指示点 (Layer C 按钮上方) ============== -->
+    <dimen name="push_indicator_inner">6dp</dimen>      <!-- 内圆 -->
+    <dimen name="push_indicator_outer">16dp</dimen>     <!-- 外圈光晕 -->
+    <dimen name="push_indicator_offset">8dp</dimen>     <!-- 距按钮顶部距离 -->
+
+    <!-- ============== 边距 / 间距 ============== -->
+    <dimen name="space_horizontal">16dp</dimen>         <!-- 左右内边距 -->
+    <dimen name="space_vertical">16dp</dimen>           <!-- 上下内边距 -->
+    <dimen name="hairline_height">1dp</dimen>           <!-- 1px 分隔线 (用 dp 防抖动) -->
+
+    <!-- ============== 字号 ============== -->
+    <dimen name="text_size_status">14sp</dimen>         <!-- Layer B 状态文字 -->
+    <dimen name="text_size_debug">13sp</dimen>          <!-- Layer B 调试数字 (JetBrains Mono) -->
+    <dimen name="text_size_button">20sp</dimen>         <!-- Layer C 推流按钮 -->
+    <dimen name="text_size_footer">12sp</dimen>         <!-- Layer D 底部状态 -->
+    <dimen name="text_size_error">15sp</dimen>          <!-- 错误占位文字 -->
+
+    <!-- ============== 图标 ============== -->
+    <dimen name="icon_size_action">24dp</dimen>         <!-- Layer B 右上角图标 (⚙ 🔄) -->
+    <dimen name="icon_size_error">64dp</dimen>          <!-- 错误占位图标 -->
+</resources>

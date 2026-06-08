@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  colors.xml — viewfinder 屏调色板（C 阶段视觉风格）
+  来源：specs/features/viewfinder-screen-C-theme.md §3
+  10 色: bg_oled / surface_1 / text 三级 / hairline / brand_cyan / led_green / warn_amber / danger_red
+-->
+<resources>
+    <!-- 背景层 -->
+    <color name="bg_oled">#0A0A0F</color>           <!-- App 主背景 (OLED 黑, 非纯黑) -->
+    <color name="surface_1">#1A1A22</color>         <!-- 卡片 / 按钮背景 -->
+    <color name="surface_glass">#990A0A0F</color>    <!-- Layer B 玻璃感 (60% 不透明) -->
+
+    <!-- 文字层 -->
+    <color name="text_primary">#E8E8F0</color>       <!-- 主要文字 (略带冷色) -->
+    <color name="text_secondary">#99FFFFFF</color>   <!-- 调试 / 时间 -->
+    <color name="text_disabled">#61FFFFFF</color>    <!-- 占位 / 禁用 -->
+
+    <!-- 边线 -->
+    <color name="hairline">#14FFFFFF</color>         <!-- 1px 分隔线 (8% 白) -->
+
+    <!-- 强调色 -->
+    <color name="brand_cyan">#00E5FF</color>         <!-- 电光青: 推流指示 / 主按钮 / 高亮 -->
+    <color name="led_green">#00E676</color>          <!-- PC 已连接 / 推流成功 -->
+    <color name="warn_amber">#FFB300</color>         <!-- 推流中断 / 重连中 / 摄像头占用 -->
+    <color name="danger_red">#FF3D5A</color>         <!-- 停止按钮 / 错误 -->
+</resources>
