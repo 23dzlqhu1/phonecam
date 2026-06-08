@@ -1,4 +1,4 @@
-# PhoneCam
+﻿# PhoneCam
 
 > 📱 → 💻 **把 Android 手机变成 Windows 电脑的高质量摄像头**
 
@@ -32,7 +32,7 @@
 | [`specs/`](specs/) | 👥 人 + AI 共用 | 产品概述、技术选型、项目结构 |
 | [`desktop/`](desktop/) | 💻 开发者（电脑端）| Windows 端 Python 代码 |
 | [`phone/`](phone/) | 📱 旧 Flutter 工程（legacy）| 已冻结，详见 ADR-006；`phone_native/` 是替代品 |
-| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin 最小 App 骨架（批次 2 ✅ 2026-06-08 跑通）|
+| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App 相机预览+多屏架构 (Phase X+Y 2026-06-08 v0.2.4)（批次 2 ✅ 2026-06-08 跑通）|
 | [`tests/`](tests/) | 🧪 测试工程师 | Mock 设备、性能测试工具 |
 | [`scripts/`](scripts/) | 🔧 所有人 | 构建、安装脚本 |
 
