@@ -415,27 +415,74 @@ And 推流按钮从 "未连接" 灰色变 "可推流" 青色边
 
 ## 8. 实现优先级建议 (进代码时按此顺序)
 
-| 序 | 任务 | 风险 | 工作量 |
-|---|------|------|--------|
-| 1 | C 阶段资源覆盖 (colors/themes/dimens) | 低 | 1h |
-| 2 | 5 个空 Activity 壳 (只显示屏名) + Manifest 注册 | 低 | 1h |
-| 3 | OnboardingActivity (3 步卡片) | 中 | 2h |
-| 4 | MainActivity 4 层布局落地 (应用 C 阶段配色) | 高 | 3h |
-| 5 | SettingsActivity 列表 + 弹窗 | 中 | 2h |
-| 6 | ConnectActivity QR + 输入框 (先不接 mDNS) | 中 | 2h |
-| 7 | AboutActivity | 低 | 0.5h |
-| 8 | DebugActivity (只日志 Tab) | 中 | 1.5h |
-| 9 | 跨屏状态同步 (SharedPreferences + EventBus 或回调) | 中 | 1.5h |
-| 10 | 真机验证 + 截图 | 低 | 1h |
+| 序 | 任务 | 风险 | 工作量 | 状态 |
+|---|------|------|--------|------|
+| 1 | C 阶段资源覆盖 (colors/themes/dimens) | 低 | 1h | ✅ Phase X-1 |
+| 2 | 5 个空 Activity 壳 (只显示屏名) + Manifest 注册 | 低 | 1h | ✅ Phase X-4 |
+| 3 | ~~OnboardingActivity (3 步卡片)~~ | ~~中~~ | ~~2h~~ | ⏳ **延后 MVP-4** |
+| 4 | MainActivity 4 层布局落地 (应用 C 阶段配色) | 高 | 3h | ✅ Phase X-2 + X-3 |
+| 5 | SettingsActivity 列表 + 弹窗 | 中 | 2h | ✅ Phase Y-1 |
+| 6 | ConnectActivity QR + 输入框 (先不接 mDNS) | 中 | 2h | ✅ Phase Y-2（QR 暂未实施）|
+| 7 | AboutActivity | 低 | 0.5h | ✅ Phase Y-3 |
+| 8 | DebugActivity (只日志 Tab) | 中 | 1.5h | ✅ Phase Y-4 |
+| 9 | 跨屏状态同步 (SharedPreferences + EventBus 或回调) | 中 | 1.5h | ✅ Phase Y-5 (SettingsStore 9+2 键) |
+| 10 | 真机验证 + 截图 | 低 | 1h | ✅ Phase Y-6 (5 张 phaseY_*.png) |
 
 **合计 ~15.5h** = 大约 2-3 个工作日 (按每天 5-6h 有效编码)
+**实际完成**: Phase X + Y = ~13.5h（Onboarding 2h 跳过未做）
 
 ---
 
-## 9. 待用户确认
+## 9. ✅ Phase X+Y 验收清单 (2026-06-08)
+
+### 9.1 Phase X 资源 + 4 层布局 + Activity 壳
+
+| AC | 描述 | 状态 |
+|----|------|------|
+| X-AC-1 | 资源齐备：colors.xml / dimens.xml / strings.xml + 4 个 activity_*.xml + themes.xml | ✅ |
+| X-AC-2 | MainActivity 4 层布局（相机 50% / 状态 8% / 推流按钮 12% / 设置条 30%）| ✅ |
+| X-AC-3 | Camera2 后置摄像头预览（30.76 FPS 稳定 logcat）| ✅ |
+| X-AC-4 | 4 个 Activity 通过 Intent 跳转正常（Settings / Connect / Debug / About）| ✅ |
+| X-AC-5 | AndroidManifest 5 个 Activity 注册 + 主题 + 父 Activity 配置 | ✅ |
+
+### 9.2 Phase Y 4 屏完整 + 跨屏同步
+
+| AC | 描述 | 状态 |
+|----|------|------|
+| Y-AC-1 | SettingsActivity 4 分区 9 项设置（默认摄像头 / 分辨率 / 目标帧率 / 码率 / 编码 / 传输方式 / PC 发现 / 显示调试信息 / 关于跳转）| ✅ |
+| Y-AC-2 | SettingsActivity AlertDialog setSingleChoiceItems 弹窗选值 + SharedPreferences 持久化 | ✅ |
+| Y-AC-3 | ConnectActivity IP/Port 输入 + 模拟连接（弹 Toast）+ lastIp/lastPort 自动回填 | ✅ |
+| Y-AC-4 | AboutActivity 版本号 v0.2.5-mvp2-phaseY + 仓库 / 许可证 / 跳转行 | ✅ |
+| Y-AC-5 | DebugActivity 实时日志（[InAppLogStore.kt](../../../phone_native/app/src/main/java/com/phonecam/nativeapp/InAppLogStore.kt) 500 行环形缓冲）+ 清空/复制/暂停滚动按钮 | ✅ |
+| Y-AC-6 | SettingsStore.kt 9+2 键封装（9 个设置项 + 2 个 lastIp/lastPort）| ✅ |
+| Y-AC-7 | 跨屏状态同步（主页推流按钮读 settings 实时更新，5 屏数据同步）| ✅ |
+| Y-AC-8 | 推流按钮状态机（空闲 / 推流中 / 已暂停 / 错误 4 态）| ✅ |
+| Y-AC-9 | 真机验收 5 张截图（[phaseY_*.png](../../../phone_native/phaseY_main.png)）| ✅ |
+| Y-AC-10 | Camera2 + 权限申请 + 30.76 FPS 稳定预览 | ✅ |
+
+### 9.3 关键决策
+
+详见 [`.ai/decisions.md`](../../../.ai/decisions.md)：
+- **ADR-007**：多 Activity 方案（vs Fragment / Compose）— 5 屏内零依赖最简方案
+- **ADR-008**：推流按钮 UI 占位（"⏳ 推流功能待后续批次"）但状态机已完整，Phase Z 填逻辑
+
+### 9.4 新增踩坑
+
+详见 [`.ai/gotchas.md`](../../../.ai/gotchas.md)：
+- G-013 SurfaceView vs TextureView 选型
+- G-014 ConstraintLayout SurfaceView 事件拦截
+- G-015 AlertDialog setSingleChoiceItems 参数顺序
+- G-016 ADB 自动化点击靠 uiautomator dump 拿坐标
+- G-017 PowerShell GBK 控制台打印 UTF-8 字符
+- G-018 Android 4 层垂直布局比例
+
+---
+
+## 10. 待用户确认
 
 1. **Onboarding 3 步卡**还是直接 "✓ 接受" 一个按钮？3 步更长教育，但用户说"从竞品来"的可能不需要
 2. **AC-APP-009 双击退出**要不要做？防误触好但增加复杂度
 3. **SettingsActivity 内的二级页面** (例如 "码率 → 高级") 本次要不要拆？建议**先不拆**，全放单层列表
+4. **Phase Z 真推流链路**（Camera2 → MediaCodec → TCP）优先级：批次 3-5 实施
 
 确认后 → 进入**实际代码实现**，按 §8 的优先级 1→10 推进。

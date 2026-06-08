@@ -54,3 +54,6 @@ PhoneCam-v*-*.zip
 *.orig
 *.rej
 ~$*
+
+# === 验证产物（不入仓，保留在本地调试） ===
+tests/output/

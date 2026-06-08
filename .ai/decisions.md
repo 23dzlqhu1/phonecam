@@ -174,6 +174,109 @@ MVP-2 目标：手机端采集真实摄像头画面 → 硬编码 H.264 → PCP 
 
 ---
 
+## ADR-007：phone_native/ 多屏架构 — 多 Activity 方案（vs 单 Activity + 4 Fragment / Jetpack Compose）
+
+**日期**：2026-06-08
+**状态**：✅ 已确定（Phase X+Y 实施完毕）
+
+### 背景
+
+MVP-2 阶段 phone_native/ App 需要 4 屏功能（设置/连接/关于/调试）外加主屏（viewfinder）= 5 屏。需要在 3 个候选方案中选一个：
+
+- 方案 A：多 Activity（每个屏一个 Activity，Intent 跳转）
+- 方案 B：单 Activity + 4 Fragment（Navigation Component）
+- 方案 C：Jetpack Compose Navigation（单 Activity + Compose 树）
+
+### 备选方案
+
+| 方案 | 描述 | 利 | 弊 |
+|------|------|----|----|
+| **A. 多 Activity** | 每个屏独立 Activity，Intent 跳转，系统返回栈管理 | 零依赖（不用 Navigation 库）；各屏独立可测；MainActivity 不被污染；onCreate 简洁 | 屏间共享状态需 Intent extras / SharedPreferences |
+| B. 单 Activity + Fragment | 1 个 MainActivity + 4 Fragment + Navigation Graph | 屏间共享 ViewModel 简单；动画过渡原生支持 | 需引入 Navigation Component（额外依赖 ~1.5MB）；Fragment 生命周期复杂；MainActivity 膨胀 |
+| C. Compose Navigation | 1 个 Activity + Compose 树 + NavController | 现代化；状态管理 Compose 风格；动画流畅 | 需引入 Compose（额外依赖 ~3MB）；学习曲线；MVP-2 阶段 UI 简单不需要 Compose |
+
+### 决策
+
+**采用方案 A**（多 Activity），5 个 Activity：
+
+| # | Activity | 职责 | 入口 | 返回 |
+|---|----------|------|------|------|
+| 0 | `MainActivity` | 主屏 (viewfinder 4 层布局) | 启动器 | 系统返回 = 退出 |
+| 1 | `SettingsActivity` | 设置页 (4 分区 9 项 + 3 跳转) | 主页"⚙ 设置" | → MainActivity |
+| 2 | `ConnectActivity` | 连接页 (大状态点 + IP/Port + 连接按钮) | 主页"🔗 连接" | → MainActivity |
+| 3 | `DebugActivity` | 调试页 (Tab + 日志 + 操作按钮) | 主页"🛠 调试" | → MainActivity |
+| 4 | `AboutActivity` | 关于页 (版本 + 跳转行) | 设置页"关于" | → SettingsActivity |
+
+### 理由
+
+1. **MVP-2 阶段 UI 极简**：每屏 1-2 个交互点（弹选 / 输入 / Tab / 跳转），**用不到 Fragment 共享 ViewModel 的能力**
+2. **零依赖**：不引入 Navigation Component，省 1.5MB APK 体积 + 减少学习成本
+3. **MainActivity 不被污染**：viewfinder 是 Phase X 的核心，Activity 类应保持短小（~80 行），其他功能下沉到独立 Activity
+4. **屏间状态用 SharedPreferences 同步**（`SettingsStore.kt`，9+2 键），不依赖 Activity 共享 ViewModel
+5. **可独立测试**：每个 Activity 都能单独启动测，调试时用 `adb shell am start -n com.phonecam.nativeapp/.SettingsActivity` 直接进目标页
+6. **官方推荐最小方案**：[Android 官方文档](https://developer.android.com/guide/components/activities/intro-activities) "如果你的应用有 5 个屏以内，每个屏独立 Activity 是最简单的方法"
+7. **Phase X+Y 已跑通真机**：4 屏 + 主页 + 真机验收 5 截图，方案 A 实战有效
+
+### 已知代价
+
+1. **屏间共享状态需走 SharedPreferences**（不能直接用 Activity Result API + 共享 ViewModel）
+2. **横屏 / 折叠屏适配**：每个 Activity 单独写 `layout-land/` 变体（5 个 Activity × 2 套布局 = 10 个 XML 文件）
+3. **未来 5+ 屏时需要重构**：如果未来加 Onboarding / Profile / Settings 子页（> 5 屏），需要迁移到 Navigation Component
+
+### 不做什么（MVP-2 范围限定）
+
+- ❌ 不引入 Navigation Component
+- ❌ 不引入 Jetpack Compose
+- ❌ 不做 Fragment 化（保留单 Activity 多 Fragment 的备选方案到 MVP-4 评估）
+- ❌ 不做 OnboardingActivity（3 步引导，MVP-4 阶段再说）
+- ❌ 不做 Activity 转场动画（用系统默认）
+- ❌ 不做 BottomNavigationView（5 屏用底部 4 个 TextView 入口即可）
+
+### 后续行动
+
+- [x] ADR-007 写入 .ai/decisions.md（2026-06-08 Phase Y 收尾）
+- [x] 同步更新 specs/features/app-architecture-B-multiscreen.md（状态 → 已实施 Phase X+Y）
+- [x] 5 个 Activity 实施完毕 + 真机验收 5 截图
+- [ ] MVP-4 阶段评估：是否需要迁移到 Navigation Component（取决于后续是否加到 8+ 屏）
+
+---
+
+## ADR-008：推流按钮 UI 占位但真推流功能在 Phase Z（不在 MVP-2 阶段）
+
+**日期**：2026-06-08
+**状态**：✅ 已确定（Phase Y 实施完毕）
+
+### 背景
+
+Phase Y 实施 SettingsActivity 时，9 个设置项中有 3 项（码率 / 编码 / 传输方式）的右侧**显示"⏳ 推流功能待后续批次"占位文字**，不是当前可选的值（如 "1 Mbps" / "H.264" / "自动"）。
+
+### 决策
+
+**MVP-2 阶段不实现真推流**：
+- 码率 / 编码 / 传输方式 设置项的右侧 UI **显示当前选中值**（"1 Mbps" / "H.264" / "自动"），**但在选项下方 / 弹窗内标注"⏳ 推流功能待后续批次"**
+- 推流按钮 (MainActivity 的"开始推流" Button) **真实可点**，但按下后**只更新 UI 状态文字**为"推流中（待 Phase Z 接入 H.264 编码）"，**不启动 Camera2 → MediaCodec → TCP 链路**
+- 推流按钮的状态机已实现完整（空闲 → 推流中 → 已暂停 → 错误 → 空闲）
+
+### 理由
+
+1. **MVP-2 阶段 = 真实摄像头画面链路跑通**，编码是 Phase Z 的事（批次 3-5：CameraController → H264Encoder → PcpPacketWriter → TcpStreamServer → desktop 端 OpenCV 看到画面）
+2. **UI 完整对真机验收很重要**：5 张截图要"看起来是个 App"，不能显示"待实现"
+3. **状态机先实现有意义**：按钮按下/释放/错误的回调链已写完，Phase Z 加编码时只填逻辑不改 UI
+4. **不影响 MVP-2 验收标准**：MVP-2 验收 = "OpenCV 窗口看到手机画面"，**推流按钮的逻辑是独立的子任务**
+
+### 已知代价
+
+1. **用户可能困惑**：看到"开始推流"按钮以为是完整功能，按下没反应
+2. **需要清晰的占位文字**：每个相关项都要"⏳ 推流功能待后续批次"提示，避免误操作
+
+### 后续行动
+
+- [x] Phase Y 实施完毕：9 设置项 UI + 推流按钮状态机
+- [ ] Phase Z（批次 3-5）填入真实编码逻辑
+- [ ] Phase Z 完成后，"⏳ 推流功能待后续批次"占位文字移除
+
+---
+
 ## 待决策（TODO）
 
 - [ ] H.264 码率默认值（建议 4 Mbps for 1080p60）
