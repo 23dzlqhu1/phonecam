@@ -1,4 +1,4 @@
-﻿# PhoneCam MVP 路线图
+# PhoneCam MVP 路线图
 
 > 🗺️ **本文档作用**：把"做一个摄像头"拆成 5 个可验收、可演示的阶段。
 > 核心原则：**端到端闭环优先**，不按功能模块写代码。
@@ -484,15 +484,15 @@ desktop/phonecam.py
 **目标**：把 Phase Y 留空的推流按钮接入真链路，让电脑端 OpenCV 看到手机画面。
 这是 MVP-2 验收的"最后 1 公里"。
 
-**状态**：⬜ 待开始
+**状态**：🟡 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅（2026-06-09），待 3.2.0.3 链路联调
 
 **分批次**（接 5.7 批次 3-5）：
 
-| 批次 | 目标 | 关键文件 | 验收 |
-|------|------|---------|------|
-| **Z-1（批次 3）** | Camera2 → ImageReader YUV420 帧 | `CameraController.kt` 扩展 | logcat "YUV frame received: WxH" |
-| **Z-2（批次 4）** | MediaCodec 硬编 H.264 ByteBuffer mode | `H264Encoder.kt` | logcat "Encoded N NALU, type=X, size=Y" |
-| **Z-3（批次 5）** | PcpPacketWriter 24 字节头（codec=0x02）+ TcpStreamServer 监听 9999 | `PcpPacketWriter.kt` + `TcpStreamServer.kt` + `MainActivity.kt` 接线 | `desktop/phonecam.py --connect 127.0.0.1:9999 --preview` 看到手机画面 |
+| 批次 | 目标 | 关键文件 | 验收 | 状态 |
+|------|------|---------|------|------|
+| ~~**Z-1（批次 3）**~~ | ~~Camera2 → ImageReader YUV420 帧~~ | ~~`CameraController.kt` 扩展~~ | ~~logcat "YUV frame received: WxH"~~ | ✅ 已合并到批次 3.2.0.2（2026-06-09）|
+| ~~**Z-2（批次 4）**~~ | ~~MediaCodec 硬编 H.264 ByteBuffer mode~~ | ~~`H264Encoder.kt`~~ | ~~logcat "Encoded N NALU, type=X, size=Y"~~ | ✅ 已合并到批次 3.2.0.1（EGL 零拷贝 InputSurface 模式更优）|
+| **Z-3（批次 3.2.0.3）** | PcpPacketWriter 24 字节头（codec=0x02）+ TcpStreamServer 监听 9999 | `PcpPacketWriter.kt`（新建）+ `TcpStreamServer.kt`（新建）+ `MainActivity.kt` 接线 | `desktop/phonecam.py --connect 127.0.0.1:9999 --preview` 看到手机画面 | ⬜ 待开始 |
 
 **不在本阶段做**：
 - ❌ 关键帧请求优化（容忍花屏）
