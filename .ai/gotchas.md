@@ -51,6 +51,8 @@
 | [G-017](#g-017powershell-gbk-控制台打印-utf-8-字符崩必须用-iotextiowrapper-强制-utf-8) | PowerShell GBK 控制台打印 ⏳ UTF-8 字符崩（必须用 `io.TextIOWrapper` 强制 UTF-8） | 2026-06-08 |
 | [G-018](#g-018android-4-层垂直布局比例相机-50--状态-8--推流按钮-12--设置-30--100-屏幕高度) | Android 4 层垂直布局比例（相机 50% + 状态 8% + 推流按钮 12% + 设置 30% = 100% 屏幕高度） | 2026-06-08 |
 | [G-019](#g-019yuv420flexible-底层-oppo-是-nv12pixelstride2-且-u-v-交织) | **YUV420Flexible 底层 OPPO 是 NV12**（pixelStride=2 + UV 交织，源 planar 写入会色相偏蓝）| 2026-06-08 **已通过批次 3.2.0.1 EGL 零拷贝根治** |
+| [G-020](#g-020oppo-coloros-5-秒自动-swipe-up-把无交互-app-推到后台调试期需绕开) | **OPPO ColorOS 5 秒自动 swipe-up 把无交互 app 推到后台**（调试期需绕开：Handler.postDelayed 3s 自动触发） | 2026-06-09 |
+| [G-021](#g-021cameracontrollersetonimageavailablelistener-在-oncreate-调用时-camerahandler-还是-nullopen-之后才能-setupimagereader) | **CameraController.setOnImageAvailableListener 在 onCreate 调用时 cameraHandler 还是 null**（race condition，加 pendingListenerRetry 机制 + 重试 loop 解决） | 2026-06-09 |
 
 ---
 
