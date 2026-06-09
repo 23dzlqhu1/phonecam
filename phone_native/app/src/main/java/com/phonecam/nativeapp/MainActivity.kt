@@ -1,7 +1,10 @@
 package com.phonecam.nativeapp
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
@@ -81,18 +84,8 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var cameraFrameCount: Int = 0
     @Volatile private var cameraFrameReady: CountDownLatch? = null  // 按按钮时 set, listener 收到帧 countDown
 
-    // ===================== 批次 3.2.0.3c 真链路推流 (状态机) =====================
-    // 推流按钮状态: false=空闲, true=推流中
-    @Volatile private var streaming: Boolean = false
-    // 真链路 3 个长生命周期句柄 (startStreaming 创建, stopStreaming 释放, 用 @Volatile 防止 listener 线程踩空指针)
-    @Volatile private var tcpServer: TcpStreamServer? = null
-    @Volatile private var h264Encoder: H264Encoder? = null
-    @Volatile private var eglRenderer: EglRenderer? = null
-    // PCP 包序列号 (每发 1 个 NALU +1, 客户端 PcpReceiver 用来检测丢包)
-    @Volatile private var pcpSequence: Int = 0
-    // 推流统计 (调试用, 显示在 Toast / InAppLogStore)
-    @Volatile private var naluSentCount: Int = 0
-    @Volatile private var bytesSentCount: Long = 0L
+    // 批次 3.2.0.3f: 推流状态/句柄全部移到 StreamingService (sActive/sH264Encoder/sEglRenderer/sTcpServer)
+    //  避免 Oplus Hans 冻结, 见 StreamingService.kt 注释
 
     // --- 双击退出 ---
     private var lastBackPressedMs: Long = 0L
@@ -163,13 +156,16 @@ class MainActivity : AppCompatActivity() {
             toggleLens()
         }
 
-        // 推流按钮 → 批次 3.2.0.3c 状态机: 开始/停止 推流 (Camera2 → EglRenderer → H264Encoder → PcpPacketWriter → TcpStreamServer)
-        //  之前 3.2.0.1 / 3.2.0.2 的"拍 1 帧"调试入口改放到 Layer D 长按 1s 触发
+        // 推流按钮 → 批次 3.2.0.3f 启前台 StreamingService (走 Service.start/stop, 避免 Oplus Hans 冻结)
+        //  Hans 冻结的是非前台任务的子线程, 启前台 Service 后 Hans 不冻
         btnPush.setOnClickListener {
-            if (streaming) {
-                stopStreaming()
+            if (StreamingService.sActive) {
+                StreamingService.stop(this)
             } else {
-                startStreaming()
+                // 把 MainActivity 当前的相机实际尺寸塞给 Service, 编码器用真实尺寸
+                StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
+                StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
+                StreamingService.start(this)
             }
         }
         // 长按 → 拍 1 帧 (老调试入口, 保留供 3.2.0.3c 期间验证单帧链路)
@@ -198,6 +194,39 @@ class MainActivity : AppCompatActivity() {
             InAppLogStore.i(TAG, "[3.2.0.3b-AUTO] 8s 自动启动 TcpStreamServer 监听 9999")
             onTcpStreamServerTest()
         }, 8000)
+
+        // 批次 3.2.0.3f: 注册 broadcast receiver (调试备用入口, 走 StreamingService)
+        //  用法: adb shell am broadcast -a com.phonecam.START_STREAMING
+        //        adb shell am broadcast -a com.phonecam.STOP_STREAMING
+        val streamFilter = IntentFilter().apply {
+            addAction("com.phonecam.START_STREAMING")
+            addAction("com.phonecam.STOP_STREAMING")
+        }
+        val streamReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                when (intent.action) {
+                    "com.phonecam.START_STREAMING" -> {
+                        InAppLogStore.i(TAG, "[3.2.0.3f-BROADCAST] 收到 START_STREAMING, 启 StreamingService")
+                        if (!StreamingService.sActive) {
+                            StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
+                            StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
+                            StreamingService.start(ctx)
+                        }
+                    }
+                    "com.phonecam.STOP_STREAMING" -> {
+                        InAppLogStore.i(TAG, "[3.2.0.3f-BROADCAST] 收到 STOP_STREAMING, 停 StreamingService")
+                        if (StreamingService.sActive) StreamingService.stop(ctx)
+                    }
+                }
+            }
+        }
+        // Android 13+ (API 33+) 必须指定 RECEIVER_EXPORTED 或 RECEIVER_NOT_EXPORTED flag
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(streamReceiver, streamFilter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(streamReceiver, streamFilter)
+        }
+        InAppLogStore.i(TAG, "[3.2.0.3e-BROADCAST] 广播接收器已注册 (START/STOP_STREAMING)")
 
         // 重试按钮 → 重新申请权限
         btnRetry.setOnClickListener {
@@ -366,19 +395,17 @@ class MainActivity : AppCompatActivity() {
                 cameraFrameReady?.countDown()
                 InAppLogStore.d(TAG, "[3.2.0.2] 真实帧 #$cameraFrameCount ${w}x${h} -> ${yuv.size} 字节 I420")
 
-                // 批次 3.2.0.3c: streaming 状态下, 把这帧 YUV 送 EGL → H264 → PCP → TCP
-                //  注意: imageListener 内部线程是 imageReaderHandler (ImageReader 自己的后台线程)
-                //  EglRenderer.drawYuv + H264Encoder.encodeFrame 不要求在 GL 线程
-                //  → 直接在这里调没问题
-                if (streaming) {
-                    val r = eglRenderer
-                    val enc = h264Encoder
-                    if (r != null && enc != null) {
-                        r.drawYuv(yuv, w, h)
-                        enc.encodeFrame(yuv)
-                    } else {
-                        InAppLogStore.w(TAG, "[3.2.0.3c] streaming=true 但 eglRenderer/h264Encoder null (可能正在 stop)")
-                    }
+                // 批次 3.2.0.3f: 推流状态下把 YUV 投递给 StreamingService.submitFrame
+                //  Service 持 EglRenderer, submitFrame 内部把任务投到 EGL owner thread
+                //  (EGL context 是 thread-local, listener 线程不能直接调 drawYuv)
+                val sActive = StreamingService.sActive
+                if (cameraFrameCount % 30 == 0) {
+                    val r = StreamingService.sEglRenderer
+                    val enc = StreamingService.sH264Encoder
+                    InAppLogStore.i(TAG, "[3.2.0.3f-DEBUG] 帧#$cameraFrameCount sActive=$sActive egl=${r != null} enc=${enc != null}")
+                }
+                if (sActive) {
+                    StreamingService.submitFrame(yuv, w, h)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "[3.2.0.2] 提取真实帧异常", e)
@@ -659,7 +686,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 InAppLogStore.i(TAG, "[3.2.0.3b] 启动 TcpStreamServer 监听 9999")
-                val server = TcpStreamServer(port = 9999) { status ->
+                val server = TcpStreamServer(port = 9998) { status ->
                     InAppLogStore.i(TAG, "[3.2.0.3b] $status")
                 }
                 server.start()
@@ -705,141 +732,6 @@ class MainActivity : AppCompatActivity() {
         }.apply { name = "TcpStreamServer-Test-Thread" }.start()
     }
 
-    /**
-     * 批次 3.2.0.3c 真链路启动入口: Camera2 → EglRenderer → H264Encoder → PcpPacketWriter → TcpStreamServer 持续推流
-     *
-     * 6 步启动:
-     *   1) 启动 TcpStreamServer 监听 0.0.0.0:9999 (在后台线程 accept)
-     *   2) 等 PC 端客户端连上 (最多 30s, 给用户 adb reverse + 启动客户端的时间)
-     *   3) 客户端连上后 → H264Encoder.start(1280, 720, naluCb) 拿到 inputSurface
-     *   4) EglRenderer(inputSurface) 构造 (自动 initEgl + initShaders + initTextures)
-     *   5) 装 NaluCallback 桥: 编码器吐 NALU → PcpPacketWriter.buildPacket → TcpStreamServer.sendPacket
-     *   6) 翻转 streaming = true → Camera2 ImageReader listener 拿到 YUV 后会调 EGL/H264
-     *
-     * 注意事项 (G-023 防御):
-     *   - 启动顺序很重要: TCP server 必须先起来 (客户端才能连), H264Encoder 起来后才能有 NALU
-     *   - streaming 翻转放最后, 防止 listener 在 EGL/H264 还没初始化好时就调 drawYuv
-     *   - 所有启动失败 → 触发 stopStreaming() 清理, 不留半截状态
-     */
-    private fun startStreaming() {
-        if (streaming) {
-            InAppLogStore.w(TAG, "[3.2.0.3c] 已在推流中, 忽略重复 start")
-            return
-        }
-        Thread {
-            try {
-                InAppLogStore.i(TAG, "[3.2.0.3c] 启动真链路推流 (Camera2→EGL→H264→PCP→TCP)")
-
-                // 1) TCP server 起来
-                val server = TcpStreamServer(port = 9999) { status ->
-                    InAppLogStore.i(TAG, "[3.2.0.3c-TCP] $status")
-                }
-                server.start()
-                tcpServer = server
-
-                // 2) 等客户端连上
-                val deadline = System.currentTimeMillis() + 30_000
-                while (!server.isClientConnected() && System.currentTimeMillis() < deadline) {
-                    Thread.sleep(200)
-                }
-                if (!server.isClientConnected()) {
-                    InAppLogStore.e(TAG, "[3.2.0.3c] 30s 内无客户端连接, 启动失败, 自动 stop")
-                    runOnUiThread { Toast.makeText(this, "推流启动失败: 30s 无连接", Toast.LENGTH_LONG).show() }
-                    stopStreamingInternal()
-                    return@Thread
-                }
-
-                // 3) H264Encoder.start (用相机实际尺寸或兜底 1280x720)
-                val w = if (cameraW > 0) cameraW else 1280
-                val h = if (cameraH > 0) cameraH else 720
-                InAppLogStore.i(TAG, "[3.2.0.3c] 启动 H264Encoder: ${w}x${h}")
-                val encoder = H264Encoder()
-                val naluCb = object : H264Encoder.NaluCallback {
-                    override fun onNalu(nalu: ByteArray, type: Int) {
-                        // PCP 桥: 把 1 个 NALU 装 24 字节头 → 发到 TCP 客户端
-                        val seq = pcpSequence++
-                        val pts = System.nanoTime() / 1000L
-                        val isKeyframe = (type == 5)  // H.264 NALU type 5 = IDR slice
-                        val pkt = PcpPacketWriter.buildPacket(
-                            sequence = seq,
-                            ptsUs = pts,
-                            payload = nalu,
-                            isKeyframe = isKeyframe
-                        )
-                        val ok = server.sendPacket(pkt)
-                        if (ok) {
-                            naluSentCount++
-                            bytesSentCount += pkt.size
-                        }
-                        if (seq % 30 == 0) {
-                            InAppLogStore.i(TAG, "[3.2.0.3c-PCP] seq=$seq type=$type keyframe=$isKeyframe bytes=${pkt.size} (累计 $naluSentCount 包 / $bytesSentCount B)")
-                        }
-                    }
-                }
-                val inputSurface = encoder.start(w, h, naluCb)
-                h264Encoder = encoder
-
-                // 4) EglRenderer 绑到 inputSurface
-                InAppLogStore.i(TAG, "[3.2.0.3c] 创建 EglRenderer (绑 inputSurface)")
-                val renderer = EglRenderer(inputSurface)
-                eglRenderer = renderer
-
-                // 5) 重置统计
-                pcpSequence = 0
-                naluSentCount = 0
-                bytesSentCount = 0L
-
-                // 6) 翻转 streaming flag (放最后, 让 listener 知道可以送帧了)
-                streaming = true
-                runOnUiThread {
-                    btnPush.text = "停止推流"
-                    Toast.makeText(this, "推流已启动: ${w}x${h} → 9999", Toast.LENGTH_LONG).show()
-                }
-                InAppLogStore.i(TAG, "[3.2.0.3c] streaming=true, 推流中...")
-
-            } catch (e: Exception) {
-                Log.e(TAG, "[3.2.0.3c] 启动异常", e)
-                runOnUiThread { Toast.makeText(this, "推流启动异常: ${e.message}", Toast.LENGTH_LONG).show() }
-                stopStreamingInternal()
-            }
-        }.apply { name = "Streaming-Start-Thread" }.start()
-    }
-
-    /**
-     * 批次 3.2.0.3c 真链路停止入口: 按推流按钮触发, 或启动失败时自动调用
-     *
-     * 释放顺序 (跟启动反着来):
-     *   1) streaming = false (先翻转, 让 listener 立刻停止送帧, 防止 EGL/H264 释放中还在被调)
-     *   2) 等 200ms (让正在处理的 NALU 回调和 drawYuv 收尾)
-     *   3) h264Encoder.stop() (signal EOS + 吐完 + 释放 codec + inputSurface)
-     *   4) eglRenderer.release() (销毁 EGL context/surface)
-     *   5) tcpServer.stop() (关 serverSocket + clientSocket, 唤醒 accept)
-     */
-    private fun stopStreaming() {
-        if (!streaming && tcpServer == null && h264Encoder == null) {
-            InAppLogStore.w(TAG, "[3.2.0.3c] 没在推流, 忽略 stop")
-            return
-        }
-        InAppLogStore.i(TAG, "[3.2.0.3c] 停止推流 (累计 $naluSentCount 包 / $bytesSentCount B)")
-        runOnUiThread {
-            btnPush.text = "开始推流"
-            Toast.makeText(this, "推流已停止: $naluSentCount 包 / $bytesSentCount B", Toast.LENGTH_LONG).show()
-        }
-        stopStreamingInternal()
-    }
-
-    /**
-     * 内部停止 (无 UI 反馈, 启动失败时也调这个)
-     */
-    private fun stopStreamingInternal() {
-        streaming = false
-        Thread.sleep(200)  // 让 listener 看到 streaming=false 后再释放
-        try { h264Encoder?.stop() } catch (e: Exception) { Log.w(TAG, "h264Encoder.stop 异常: ${e.message}") }
-        h264Encoder = null
-        try { eglRenderer?.release() } catch (e: Exception) { Log.w(TAG, "eglRenderer.release 异常: ${e.message}") }
-        eglRenderer = null
-        try { tcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop 异常: ${e.message}") }
-        tcpServer = null
-        InAppLogStore.i(TAG, "[3.2.0.3c] 推流已完全停止")
-    }
+    // 批次 3.2.0.3f: startStreaming() / stopStreaming() / stopStreamingInternal() 3 个方法已迁到 StreamingService
+    //  MainActivity 这里只留推流按钮 onClick 调 StreamingService.start/stop, 见 onCreate() 169-180 行
 }

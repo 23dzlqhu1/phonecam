@@ -32,7 +32,7 @@
 | [`specs/`](specs/) | 👥 人 + AI 共用 | 产品概述、技术选型、项目结构 |
 | [`desktop/`](desktop/) | 💻 开发者（电脑端）| Windows 端 Python 代码 |
 | ~~[`phone/`]~~ | 📱 旧 Flutter 工程（已删除 2026-06-09）| 2026-06-09 `git rm -r phone/`，保留 git 历史可 checkout；`phone_native/` 是替代品 |
-| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 + 3.2.0.2 + 3.2.0.3a + 3.2.0.3b + 3.2.0.3c + **3.2.0.3d ✅ 2026-06-09**, v0.2.8-mvp2-batch3.2.0.3d) |
+| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 + 3.2.0.2 + 3.2.0.3a + 3.2.0.3b + 3.2.0.3c + 3.2.0.3d + 3.2.0.3e + **3.2.0.3f ✅ 2026-06-09 (StreamingService + EGL 跨线程修复)**, v0.2.9-mvp2-batch3.2.0.3f) |
 | [`tests/`](tests/) | 🧪 测试工程师 | Mock 设备、性能测试工具 |
 | [`scripts/`](scripts/) | 🔧 所有人 | 构建、安装脚本 |
 

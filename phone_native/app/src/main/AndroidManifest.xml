@@ -6,6 +6,12 @@
     - INTERNET 权限 (批次 3.2.0.3b: TcpStreamServer 监听 9999 需网络权限)
     - MainActivity (LAUNCHER, NoActionBar 主题)
     - Settings / Connect / About / Debug 4 个 Activity 壳 (WithActionBar 主题)
+
+  批次 3.2.0.3f 新增:
+    - FOREGROUND_SERVICE 权限 (启前台 Service 必需)
+    - FOREGROUND_SERVICE_CAMERA 权限 (Android 14+ 要求前台 Service 标 type=camera)
+    - POST_NOTIFICATIONS 权限 (Android 13+ 通知需用户授权)
+    - <service> 注册 StreamingService (前台 Service, 推流用)
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -14,6 +20,13 @@
 
     <!-- 批次 3.2.0.3b：INTERNET 权限 (TcpStreamServer 用 ServerSocket 监听 9999 需此权限) -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 批次 3.2.0.3f：前台 Service 权限 (Oplus Hans 冻结回避, startForeground 必需) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 批次 3.2.0.3f：Android 14+ (API 34) 要求前台 Service 标 type=camera -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- 批次 3.2.0.3f：Android 13+ (API 33) 通知需用户授权 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="@string/app_name"
@@ -58,6 +71,12 @@
             android:exported="false"
             android:theme="@style/AppTheme.WithActionBar"
             android:parentActivityName=".MainActivity" />
+
+        <!-- 批次 3.2.0.3f: 前台 Service 推流 (Hans 冻结回避) -->
+        <service
+            android:name=".StreamingService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
 
     </application>
 

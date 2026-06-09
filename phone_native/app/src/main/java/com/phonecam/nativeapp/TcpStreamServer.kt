@@ -56,8 +56,12 @@ class TcpStreamServer(
         running = true
         acceptThread = Thread({
             try {
-                serverSocket = ServerSocket(port, 1, InetAddress.getByName("0.0.0.0"))
-                onEvent("ServerSocket 监听 0.0.0.0:$port OK")
+                // 批次 3.2.0.3f: 用 bind() + setReuseAddress(true), 避免上次连接 TIME_WAIT (60s) 内 bind 同端口失败
+                //  ServerSocket(port) 旧构造不暴露底层 SO_REUSEADDR
+                serverSocket = java.net.ServerSocket()
+                serverSocket!!.reuseAddress = true
+                serverSocket!!.bind(java.net.InetSocketAddress("0.0.0.0", port), 1)
+                onEvent("ServerSocket 监听 0.0.0.0:$port OK (SO_REUSEADDR)")
                 while (running) {
                     val client = serverSocket!!.accept()  // 阻塞, 客人来之前一直等
                     if (!running) {
