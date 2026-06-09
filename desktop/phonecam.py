@@ -9,7 +9,7 @@
 协议：PCP（PhoneCam Protocol），见 receiver.py 顶部文档
 """
 
-__version__ = "0.5.0-mvp1"
+__version__ = "0.6.0-mvp3"
 
 import argparse
 import sys
@@ -38,16 +38,16 @@ def parse_args(argv=None):
         help="PCP 默认端口（MVP-1 用 9999）"
     )
     parser.add_argument(
-        "--width", type=int, default=640,
-        help="虚拟摄像头宽度（仅在 --virtual-cam 模式生效）"
+        "--width", type=int, default=1280,
+        help="虚拟摄像头宽度（仅在 --virtual-cam 模式生效, MVP-3 默认 1280）"
     )
     parser.add_argument(
-        "--height", type=int, default=480,
-        help="虚拟摄像头高度"
+        "--height", type=int, default=720,
+        help="虚拟摄像头高度（MVP-3 默认 720）"
     )
     parser.add_argument(
         "--fps", type=int, default=30,
-        help="虚拟摄像头帧率"
+        help="虚拟摄像头帧率（MVP-3 默认 30）"
     )
     parser.add_argument(
         "--no-virtual-cam", action="store_true",
