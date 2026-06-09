@@ -78,11 +78,11 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 |------|------|------|
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + **批次 3.2.0.2 ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 12 截图 + H264Encoder 单帧 H.264 + EGL 零拷贝 + **Camera2 ImageReader 真实帧 EGL 编码**验证通过，v0.2.8-mvp2-batch3.2.0.2）。下一批次：3.2.0.3 端到端闭环（长时连拍 → 实时传输到电脑）|
+| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + **批次 3.2.0.3a ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 12 截图 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码 + **PcpPacketWriter 24 字节头字节级正确 (G-001 防御，Python struct.unpack 8 字段全等)**，v0.2.8-mvp2-batch3.2.0.3a）。下一批次：3.2.0.3b TcpStreamServer 监听 9999 → 3c 真链路接线 → 3d 电脑端联调 |
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 + H264Encoder 单帧 H.264 + EGL 零拷贝 + **Camera2 ImageReader 真实帧 EGL 编码**）。下一批次：3.2.0.3 端到端闭环（长时连拍 → 实时传输到电脑）。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码）→ **批次 3.2.0.3a ✅**（2026-06-09，PcpPacketWriter 24 字节头字节级正确）。下一批次：3.2.0.3b TcpStreamServer 监听 9999。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---

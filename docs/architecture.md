@@ -1,6 +1,6 @@
 # PhoneCam 架构设计
 
-> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.2（2026-06-09）
+> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.3a（2026-06-09）
 >
 > **历史版本**：v0.1 MVP-0/1 时期用过 Flutter + HTTP MJPEG（详见 [.ai/decisions.md ADR-006](../.ai/decisions.md)）。**本文档描述当前实现**，旧设计不再维护。
 
@@ -39,6 +39,8 @@
 | CameraController | CameraController.kt | Camera2 生命周期、预览、ImageReader 监听 |
 | EglRenderer | EglRenderer.kt | EGL/OpenGL ES YUV→Surface 零拷贝渲染 |
 | H264Encoder | H264Encoder.kt | MediaCodec H.264 硬编码（createInputSurface）|
+| **PcpPacketWriter** | **PcpPacketWriter.kt** | **PCP 24 字节头打包（buildHeader/buildPacket），批次 3.2.0.3a 新增** |
+| **TestPcpPackets** | **TestPcpPackets.kt** | **PCP 打包单元自检（写 2 个测试包到 .pcp 文件），批次 3.2.0.3a 新增** |
 | Yuv420Extractor | Yuv420Extractor.kt | YUV_420_888 → I420 planar（处理 NV12 padding）|
 | InAppLogStore | InAppLogStore.kt | 应用内日志（环形缓冲 + UI 显示）|
 | TestYuvFrames | TestYuvFrames.kt | 调试用渐变测试图 |
@@ -64,7 +66,7 @@
 | mock_phone | mock_phone/mock_phone_server.py | 假视频流发送端（无真机即可联调）|
 | verify scripts | tests/output/verify_*.py | OpenCV 解码 + mean/std 验证 |
 
-## 数据流（MVP-2 批次 3.2.0.2 已验证）
+## 数据流（MVP-2 批次 3.2.0.3a 已验证：PcpPacketWriter 24 字节头打包字节级正确）
 
 ```
 Camera2 物理摄像头 (后置 1280×720 @ 30fps)
@@ -76,13 +78,13 @@ I420 planar ByteArray (Y 平面 + U 平面 + V 平面，无 padding)
 EGL Surface (绑定到 MediaCodec.createInputSurface())
     ↓ MediaCodec (H.264 硬编码, color_format=Surface, bitrate=2Mbps)
 H.264 压缩帧 (NV12/I420 → IDR/P/B frames, 49KB/帧 平均)
-    ↓ (批次 3.2.0.3 待实现) PcpPacketWriter 24 字节头打包
-PCP 帧 (magic='PHCM' + version=0x01 + type=0x01 + len + pts + payload)
-    ↓ (待实现) TcpStreamServer 发送
+    ↓ (✅ 3.2.0.3a) PcpPacketWriter.buildPacket() — 24 字节头 + payload
+PCP 帧 (magic='PHCM' + version=0x01 + type=0x01 + codec=0x02 + flags + sequence + pts + payload_len + NALU)
+    ↓ (待 3.2.0.3b) TcpStreamServer 发送
 电脑端 Socket
-    ↓ (待实现) PcpReceiver
+    ↓ (待 3.2.0.3d) PcpReceiver
 PcpReceiver.frames() generator
-    ↓ (待实现) PyAV 解码
+    ↓ (待 3.2.0.3d) H264Decoder
 BGR numpy array
     ↓ (MVP-3) pyvirtualcam.send()
 DirectShow / V4L2 虚拟摄像头

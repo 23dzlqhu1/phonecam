@@ -1,4 +1,4 @@
-﻿// app/build.gradle.kts — phone_native/ 的 :app 模块构建脚本
+// app/build.gradle.kts — phone_native/ 的 :app 模块构建脚本
 // 作用：声明 Android App 的所有编译参数
 
 plugins {
@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 10                          // 批次 3.2.0.2: EGL 接 Camera2 ImageReader 真实帧 (替换 TestYuvFrames)
-        versionName = "0.2.8-mvp2-batch3.2.0.2"
+        versionCode = 11                          // 批次 3.2.0.3a: PcpPacketWriter 24 字节头打包 + TestPcpPackets 单元自检 (无网络)
+        versionName = "0.2.8-mvp2-batch3.2.0.3a"
     }
 
     buildTypes {

@@ -1,4 +1,4 @@
-﻿package com.phonecam.nativeapp
+package com.phonecam.nativeapp
 
 import android.Manifest
 import android.content.Intent
@@ -162,6 +162,13 @@ class MainActivity : AppCompatActivity() {
             InAppLogStore.i(TAG, "[3.2.0.2-AUTO] 3s 自动触发真实摄像头 EGL 编码")
             onEncodeOneFrameCameraEglTest()
         }, 3000)
+
+        // 批次 3.2.0.3a: 6s 后再触发 PCP 打包单元自检 (在 3.2.0.2 之后跑, 避免抢 IO)
+        //  3.2.0.3a 只写文件, 不接网络, 不依赖 Camera2
+        Handler(Looper.getMainLooper()).postDelayed({
+            InAppLogStore.i(TAG, "[3.2.0.3a-AUTO] 6s 自动触发 PCP 打包单元自检")
+            onEncodeOneFramePcpTest()
+        }, 6000)
 
         // 重试按钮 → 重新申请权限
         btnRetry.setOnClickListener {
@@ -534,5 +541,53 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.apply { name = "CameraEGL-Test-Thread" }.start()
+    }
+
+    /**
+     * 批次 3.2.0.3a 单元自检: PcpPacketWriter 写 2 个 PCP 包到文件供 Python 校验
+     *
+     * 流程:
+     *   1) TestPcpPackets.writeTestPcpFile 写 2 帧 (keyframe + P-frame) 到 .pcp 文件
+     *   2) adb pull 到电脑 → tests/output/verify_pcp_packet.py 用 struct.unpack 校验 8 字段全等
+     *
+     * 验证目标:
+     *   - PcpPacketWriter 24 字节头打包字节级与 desktop/receiver.py::HEADER_STRUCT 一致
+     *   - magic='PHCM' / version=0x01 / type=0x01 / codec=0x02 / flags=0x01(帧1)/0(帧2)
+     *   - sequence u32 / pts u64 / payload_len u32 都小端序正确
+     *
+     * 不做 (后续批次):
+     *   - 3.2.0.3b: 不再写文件, 改用 TcpStreamServer 发字节
+     *   - 3.2.0.3c: 接 Camera2 持续推流
+     */
+    private fun onEncodeOneFramePcpTest() {
+        Thread {
+            try {
+                InAppLogStore.i(TAG, "[3.2.0.3a] PCP 打包单元自检开始")
+
+                val outDir = getExternalFilesDir(null)
+                if (outDir == null) {
+                    InAppLogStore.e(TAG, "[3.2.0.3a] getExternalFilesDir(null) 返回 null")
+                    return@Thread
+                }
+                if (!outDir.exists()) outDir.mkdirs()
+                val outFile = java.io.File(outDir, "test_3_2_3a_packets.pcp")
+
+                val (packetCount, totalBytes) = TestPcpPackets.writeTestPcpFile(outFile)
+                InAppLogStore.i(TAG, "[3.2.0.3a] 已写入: ${outFile.absolutePath} ($packetCount 包 / $totalBytes 字节)")
+
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "PCP OK: $packetCount 包 / $totalBytes 字节\n${outFile.absolutePath}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "[3.2.0.3a] 异常", e)
+                runOnUiThread {
+                    Toast.makeText(this, "PCP 异常: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.apply { name = "PCP-Test-Thread" }.start()
     }
 }
