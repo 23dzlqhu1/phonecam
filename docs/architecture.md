@@ -1,6 +1,6 @@
 # PhoneCam 架构设计
 
-> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.3c（2026-06-09）
+> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.3d（2026-06-09）
 >
 > **历史版本**：v0.1 MVP-0/1 时期用过 Flutter + HTTP MJPEG（详见 [.ai/decisions.md ADR-006](../.ai/decisions.md)）。**本文档描述当前实现**，旧设计不再维护。
 
@@ -58,6 +58,7 @@
 |------|------|------|
 | PcpReceiver | receiver.py | TCP+PCP 24 字节头接收（H.264 帧 + 命令）|
 | H264Decoder | h264_decoder.py | PyAV/av 软/硬解码 H.264 → BGR numpy |
+| **video_frame_to_bgr (H.264 分支)** | **receiver.py** | **CODEC_H264 走 H264Decoder 单例 (懒加载) → BGR numpy，批次 3.2.0.3d 新增** |
 | PhoneCam | phonecam.py | 主程序入口（argparse + 主循环）|
 | VirtualCamera | virtual_camera.py | pyvirtualcam 包装（待 MVP-3）|
 
@@ -68,7 +69,7 @@
 | mock_phone | mock_phone/mock_phone_server.py | 假视频流发送端（无真机即可联调）|
 | verify scripts | tests/output/verify_*.py | OpenCV 解码 + mean/std 验证 |
 
-## 数据流（MVP-2 批次 3.2.0.3c 已验证：真链路推流按钮状态机接通）
+## 数据流（MVP-2 批次 3.2.0.3d 已验证：H.264 PCP 链路在 PC 端完全打通，30/30 帧解出率）
 
 ```
 Camera2 物理摄像头 (后置 1280×720 @ 30fps)
@@ -84,10 +85,12 @@ H.264 压缩帧 (NV12/I420 → IDR/P/B frames, 49KB/帧 平均)
 PCP 帧 (magic='PHCM' + version=0x01 + type=0x01 + codec=0x02 + flags + sequence + pts + payload_len + NALU)
     ↓ (✅ 3.2.0.3b) TcpStreamServer.sendPacket() → 0.0.0.0:9999
 电脑端 Socket (adb reverse tcp:9999 tcp:9999 → 127.0.0.1:9999)
-    ↓ (待 3.2.0.3d) PcpReceiver
-PcpReceiver.frames() generator
-    ↓ (待 3.2.0.3d) H264Decoder
+    ↓ (✅ 3.2.0.3 已实现) PcpReceiver._parse_pcp_stream() — 24 字节头 unpack + NALU payload
+VideoFrame dataclass (codec=CODEC_H264, data=NALU bytes, sequence, pts, is_keyframe)
+    ↓ (✅ 3.2.0.3d) video_frame_to_bgr() — 走 CODEC_H264 分支 → H264Decoder 单例 (懒加载, 线程安全) → PyAV decode → BGR numpy (1280×720×3)
 BGR numpy array
+    ↓ (✅ 3.2.0.3d 验证: PyAV libx264 编码 30 帧彩色渐变 → 装 PCP 头 → 喂 video_frame_to_bgr → 30/30 帧解出, 第 1 帧 BGR 均值 (40,42,197) 红色调, 帧间色差 21.3)
+OpenCV imshow("PhoneCam (PCP)", bgr)  // phonecam.py --preview 已就绪
     ↓ (MVP-3) pyvirtualcam.send()
 DirectShow / V4L2 虚拟摄像头
     ↓

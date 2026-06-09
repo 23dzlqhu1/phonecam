@@ -369,11 +369,38 @@ class PcpReceiver:
 
 # ============== 帧转 numpy 工具 ==============
 
+# 批次 3.2.0.3d: H.264 解码器 module-level 单例
+# 原因: H264Decoder 是有状态解码器 (SPS/PPS 缓存 + 解码缓冲),
+#       每包创建新实例 = 永远解不出帧 (B 帧前向依赖 IDR, IDR 还没缓存就被丢)
+_H264_DECODER_SINGLETON = None
+_H264_DECODER_LOCK = threading.Lock()
+
+
+def _get_h264_decoder():
+    """懒加载单例 H264Decoder (线程安全)"""
+    global _H264_DECODER_SINGLETON
+    if _H264_DECODER_SINGLETON is None:
+        with _H264_DECODER_LOCK:
+            if _H264_DECODER_SINGLETON is None:
+                try:
+                    from h264_decoder import H264Decoder
+                    _H264_DECODER_SINGLETON = H264Decoder(use_hw=True)
+                    logger.info(
+                        f"[3.2.0.3d] H264Decoder 单例创建: "
+                        f"hw={_H264_DECODER_SINGLETON.is_hardware}, "
+                        f"init={_H264_DECODER_SINGLETON.is_initialized}"
+                    )
+                except Exception as e:
+                    logger.error(f"[3.2.0.3d] H264Decoder 创建失败: {e}")
+                    return None
+    return _H264_DECODER_SINGLETON
+
+
 def video_frame_to_bgr(frame: VideoFrame) -> Optional[np.ndarray]:
     """把 VideoFrame 转为 OpenCV 用的 BGR numpy 数组
 
     MVP-1: raw_rgb 通道直接 reshape
-    MVP-2: H.264 走 H264Decoder.decode
+    MVP-2 批次 3.2.0.3d: H.264 走 H264Decoder.decode (单例)
     """
     if frame.codec == CODEC_RAW_RGB:
         if frame.width == 0 or frame.height == 0:
@@ -385,4 +412,21 @@ def video_frame_to_bgr(frame: VideoFrame) -> Optional[np.ndarray]:
         )
         # RGB → BGR
         return arr[:, :, ::-1].copy()
+
+    if frame.codec == CODEC_H264:
+        # 批次 3.2.0.3d: H.264 NALU → H264Decoder → BGR 帧
+        decoder = _get_h264_decoder()
+        if decoder is None or not decoder.is_initialized:
+            return None
+        try:
+            bgr = decoder.decode(frame.data)
+            if bgr is not None:
+                # 更新 VideoFrame 的宽高 (从解码结果反推)
+                frame.width = bgr.shape[1]
+                frame.height = bgr.shape[0]
+            return bgr
+        except Exception as e:
+            logger.debug(f"[3.2.0.3d] H264 解码异常: {e}")
+            return None
+
     return None

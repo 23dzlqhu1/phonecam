@@ -32,7 +32,7 @@
 | [`specs/`](specs/) | 👥 人 + AI 共用 | 产品概述、技术选型、项目结构 |
 | [`desktop/`](desktop/) | 💻 开发者（电脑端）| Windows 端 Python 代码 |
 | ~~[`phone/`]~~ | 📱 旧 Flutter 工程（已删除 2026-06-09）| 2026-06-09 `git rm -r phone/`，保留 git 历史可 checkout；`phone_native/` 是替代品 |
-| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 + 3.2.0.2 + 3.2.0.3a + 3.2.0.3b + **3.2.0.3c ✅ 2026-06-09**, v0.2.8-mvp2-batch3.2.0.3c) |
+| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 + 3.2.0.2 + 3.2.0.3a + 3.2.0.3b + 3.2.0.3c + **3.2.0.3d ✅ 2026-06-09**, v0.2.8-mvp2-batch3.2.0.3d) |
 | [`tests/`](tests/) | 🧪 测试工程师 | Mock 设备、性能测试工具 |
 | [`scripts/`](scripts/) | 🔧 所有人 | 构建、安装脚本 |
 
@@ -78,11 +78,11 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 |------|------|------|
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + 批次 3.2.0.3a ✅ + 批次 3.2.0.3b ✅ + **批次 3.2.0.3c ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 12 截图 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码 + PcpPacketWriter 24 字节头字节级正确 + TcpStreamServer 监听 9999 + 客户端连上发 1 个测试包 + **推流按钮状态机接通 Camera2→EGL→H264→PCP→TCP 5 节点真链路**，v0.2.8-mvp2-batch3.2.0.3c）。下一批次：3.2.0.3d 电脑端联调验证 |
+| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + 批次 3.2.0.3a ✅ + 批次 3.2.0.3b ✅ + 批次 3.2.0.3c ✅ + **批次 3.2.0.3d ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 12 截图 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码 + PcpPacketWriter 24 字节头字节级正确 + TcpStreamServer 监听 9999 + 客户端连上发 1 个测试包 + 推流按钮状态机接通 Camera2→EGL→H264→PCP→TCP 5 节点真链路 + **video_frame_to_bgr 加 CODEC_H264 分支 + H264Decoder 单例懒加载 + PC 端 E2E 验证 30/30 帧解出 1280×720 彩色渐变**），v0.2.8-mvp2-batch3.2.0.3d。**MVP-2 端到端闭环达成**。下一阶段：MVP-3 虚拟摄像头 (pyvirtualcam 接入腾讯会议)。|
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码）→ **批次 3.2.0.3a ✅**（PcpPacketWriter 24 字节头字节级正确）→ **批次 3.2.0.3b ✅**（TcpStreamServer 监听 9999 + 客户端连上发 1 测试包）。下一批次：3.2.0.3c 真链路接线。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码）→ **批次 3.2.0.3a ✅**（PcpPacketWriter 24 字节头字节级正确）→ **批次 3.2.0.3b ✅**（TcpStreamServer 监听 9999 + 客户端连上发 1 测试包）→ **批次 3.2.0.3c ✅**（推流按钮状态机接 5 节点真链路）→ **批次 3.2.0.3d ✅**（video_frame_to_bgr 加 H.264 分支 + H264Decoder 单例 + PC 端 E2E 验证 30/30 帧解出，1280×720 彩色渐变视频过整链路）。**MVP-2 端到端闭环达成**。下一阶段：MVP-3 虚拟摄像头。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---

@@ -52,7 +52,7 @@
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09）→ **批次 3.2.0.3a ✅ 2026-06-09**（PcpPacketWriter 24 字节头字节级正确）→ **批次 3.2.0.3b ✅ 2026-06-09**（TcpStreamServer 监听 0.0.0.0:9999 + accept loop + sendPacket API）→ **批次 3.2.0.3c ✅ 2026-06-09**（MainActivity 推流按钮状态机 startStreaming 6 步启动 + stopStreaming 反向释放，PCP 桥在 H264Encoder.NaluCallback 内打 24 字节头 sequence++ / pts=nanoTime/1000 / isKeyframe=type==5，接通 Camera2→EglRenderer→H264Encoder→PcpPacketWriter→TcpStreamServer 5 节点真链路）。下一批次：3.2.0.3d 电脑端联调（phonecam.py --connect 127.0.0.1:9999 --preview 看到 OpenCV 实时画面）。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09）→ **批次 3.2.0.3a ✅ 2026-06-09**（PcpPacketWriter 24 字节头字节级正确）→ **批次 3.2.0.3b ✅ 2026-06-09**（TcpStreamServer 监听 0.0.0.0:9999 + accept loop + sendPacket API）→ **批次 3.2.0.3c ✅ 2026-06-09**（MainActivity 推流按钮状态机 startStreaming 6 步启动 + stopStreaming 反向释放，PCP 桥在 H264Encoder.NaluCallback 内打 24 字节头 sequence++ / pts=nanoTime/1000 / isKeyframe=type==5，接通 Camera2→EglRenderer→H264Encoder→PcpPacketWriter→TcpStreamServer 5 节点真链路）→ **批次 3.2.0.3d ✅ 2026-06-09**（desktop/receiver.py::video_frame_to_bgr 加 CODEC_H264 分支 + H264Decoder module-level 单例懒加载，PC 端 E2E 验证脚本 verify_3_2_3d_e2e.py：PyAV libx264 编码 30 帧 1280×720 彩色渐变 H.264 → 装 24 字节 PCP 头 → 喂 video_frame_to_bgr → 30/30 帧解出，验证：分辨率 1280×720 / 第 1 帧 BGR (40,42,197) 红色调非黑 / 帧间色差 21.3 / H264Decoder 软解兜底）。**MVP-2 端到端闭环达成**。下一阶段：MVP-3 虚拟摄像头 (pyvirtualcam)。
 
 ---
 
