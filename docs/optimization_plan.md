@@ -1,20 +1,24 @@
 # PhoneCam 优化计划：追赶 Iriun Webcam
 
-> **当前版本：** v0.4 (MVP)
-> **目标版本：** v1.0 (产品级)
-> **核心目标：** 达到 Iriun Webcam 同等体验
+> ⚠️ **本文档部分已实现**：v0.4 MVP 目标（HTTP MJPEG → H.264 私有 TCP）在 v0.2.8-mvp2-batch3.2.0.2（2026-06-09）已达成。
+>
+> 📌 **当前权威路线**：[`specs/MVP路线图.md`](../specs/MVP路线图.md) 批次 3.2.0.3（端到端闭环）+ 3.3（虚拟摄像头）+ 3.4（产品化）
+>
+> 📌 **当前架构**：[`docs/architecture.md`](architecture.md)（Kotlin + EGL + MediaCodec + PCP）
+>
+> **本文档保留**作为 v1.0 性能优化目标参考（延迟、CPU、APK 体积、虚拟摄像头驱动等）。
 
 ---
 
 ## 技术差距分析
 
-| 维度 | 当前 (v0.4) | Iriun | 差距 |
-|------|-------------|-------|------|
-| 视频编码 | JPEG | H.264 | 带宽差 5-8 倍 |
-| 传输协议 | HTTP MJPEG | 私有 TCP | 延迟高 30% |
-| 虚拟摄像头 | pyvirtualcam (需OBS) | 自研驱动 | 需第三方软件 |
-| 电脑端 | Python (150MB) | exe (5MB) | 需装 Python |
-| 手机端 | Flutter + camera | 原生 + MediaCodec | 无硬件编码 |
+| 维度 | MVP-0 旧版 | 当前 v0.2.8 | v1.0 目标 | 状态 |
+|------|-------------|-------------|-----------|------|
+| 视频编码 | JPEG | **H.264 硬编** (MediaCodec) | H.264 硬编 | ✅ MVP-2 达成 |
+| 传输协议 | HTTP MJPEG | **私有 TCP + PCP 24B 头** (待 3.2.0.3 联调) | 私有 TCP | 🟡 协议 OK，待链路 |
+| 虚拟摄像头 | pyvirtualcam (需OBS) | pyvirtualcam (待 MVP-3 集成) | 自研驱动 | ⬜ MVP-3 |
+| 电脑端 | Python (150MB) | Python | exe (5MB) | ⬜ MVP-4 |
+| 手机端 | Flutter + camera | **Kotlin 原生 + Camera2 + MediaCodec** | 同左 | ✅ MVP-2 达成 (ADR-006) |
 
 ---
 

@@ -1,10 +1,20 @@
 # PhoneCam — 手机摄像头救急工具 项目计划
 
+> ⚠️ **本文档已 SUPERSEDED（作废）** —— 本文档是 v0.1 MVP-0 时期的 Phase 0/1/5/6 阶段计划（基于 Flutter + HTTP MJPEG 旧架构），**不要再按本文档实现任何任务**。
+>
+> 📌 **当前权威计划**：[`specs/MVP路线图.md`](../specs/MVP路线图.md)（v0.2.8-mvp2-batch3.2.0.2, 2026-06-09）
+>
+> 📌 **当前架构设计**：[`docs/architecture.md`](architecture.md)
+>
+> 📌 **历史背景**：本文档保留在 git 历史中，作为项目从 MVP-0 起步到 MVP-2 batch3.2.0.2 演进的考古参考，详见 [.ai/decisions.md ADR-006](../.ai/decisions.md)（2026-06-08 路线重置）。
+
+---
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** 一款跨平台工具，在笔记本摄像头坏了的紧急情况下，30秒内将手机摄像头变成电脑的虚拟摄像头，让Zoom/腾讯会议/OBS等软件直接识别使用。
 
-**Architecture:**
+**Architecture (v0.1 时期, 已作废):**
 - 手机端 Flutter App 采集摄像头画面，通过WiFi/USB推流到电脑
 - 电脑端 Python 接收视频流，通过 pyvirtualcam 输出为虚拟摄像头
 - 协议采用 HTTP MJPEG（第一版），后续升级 H.264

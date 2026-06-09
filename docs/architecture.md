@@ -1,139 +1,147 @@
 # PhoneCam 架构设计
 
+> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.2（2026-06-09）
+>
+> **历史版本**：v0.1 MVP-0/1 时期用过 Flutter + HTTP MJPEG（详见 [.ai/decisions.md ADR-006](../.ai/decisions.md)）。**本文档描述当前实现**，旧设计不再维护。
+
+---
+
 ## 系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        手机端 (Flutter)                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ CameraService │  │ StreamServer │  │ DiscoveryService │  │
-│  │  摄像头采集    │  │  MJPEG HTTP  │  │   mDNS 广播      │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────────┘  │
-│         │                  │                                  │
-│         └──────────────────┘                                  │
-│                  │                                            │
-└──────────────────┼────────────────────────────────────────────┘
-                   │ HTTP MJPEG (multipart/x-mixed-replace)
-                   │ WiFi / USB Tethering
-                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        电脑端 (Python)                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │  MjpegReceiver│  │VirtualCamera │  │ConnectionManager │  │
-│  │  流接收+解码   │  │ 虚拟摄像头输出│  │  自动发现+连接   │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────────┘  │
-│         │                  │                                  │
-│         └──────────────────┘                                  │
-│                  │                                            │
-└──────────────────┼────────────────────────────────────────────┘
-                   │ DirectShow (Windows) / V4L2 (Linux)
-                   ▼
-           ┌──────────────┐
-           │  Zoom / 腾讯会议 / OBS  │
-           │   识别为摄像头   │
-           └──────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│              手机端 (Kotlin 原生, com.phonecam.nativeapp)            │
+│  ┌────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
+│  │  Camera2   │  │  EglRenderer │  │ MediaCodec   │  │ (计划中)   │ │
+│  │ ImageReader│→ │ (YUV→Surface)│→ │ H.264 硬编码 │→ │ TCP+PCP    │ │
+│  │ YUV_420_888│  │ 零拷贝渲染    │  │ InputSurface │  │ (3.2.0.3)  │ │
+│  └────────────┘  └──────────────┘  └──────────────┘  └────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ (批次 3.2.0.3 实现) WiFi / USB
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              电脑端 (Python)                                          │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐     │
+│  │ PcpReceiver│→ │ PyAV/av    │→ │ pyvirtualcam│→ │ 腾讯会议   │     │
+│  │ 24B 头解析 │  │ H.264 解码 │  │ 虚拟摄像头  │  │ / OBS      │     │
+│  └────────────┘  └────────────┘  └────────────┘  └────────────┘     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 核心组件
 
-### 手机端
+### 手机端 `phone_native/`
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| CameraService | camera_service.dart | 摄像头初始化、预览、JPEG 帧捕获 |
-| StreamServer | stream_server.dart | HTTP MJPEG 推流服务 (/video, /info, /snapshot) |
-| DiscoveryService | discovery_service.dart | mDNS 服务注册 (_phonecam._tcp) |
-| UsbService | usb_service.dart | USB Tethering 状态检测与引导 |
-| HomePage | ui/home_page.dart | 主界面（动画状态+推流控制） |
-| SettingsPage | ui/settings_page.dart | 设置界面（分辨率/帧率/质量） |
+| MainActivity | MainActivity.kt | 主屏（4 层布局 + 推流按钮 + 状态同步）|
+| CameraController | CameraController.kt | Camera2 生命周期、预览、ImageReader 监听 |
+| EglRenderer | EglRenderer.kt | EGL/OpenGL ES YUV→Surface 零拷贝渲染 |
+| H264Encoder | H264Encoder.kt | MediaCodec H.264 硬编码（createInputSurface）|
+| Yuv420Extractor | Yuv420Extractor.kt | YUV_420_888 → I420 planar（处理 NV12 padding）|
+| InAppLogStore | InAppLogStore.kt | 应用内日志（环形缓冲 + UI 显示）|
+| TestYuvFrames | TestYuvFrames.kt | 调试用渐变测试图 |
+| SettingsStore | SettingsStore.kt | SharedPreferences 包装 |
+| AboutActivity | AboutActivity.kt | 版本/许可证/联系方式 |
+| ConnectActivity | ConnectActivity.kt | 二维码配网 |
+| DebugActivity | DebugActivity.kt | 实时日志查看 |
+| SettingsActivity | SettingsActivity.kt | 分辨率/码率/编码参数设置 |
 
-### 电脑端
+### 电脑端 `desktop/`
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| MjpegReceiver | receiver.py | MJPEG 流接收、解码、自动重连 |
-| VirtualCamera | virtual_camera.py | pyvirtualcam 虚拟摄像头输出 |
-| MdnsDiscovery | discovery.py | mDNS + 子网扫描自动发现 |
-| UsbHandler | usb_handler.py | USB Tethering 接口检测 |
-| ConnectionManager | connection_manager.py | 统一连接管理 (USB > WiFi) |
-| PhoneCamGUI | gui.py | tkinter 桌面 GUI |
+| PcpReceiver | receiver.py | TCP+PCP 24 字节头接收（H.264 帧 + 命令）|
+| H264Decoder | h264_decoder.py | PyAV/av 软/硬解码 H.264 → BGR numpy |
+| PhoneCam | phonecam.py | 主程序入口（argparse + 主循环）|
+| VirtualCamera | virtual_camera.py | pyvirtualcam 包装（待 MVP-3）|
 
-## 数据流
+### 测试/工具 `tests/`
+
+| 组件 | 文件 | 职责 |
+|------|------|------|
+| mock_phone | mock_phone/mock_phone_server.py | 假视频流发送端（无真机即可联调）|
+| verify scripts | tests/output/verify_*.py | OpenCV 解码 + mean/std 验证 |
+
+## 数据流（MVP-2 批次 3.2.0.2 已验证）
 
 ```
-手机摄像头 (YUV420)
-    ↓ CameraService.captureJpeg()
-JPEG bytes (~30KB @ 640x480, Q80)
-    ↓ StreamServer.updateFrame()
-HTTP MJPEG 流 (multipart/x-mixed-replace)
-    ↓ WiFi / USB Tethering
-MjpegReceiver._decode_frame()
-    ↓ cv2.imdecode()
+Camera2 物理摄像头 (后置 1280×720 @ 30fps)
+    ↓ ImageReader.OnImageAvailableListener
+YUV_420_888 Image (3 planes: Y + U/2 + V/2)
+    ↓ Yuv420Extractor.imageToI420()
+I420 planar ByteArray (Y 平面 + U 平面 + V 平面，无 padding)
+    ↓ EglRenderer.render() (GL_LUMINANCE 纹理 + 着色器)
+EGL Surface (绑定到 MediaCodec.createInputSurface())
+    ↓ MediaCodec (H.264 硬编码, color_format=Surface, bitrate=2Mbps)
+H.264 压缩帧 (NV12/I420 → IDR/P/B frames, 49KB/帧 平均)
+    ↓ (批次 3.2.0.3 待实现) PcpPacketWriter 24 字节头打包
+PCP 帧 (magic='PHCM' + version=0x01 + type=0x01 + len + pts + payload)
+    ↓ (待实现) TcpStreamServer 发送
+电脑端 Socket
+    ↓ (待实现) PcpReceiver
+PcpReceiver.frames() generator
+    ↓ (待实现) PyAV 解码
 BGR numpy array
-    ↓ VirtualCamera.send()
-    ├─→ cv2.cvtColor(BGR→RGB)
-    ├─→ cv2.resize(目标分辨率)
-    └─→ pyvirtualcam.send(RGB)
-        ↓ DirectShow / V4L2
-        系统虚拟摄像头
+    ↓ (MVP-3) pyvirtualcam.send()
+DirectShow / V4L2 虚拟摄像头
+    ↓
+Zoom / 腾讯会议 / OBS 识别为 "PhoneCam Camera"
 ```
 
-## 设计决策
+## 关键设计决策
 
-### 1. HTTP MJPEG vs RTSP/H.264
+### 1. Kotlin 原生 vs Flutter（[ADR-006](../.ai/decisions.md)）
 
-**选择: HTTP MJPEG**
-
-| 方案 | 优点 | 缺点 |
-|------|------|------|
-| HTTP MJPEG | 实现简单、兼容性好、无需编解码库 | 带宽占用大 |
-| RTSP+H.264 | 带宽小、延迟低 | 实现复杂、需要 FFmpeg |
-
-**理由:** 第一版优先跑通，MJPEG 实现最简单，后续可升级到 H.264。
-
-### 2. pyvirtualcam vs OBS 虚拟摄像头
-
-**选择: pyvirtualcam**
+**选 Kotlin 原生**：
 
 | 方案 | 优点 | 缺点 |
 |------|------|------|
-| pyvirtualcam | 轻量、Python 原生 | 需要安装驱动 |
-| OBS 虚拟摄像头 | 用户可能已装 OBS | 依赖 OBS 运行 |
+| **Kotlin 原生** ✅ | 链路最短（Camera2→MediaCodec→Socket 3 跳），APK 2-5MB | 失去跨平台红利（iOS 需学 Swift）|
+| Flutter + Plugin | UI 跨平台，Material 3 漂亮 | 4 跳数据流（Dart↔Kotlin 桥），APK 15-25MB，调试链长 |
 
-**理由:** pyvirtualcam 更轻量，不依赖外部软件。
+**当前状态**：phone_native/ 4 屏完整（Main/Settings/Connect/Debug/About），Kotlin 直接调 Camera2+MediaCodec+EGL，单屏 UI 不需要 Flutter 价值。
 
-### 3. mDNS 自动发现 vs 手动输入 IP
+### 2. EGL 零拷贝 vs Bitmap/YUV 软件渲染
 
-**选择: 两者都支持**
-
-- 自动发现 (mDNS + 子网扫描) 作为默认模式
-- `--url` 参数支持手动指定，兼容所有场景
-
-### 4. USB Tethering vs ADB
-
-**选择: USB Tethering**
+**选 EGL 零拷贝**（InputSurface 模式）：
 
 | 方案 | 优点 | 缺点 |
 |------|------|------|
-| USB Tethering | 无需开发者模式、稳定 | 需要用户开启网络共享 |
-| ADB | 更灵活 | 需要 USB 调试、安装 ADB |
+| **EGL InputSurface** ✅ | 零 CPU 拷贝，MediaCodec 内部直接读 GPU 纹理 | 调试复杂（GL 状态机）|
+| Bitmap + JNI | 调试直观 | 5-8ms/帧 CPU 开销，30fps 跑不满 |
+| MediaCodec ByteBuffer 喂 NV12 | 简单 | CPU→GPU→CPU 两次拷贝 |
 
-**理由:** USB Tethering 更适合普通用户。
+**当前状态**：EglRenderer 用 GL_LUMINANCE 纹理 + 自写 YUV→RGB 着色器，处理 NV12 padding 走 Yuv420Extractor 转换。
+
+### 3. PCP vs HTTP MJPEG / WebSocket
+
+**选 PCP (TCP + 24 字节头 + payload)**：
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| **PCP** ✅ | 24 字节头 + 二进制 payload，新手 30 分钟看懂；TCP 单连接；可演进 | 自研协议，要维护 |
+| HTTP MJPEG (旧) | 实现简单 | 带宽 5-8 倍（每帧 JPEG header 重复），无硬件编码 |
+| WebSocket (旧) | 全双工，浏览器友好 | shelf.Request ↔ HttpRequest 类型冲突（G-009），APK 大 |
+
+**当前状态**：MVP-1 协议跑通，电脑端 PyAV 软解 29.6 FPS。
 
 ## 性能指标
 
-| 指标 | 目标 | 实测 |
-|------|------|------|
-| 端到端延迟 | < 500ms | ~200ms (WiFi), ~100ms (USB) |
-| 帧率 | 15fps | 15fps (640x480) |
-| 带宽 | < 5Mbps | ~3.5Mbps (640x480, Q80) |
-| CPU 占用 (电脑端) | < 5% | ~3% |
-| 内存占用 (电脑端) | < 100MB | ~60MB |
+| 阶段 | 延迟 | 带宽 | CPU |
+|------|------|------|-----|
+| Camera2→ImageReader (PLC110) | ~30ms | — | 低 |
+| EGL 渲染 (1280×720) | ~5ms | — | < 5% |
+| MediaCodec H.264 硬编 (2Mbps) | ~10ms | 2 Mbps | < 10% |
+| 编码产物 (test_3_2_2_camera.h264) | — | 49,788B / 单帧 | — |
+| **端到端（待 3.2.0.3 实测）** | **< 200ms 目标** | < 8 Mbps | < 30% |
 
-## 后续优化方向
+## 相关文档
 
-1. **H.264 编码** - 降低带宽 50%+
-2. **WebRTC** - 支持跨网络、NAT 穿透
-3. **音频传输** - 手机麦克风同步到电脑
-4. **多设备支持** - 同时连接多个手机
-5. **画面增强** - 降噪、美颜、背景虚化
+- 协议规范：[protocol.md](protocol.md)（PCP 24 字节头 + payload）
+- 优化路线：[optimization_plan.md](optimization_plan.md)（v1.0 目标）
+- 架构演进史：[.ai/decisions.md ADR-006](../.ai/decisions.md)
+- 实现陷阱：[.ai/gotchas.md G-010/G-020/G-021](../.ai/gotchas.md)
+- 项目结构：[specs/项目结构.md](../specs/项目结构.md)
+- 批次计划：[specs/MVP路线图.md](../specs/MVP路线图.md)

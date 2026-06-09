@@ -65,9 +65,69 @@ def start_server(port: int = 8080) -> bool:
 
 ---
 
-## Dart/Flutter（手机端）
+## Kotlin（手机端 `phone_native/`）
+
+> 📌 **当前手机端为 Kotlin 原生**（2026-06-08 路线重置 ADR-006）。旧 Dart/Flutter 工程 `phone/` 已 git rm 2026-06-09。
+>
+> 旧 Dart 风格保留在下文以作历史参考（新人 onboarding 切勿参考）。
 
 ### 命名
+- 文件名：大驼峰 `MainActivity.kt` / 工具类大驼峰 `H264Encoder.kt`
+- 类名：大驼峰 `CameraController`
+- 变量/方法：小驼峰 `startPreview()` / `cameraW`
+- 私有方法/变量：前缀下划线 `_internalState`（Kotlin 习惯用 `private val`/`private fun` 而非下划线）
+- 常量：大写下划线 `TAG = "MainActivity"`
+- 包名：小写 `com.phonecam.nativeapp`
+
+### 导入顺序
+```kotlin
+// 1. Android SDK
+import android.media.MediaCodec
+import android.opengl.EGL14
+
+// 2. Kotlin 标准库
+import kotlin.concurrent.thread
+
+// 3. 第三方（当前项目用得少）
+// import com.example.thirdparty.X
+
+// 4. 本项目相对路径
+import com.phonecam.nativeapp.H264Encoder
+```
+
+### 类注释（KDoc 风格）
+```kotlin
+/**
+ * Camera2 控制器，封装预览/拍照/ImageReader 监听。
+ *
+ * @param context Android Context
+ * @param handler 相机后台线程 Handler（ImageReader 回调在此线程）
+ * @see EglRenderer
+ */
+class CameraController(
+    private val context: Context,
+    private val handler: Handler
+) {
+    ...
+}
+```
+
+### 风格要点
+- **优先 `val` 而非 `var`**：不可变更安全
+- **数据类用 `data class`**：`data class PcpHeader(val magic: Int, val version: Byte, val type: Byte, val length: Int)`
+- **空安全**：用 `?` + `?:` 兜底，避免 `!!`
+- **Lambda 简洁**：`{ it.width }` 而非 `{ img -> img.width }`（单参数时）
+- **日志用 `InAppLogStore.i(TAG, msg)`**：UI 可见，便于现场排查（见 [.ai/gotchas.md G-014](../.ai/gotchas.md)）
+
+---
+
+## Dart/Flutter（手机端，已废）
+
+> ⚠️ **历史章节**：MVP-0/1 时期旧手机端用 Flutter + Dart。2026-06-08 路线重置（ADR-006）后冻结，2026-06-09 `git rm -r phone/` 彻底删除。
+>
+> 新人请直接读上文 **Kotlin（手机端）** 章节。
+
+### 命名（历史参考，仅供查 git 老代码）
 - 文件名：小写下划线 `stream_server.dart`
 - 类名：大驼峰 `StreamServer`
 - 变量/方法：小驼峰 `startServer()`
