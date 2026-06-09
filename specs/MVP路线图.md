@@ -484,7 +484,7 @@ desktop/phonecam.py
 **目标**：把 Phase Y 留空的推流按钮接入真链路，让电脑端 OpenCV 看到手机画面。
 这是 MVP-2 验收的"最后 1 公里"。
 
-**状态**：🟡 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + **批次 3.2.0.3a ✅**（2026-06-09，PcpPacketWriter 单元自检通过），待 3.2.0.3b/3c/3d 链路联调
+**状态**：🟡 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + 批次 3.2.0.3a ✅ + **批次 3.2.0.3b ✅ 2026-06-09**（TcpStreamServer 监听 9999 + AndroidManifest INTERNET 权限 + 客户端连上发 1 个 "Hello PCP" 测试包），待 3.2.0.3c 真链路接线 + 3d 电脑端联调
 
 **分批次**（接 5.7 批次 3-5）：
 
@@ -493,8 +493,8 @@ desktop/phonecam.py
 | ~~**Z-1（批次 3）**~~ | ~~Camera2 → ImageReader YUV420 帧~~ | ~~`CameraController.kt` 扩展~~ | ~~logcat "YUV frame received: WxH"~~ | ✅ 已合并到批次 3.2.0.2（2026-06-09）|
 | ~~**Z-2（批次 4）**~~ | ~~MediaCodec 硬编 H.264 ByteBuffer mode~~ | ~~`H264Encoder.kt`~~ | ~~logcat "Encoded N NALU, type=X, size=Y"~~ | ✅ 已合并到批次 3.2.0.1（EGL 零拷贝 InputSurface 模式更优）|
 | **Z-3a（批次 3.2.0.3a）** | PcpPacketWriter 24 字节头（codec=0x02）+ Python struct.unpack 字节级校验 | `PcpPacketWriter.kt`（新建）+ `TestPcpPackets.kt`（新建）+ `tests/output/verify_3_2_3a_packets.py`（新建） | `python verify_3_2_3a_packets.py` 输出 "ALL PASS ✅" | ✅ 完成（2026-06-09） |
-| **Z-3b（批次 3.2.0.3b）** | TcpStreamServer 监听 9999 单独跑通（塞测试字节） | `TcpStreamServer.kt`（新建）+ `AndroidManifest.xml` 加 INTERNET 权限 | `adb reverse tcp:9999 tcp:9999` + PowerShell `Test-NetConnection 9999` 通 + `nc -l 9999` 收到字节 | ⬜ 待开始 |
-| **Z-3c（批次 3.2.0.3c）** | 真链路接线：Camera2 → EglRenderer → H264Encoder → PcpPacketWriter → TcpStreamServer 持续推流 | `MainActivity.kt` 推流按钮接 4 节点 | 真机启动 app，`adb reverse`，`nc -l 9999` 看到 NALU 字节流 | ⬜ 待开始 |
+| **Z-3b（批次 3.2.0.3b）** | TcpStreamServer 监听 9999 单独跑通（塞测试字节） | `TcpStreamServer.kt`（新建）+ `AndroidManifest.xml` 加 INTERNET 权限 + `MainActivity.kt` 8s 触发 | `adb reverse tcp:9999 tcp:9999` + PC 端 TCP 客户端连上后收到 1 个 "Hello PCP" 测试包 (24+15=39 字节) | ✅ 完成（2026-06-09） |
+| **Z-3c（批次 3.2.0.3c）** | 真链路接线：Camera2 → EglRenderer → H264Encoder → PcpPacketWriter → TcpStreamServer 持续推流 | `MainActivity.kt` 推流按钮接 4 节点 | 真机启动 app，`adb reverse`，PC 端收到持续 H.264 NALU 字节流 | ⬜ 待开始 |
 | **Z-3d（批次 3.2.0.3d）** | 电脑端 H.264 解码接线 + 联调 | `desktop/receiver.py::video_frame_to_bgr` 加 `CODEC_H264` 分支调 `H264Decoder` | `phonecam.py --connect 127.0.0.1:9999 --preview` OpenCV 看到手机实时画面 | ⬜ 待开始 |
 
 **不在本阶段做**：

@@ -52,7 +52,7 @@
 | **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09）→ **批次 3.2.0.3a ✅ 2026-06-09**（phone_native/ 加 PcpPacketWriter.kt + TestPcpPackets.kt；PcpPacketWriter 24 字节头字节级与 desktop/receiver.py::HEADER_STRUCT '<4sBBBBIQI' 一致；G-001 防御：Python struct.unpack 反向校验 8 字段 + 字节序 + payload 全等通过；未接网络/未接 Camera2）。下一批次：3.2.0.3b TcpStreamServer 监听 9999。
+**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09）→ **批次 3.2.0.3a ✅ 2026-06-09**（PcpPacketWriter 24 字节头字节级正确）→ **批次 3.2.0.3b ✅ 2026-06-09**（TcpStreamServer 监听 0.0.0.0:9999 + AndroidManifest INTERNET 权限 + accept loop + sendPacket API + MainActivity 8s 自动测试发 "Hello PCP" 包；未接 Camera2/未接 H264Encoder）。下一批次：3.2.0.3c 真链路接线（Camera2 → EglRenderer → H264Encoder → PcpPacketWriter → TcpStreamServer 持续推流）。
 
 ---
 

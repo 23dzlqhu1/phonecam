@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 11                          // 批次 3.2.0.3a: PcpPacketWriter 24 字节头打包 + TestPcpPackets 单元自检 (无网络)
-        versionName = "0.2.8-mvp2-batch3.2.0.3a"
+        versionCode = 12                          // 批次 3.2.0.3b: TcpStreamServer 监听 9999 + AndroidManifest INTERNET 权限 + MainActivity 8s 自动测试
+        versionName = "0.2.8-mvp2-batch3.2.0.3b"
     }
 
     buildTypes {

@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   AndroidManifest.xml — phone_native/ App 清单
-  MVP-2 批次 3 + Phase X 范围：
+  MVP-2 批次 3 + Phase X + 批次 3.2.0.3b 范围：
     - CAMERA 权限
+    - INTERNET 权限 (批次 3.2.0.3b: TcpStreamServer 监听 9999 需网络权限)
     - MainActivity (LAUNCHER, NoActionBar 主题)
     - Settings / Connect / About / Debug 4 个 Activity 壳 (WithActionBar 主题)
 -->
@@ -10,6 +11,9 @@
 
     <!-- 批次 3：申请相机权限以打开后置摄像头预览 -->
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 批次 3.2.0.3b：INTERNET 权限 (TcpStreamServer 用 ServerSocket 监听 9999 需此权限) -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:label="@string/app_name"

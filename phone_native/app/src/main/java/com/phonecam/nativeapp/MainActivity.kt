@@ -170,6 +170,13 @@ class MainActivity : AppCompatActivity() {
             onEncodeOneFramePcpTest()
         }, 6000)
 
+        // 批次 3.2.0.3b: 8s 后启动 TcpStreamServer 监听 9999, 客户端连上发 1 个测试包
+        //  adb reverse tcp:9999 tcp:9999 → PC 端 127.0.0.1:9999 → 手机端 0.0.0.0:9999
+        Handler(Looper.getMainLooper()).postDelayed({
+            InAppLogStore.i(TAG, "[3.2.0.3b-AUTO] 8s 自动启动 TcpStreamServer 监听 9999")
+            onTcpStreamServerTest()
+        }, 8000)
+
         // 重试按钮 → 重新申请权限
         btnRetry.setOnClickListener {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
@@ -589,5 +596,75 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.apply { name = "PCP-Test-Thread" }.start()
+    }
+
+    /**
+     * 批次 3.2.0.3b 单跑通: 启动 TcpStreamServer 监听 9999, 客户端连上后发 1 个 "Hello PCP" 测试包
+     *
+     * 流程:
+     *   1) TcpStreamServer.start() → ServerSocket 监听 0.0.0.0:9999
+     *   2) 用户在 PC 端 adb reverse tcp:9999 tcp:9999 + 启动客户端 (Python/PowerShell TcpClient)
+     *   3) 客户端连上 → server.accept() 收到 → 立刻用 PcpPacketWriter 打个 "Hello PCP" 包
+     *      (sequence=0, pts=System.nanoTime()/1000, payload=15 字节明文) 发过去
+     *   4) server 持续运行 60s 让用户验证多次, 然后 stop() 关闭
+     *
+     * 验证目标:
+     *   - ServerSocket 监听 9999 OK
+     *   - accept() 能拿到 PC 端的连接
+     *   - getOutputStream().write() 写出去 24+N 字节, PC 端 recv() 能收到
+     *   - 收到的字节 = PcpPacketWriter.buildPacket 输出 (G-001 防御: 可再用 Python struct.unpack 校验)
+     *
+     * 不做 (后续批次):
+     *   - 3.2.0.3c: 接 Camera2 持续推流 (这个测试方法不接相机, 客户端连上就发 1 包然后等)
+     *   - 3.2.0.3d: 电脑端 PcpReceiver 解码
+     */
+    private fun onTcpStreamServerTest() {
+        Thread {
+            try {
+                InAppLogStore.i(TAG, "[3.2.0.3b] 启动 TcpStreamServer 监听 9999")
+                val server = TcpStreamServer(port = 9999) { status ->
+                    InAppLogStore.i(TAG, "[3.2.0.3b] $status")
+                }
+                server.start()
+
+                // 等客户端连上 (最多 30s, 给用户 adb reverse + 启动客户端的时间)
+                val deadline = System.currentTimeMillis() + 30_000
+                while (!server.isClientConnected() && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(200)
+                }
+                if (!server.isClientConnected()) {
+                    InAppLogStore.e(TAG, "[3.2.0.3b] 30s 内无客户端连接, 请确认 adb reverse tcp:9999 tcp:9999 + 客户端已启动")
+                    runOnUiThread {
+                        Toast.makeText(this, "TcpStreamServer 30s 无连接", Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
+
+                // 客户端连上了, 构造 1 个 "Hello PCP" 测试包发送
+                val testPayload = "Hello-PCP-3.2.0.3b".toByteArray()
+                val testPacket = PcpPacketWriter.buildPacket(
+                    sequence = 0,
+                    ptsUs = System.nanoTime() / 1000,  // 当前时间戳 (微秒)
+                    payload = testPayload,
+                    isKeyframe = true
+                )
+                val ok = server.sendPacket(testPacket)
+                InAppLogStore.i(TAG, "[3.2.0.3b] 测试包发送 ${if (ok) "成功" else "失败"}: ${testPacket.size} 字节 (payload='${testPayload.toString(Charsets.UTF_8)}')")
+
+                runOnUiThread {
+                    Toast.makeText(this, "TCP 服务端 OK: 已发 ${testPacket.size}B 测试包", Toast.LENGTH_LONG).show()
+                }
+
+                // 保持 server 运行 60s, 让用户可以从 PC 端多次连接验证
+                Thread.sleep(60_000)
+                server.stop()
+                InAppLogStore.i(TAG, "[3.2.0.3b] 服务端已 stop()")
+            } catch (e: Exception) {
+                Log.e(TAG, "[3.2.0.3b] 异常", e)
+                runOnUiThread {
+                    Toast.makeText(this, "TCP 异常: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.apply { name = "TcpStreamServer-Test-Thread" }.start()
     }
 }

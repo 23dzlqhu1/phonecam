@@ -1,6 +1,6 @@
 # PhoneCam 架构设计
 
-> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.3a（2026-06-09）
+> 📌 **当前实现版本**：v0.2.8-mvp2-batch3.2.0.3b（2026-06-09）
 >
 > **历史版本**：v0.1 MVP-0/1 时期用过 Flutter + HTTP MJPEG（详见 [.ai/decisions.md ADR-006](../.ai/decisions.md)）。**本文档描述当前实现**，旧设计不再维护。
 
@@ -41,6 +41,7 @@
 | H264Encoder | H264Encoder.kt | MediaCodec H.264 硬编码（createInputSurface）|
 | **PcpPacketWriter** | **PcpPacketWriter.kt** | **PCP 24 字节头打包（buildHeader/buildPacket），批次 3.2.0.3a 新增** |
 | **TestPcpPackets** | **TestPcpPackets.kt** | **PCP 打包单元自检（写 2 个测试包到 .pcp 文件），批次 3.2.0.3a 新增** |
+| **TcpStreamServer** | **TcpStreamServer.kt** | **TCP 服务端（ServerSocket 监听 9999 + accept + sendPacket），批次 3.2.0.3b 新增** |
 | Yuv420Extractor | Yuv420Extractor.kt | YUV_420_888 → I420 planar（处理 NV12 padding）|
 | InAppLogStore | InAppLogStore.kt | 应用内日志（环形缓冲 + UI 显示）|
 | TestYuvFrames | TestYuvFrames.kt | 调试用渐变测试图 |
@@ -66,7 +67,7 @@
 | mock_phone | mock_phone/mock_phone_server.py | 假视频流发送端（无真机即可联调）|
 | verify scripts | tests/output/verify_*.py | OpenCV 解码 + mean/std 验证 |
 
-## 数据流（MVP-2 批次 3.2.0.3a 已验证：PcpPacketWriter 24 字节头打包字节级正确）
+## 数据流（MVP-2 批次 3.2.0.3b 已验证：TcpStreamServer 监听 9999 + 客户端连上发 1 包）
 
 ```
 Camera2 物理摄像头 (后置 1280×720 @ 30fps)
@@ -80,8 +81,8 @@ EGL Surface (绑定到 MediaCodec.createInputSurface())
 H.264 压缩帧 (NV12/I420 → IDR/P/B frames, 49KB/帧 平均)
     ↓ (✅ 3.2.0.3a) PcpPacketWriter.buildPacket() — 24 字节头 + payload
 PCP 帧 (magic='PHCM' + version=0x01 + type=0x01 + codec=0x02 + flags + sequence + pts + payload_len + NALU)
-    ↓ (待 3.2.0.3b) TcpStreamServer 发送
-电脑端 Socket
+    ↓ (✅ 3.2.0.3b) TcpStreamServer.sendPacket() → 0.0.0.0:9999
+电脑端 Socket (adb reverse tcp:9999 tcp:9999 → 127.0.0.1:9999)
     ↓ (待 3.2.0.3d) PcpReceiver
 PcpReceiver.frames() generator
     ↓ (待 3.2.0.3d) H264Decoder
