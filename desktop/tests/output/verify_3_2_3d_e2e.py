@@ -44,18 +44,21 @@ logging.basicConfig(
 log = logging.getLogger("verify_3_2_3d")
 
 
-# ====== PCP 协议常量 (与 phone_native/PcpPacketWriter.kt 同步) ======
+# ====== PCP 协议常量 (与 phone_native/PcpPacketWriter.kt 同步, 批次 3.2.0.3g 32 字节头) ======
 MAGIC = b'PHCM'
-VERSION = 0x01
-HEADER_SIZE = 24
+VERSION = 0x02  # 批次 3.2.0.3g 起
+HEADER_SIZE = 32
 FLAG_KEYFRAME = 0x01
 
 
-def pcp_pack(sequence: int, pts_us: int, nalu: bytes, is_keyframe: bool) -> bytes:
-    """把 1 个 NALU 打成 PCP 24 字节头 + payload (小端, 与 PcpPacketWriter.kt 一致)"""
+def pcp_pack(sequence: int, pts_us: int, nalu: bytes, is_keyframe: bool, pts_ns: int = 0) -> bytes:
+    """把 1 个 NALU 打成 PCP 32 字节头 (v2) + payload (小端, 与 PcpPacketWriter.kt 一致)
+
+    批次 3.2.0.3g: 加 pts_ns (Camera2 Image.getTimestamp 纳秒), PC 端用此算时延
+    """
     flags = FLAG_KEYFRAME if is_keyframe else 0
     header = struct.pack(
-        '<4sBBBBIQI',
+        '<4sBBBBIQQI',
         MAGIC,
         VERSION,
         TYPE_VIDEO,
@@ -63,6 +66,7 @@ def pcp_pack(sequence: int, pts_us: int, nalu: bytes, is_keyframe: bool) -> byte
         flags,
         sequence & 0xFFFFFFFF,
         pts_us & 0xFFFFFFFFFFFFFFFF,
+        pts_ns & 0xFFFFFFFFFFFFFFFF,
         len(nalu) & 0xFFFFFFFF,
     )
     assert len(header) == HEADER_SIZE, f"header size {len(header)} != {HEADER_SIZE}"
@@ -70,15 +74,15 @@ def pcp_pack(sequence: int, pts_us: int, nalu: bytes, is_keyframe: bool) -> byte
 
 
 def pcp_unpack(packet: bytes):
-    """解 PCP 24 字节头, 返 (sequence, pts, codec, flags, payload)"""
+    """解 PCP 32 字节头 (v2), 返 (sequence, pts, pts_ns, codec, flags, payload)"""
     assert len(packet) >= HEADER_SIZE, f"packet too short: {len(packet)}"
-    magic, ver, ptype, codec, flags, seq, pts, plen = struct.unpack(
-        '<4sBBBBIQI', packet[:HEADER_SIZE]
+    magic, ver, ptype, codec, flags, seq, pts, pts_ns, plen = struct.unpack(
+        '<4sBBBBIQQI', packet[:HEADER_SIZE]
     )
     assert magic == MAGIC, f"magic mismatch: {magic!r}"
     assert ver == VERSION, f"version mismatch: {ver}"
     payload = packet[HEADER_SIZE:HEADER_SIZE + plen]
-    return seq, pts, codec, flags, payload
+    return seq, pts, pts_ns, codec, flags, payload
 
 
 def nalu_type(n: bytes) -> int:
@@ -188,7 +192,9 @@ def main():
     pcp_packets = []
     for seq, (nalu, is_kf) in enumerate(nalus):
         pts = int(seq * (1_000_000 / 30))  # 30fps → 33333us/帧
-        pkt = pcp_pack(sequence=seq, pts_us=pts, nalu=nalu, is_keyframe=is_kf)
+        # 批次 3.2.0.3g: 模拟 Camera2 pts_ns (单调时钟, 任意起点, 模拟 1000ns/帧)
+        pts_ns = 1_000_000_000_000 + seq * 33_333_333  # 1e12 起点 + 33.3ms/帧
+        pkt = pcp_pack(sequence=seq, pts_us=pts, nalu=nalu, is_keyframe=is_kf, pts_ns=pts_ns)
         pcp_packets.append(pkt)
     t_pack = time.time() - t0
     total_pcp_bytes = sum(len(p) for p in pcp_packets)
@@ -206,7 +212,7 @@ def main():
         'decode_failed': 0,
     }
     for pkt in pcp_packets:
-        seq, pts, codec, flags, nalu = pcp_unpack(pkt)
+        seq, pts, pts_ns, codec, flags, nalu = pcp_unpack(pkt)
         decode_stats['received_pcp'] += 1
         vf = VideoFrame(
             data=nalu,
@@ -215,6 +221,7 @@ def main():
             codec=codec,
             sequence=seq,
             pts=pts,
+            pts_ns=pts_ns,  # 批次 3.2.0.3g 推流时延
             is_keyframe=bool(flags & FLAG_KEYFRAME),
             receive_time=time.time(),
         )

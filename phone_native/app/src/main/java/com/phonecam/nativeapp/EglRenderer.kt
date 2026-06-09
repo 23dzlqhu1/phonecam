@@ -109,6 +109,11 @@ class EglRenderer(private val inputSurface: Surface) {
     private var uTexture: Int = 0
     private var vTexture: Int = 0
 
+    // 批次 3.2.0.3g: EGL/GLES 错误统计 (跨线程不安全, 只在 EGL owner thread 写)
+    @Volatile var eglErrorCount: Long = 0
+    @Volatile var eglSwapFailCount: Long = 0
+    @Volatile var drawCallCount: Long = 0
+
     // 顶点 / 纹理坐标 buffer (一次性分配)
     private val vertexBuffer: FloatBuffer = ByteBuffer
         .allocateDirect(VERTEX_COORDS.size * 4)
@@ -258,12 +263,15 @@ class EglRenderer(private val inputSurface: Surface) {
 
         // 1. 上传 Y 平面 → Y 纹理
         uploadTextureLuminance(yTexture, yuv420planar, 0, ySize, width, height)
+        checkGlError("[3.2.0.3g] glTexImage2D Y 失败")
 
         // 2. 上传 U 平面 → U 纹理
         uploadTextureLuminance(uTexture, yuv420planar, ySize, uvSize, uvW, uvH)
+        checkGlError("[3.2.0.3g] glTexImage2D U 失败")
 
         // 3. 上传 V 平面 → V 纹理
         uploadTextureLuminance(vTexture, yuv420planar, ySize + uvSize, uvSize, uvW, uvH)
+        checkGlError("[3.2.0.3g] glTexImage2D V 失败")
 
         // 4. 清除画布
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
@@ -294,10 +302,30 @@ class EglRenderer(private val inputSurface: Surface) {
 
         // 6. 画 2D 矩形 (4 顶点 = 2 三角形)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        checkGlError("[3.2.0.3g] glDrawArrays 失败")
 
         // 7. 通知 EGL 把画好的像素"送"到 MediaCodec InputSurface
         //    MediaCodec 内部编码器在 eglSwapBuffers 时拿到新帧
-        EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+        //    批次 3.2.0.3g: 检查 eglSwapBuffers 返回值, false 表示 EGL 错误
+        val swapped = EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+        if (!swapped) {
+            eglSwapFailCount++
+            val err = EGL14.eglGetError()
+            Log.w(TAG, "[3.2.0.3g] eglSwapBuffers 失败 #${eglSwapFailCount}: err=0x${Integer.toHexString(err)}")
+        }
+        drawCallCount++
+    }
+
+    /**
+     * 批次 3.2.0.3g: 检查 GL 错误, 累加统计 + log (不抛异常, 让推流继续)
+     */
+    private fun checkGlError(op: String) {
+        var err = GLES20.glGetError()
+        while (err != GLES20.GL_NO_ERROR) {
+            eglErrorCount++
+            Log.w(TAG, "$op err=0x${Integer.toHexString(err)} (累计 $eglErrorCount)")
+            err = GLES20.glGetError()
+        }
     }
 
     private fun uploadTextureLuminance(

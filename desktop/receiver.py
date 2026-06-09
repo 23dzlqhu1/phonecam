@@ -46,10 +46,13 @@ logger = logging.getLogger(__name__)
 
 # 魔数 'PHCM' = 0x4D434850 (little-endian)
 MAGIC = b'PHCM'
-HEADER_SIZE = 24
+# 批次 3.2.0.3g 升级: 24→32 字节 (新增 pts_ns 8 字节, 算端到端时延)
+HEADER_SIZE = 32
+HEADER_SIZE_V1 = 24  # 老版本 24 字节头 (3.2.0.3a~3.2.0.3f 兼容)
 
 # 协议版本
-VERSION = 0x01
+VERSION = 0x02  # 批次 3.2.0.3g 起
+VERSION_V1 = 0x01  # 老版本
 
 # 通道类型
 TYPE_VIDEO = 0x01
@@ -97,6 +100,7 @@ class VideoFrame:
     codec: int = CODEC_RAW_RGB
     sequence: int = 0
     pts: int = 0
+    pts_ns: int = 0       # 批次 3.2.0.3g: Camera2 timestamp 纳秒, 算端到端时延
     is_keyframe: bool = False
     receive_time: float = 0.0  # 接收时刻（用于延迟计算）
 
@@ -108,15 +112,17 @@ class PcpReceiver:
     支持自动重连、指数退避、丢帧统计、FPS 计算。
     """
 
-    HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节，与 HEADER_SIZE 对应
-    #              │   │  │ │ │  │  │   └─ payload_len: u32
-    #              │   │  │ │ │  │  └───── pts: u64
-    #              │   │  │ │ │  └──────── sequence: u32
-    #              │   │  │ │ └─────────── flags: u8
-    #              │   │  │ └──────────── codec: u8
-    #              │   │  └────────────── type: u8
-    #              │   └───────────────── version: u8
-    #              └───────────────────── magic: 4s = 'PHCM'
+    HEADER_STRUCT = struct.Struct('<4sBBBBIQQI')  # 32 字节，与 HEADER_SIZE 对应
+    #              │   │  │ │ │  │  │   │  └─ payload_len: u32
+    #              │   │  │ │ │  │  │   └──── pts_ns: u64 (Camera2 timestamp, 算端到端时延)
+    #              │   │  │ │ │  │  └──────── pts_us: u64
+    #              │   │  │ │ │  └─────────── sequence: u32
+    #              │   │  │ │ └────────────── flags: u8
+    #              │   │  │ └──────────────── codec: u8
+    #              │   │  └────────────────── type: u8
+    #              │   └───────────────────── version: u8
+    #              └───────────────────────── magic: 4s = 'PHCM'
+    HEADER_STRUCT_V1 = struct.Struct('<4sBBBBIQI')  # 24 字节老版本兼容
 
     def __init__(self, host: str, port: int = 9999,
                  reconnect_delay: float = 2.0, max_delay: float = 30.0):
@@ -250,22 +256,41 @@ class PcpReceiver:
         """从已连接的 socket 读取 PCP 帧
 
         协议格式见模块顶部文档。
+        批次 3.2.0.3g: 根据 version 自动选 HEADER_SIZE (v1=24, v2=32)
         """
-        header_buf = bytearray(HEADER_SIZE)
+        # 批次 3.2.0.3g: 先读 4 字节 magic + 1 字节 version, 决定用哪个 HEADER_SIZE
+        #  这样做: 老的 24 字节头 (version=1) 也能被新 receiver 解析
+        first5 = bytearray(5)
+        self._recv_exact(sock, first5, 5)
+        magic = bytes(first5[:4])
+        if magic != MAGIC:
+            raise ValueError(f"协议魔数错误: {magic!r}，期望 {MAGIC!r}")
+        version = first5[4]
+        if version == VERSION_V1:
+            header_size = HEADER_SIZE_V1
+            struct_cls = self.HEADER_STRUCT_V1
+        elif version == VERSION:
+            header_size = HEADER_SIZE
+            struct_cls = self.HEADER_STRUCT
+        else:
+            raise ValueError(f"协议版本不支持: {version}")
+
         recv_into = sock.recv_into  # 局部变量，加速
+        header_buf = bytearray(header_size)
 
         while self._running:
-            # 1) 读 24 字节头
-            self._recv_exact(sock, header_buf, HEADER_SIZE)
-            magic, version, ptype, codec, flags, sequence, pts, payload_len = \
-                self.HEADER_STRUCT.unpack(bytes(header_buf))
-
-            # 2) 校验魔数
-            if magic != MAGIC:
-                raise ValueError(f"协议魔数错误: {magic!r}，期望 {MAGIC!r}")
-
-            if version != VERSION:
-                raise ValueError(f"协议版本不支持: {version}")
+            # 1) 把剩下的 (header_size-5) 字节补齐
+            #    已经读了 magic+version 共 5 字节
+            self._recv_exact(sock, header_buf, header_size)
+            # 拼回完整头
+            full_header = bytes(first5) + bytes(header_buf)
+            if header_size == HEADER_SIZE_V1:
+                _magic, _ver, ptype, codec, flags, sequence, pts, payload_len = \
+                    struct_cls.unpack(full_header)
+                pts_ns = 0  # 老版本无 pts_ns
+            else:
+                _magic, _ver, ptype, codec, flags, sequence, pts, pts_ns, payload_len = \
+                    struct_cls.unpack(full_header)
 
             # 3) 只处理 video 通道
             if ptype != TYPE_VIDEO:
@@ -285,6 +310,7 @@ class PcpReceiver:
                 codec=codec,
                 sequence=sequence,
                 pts=pts,
+                pts_ns=pts_ns,  # 批次 3.2.0.3g: 推流时延用
                 is_keyframe=bool(flags & FLAG_KEYFRAME),
                 receive_time=time.time(),
             )

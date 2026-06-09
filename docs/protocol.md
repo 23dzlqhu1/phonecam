@@ -36,7 +36,7 @@
 │ Offset  Size  Field        取值范围              │
 ├──────────────────────────────────────────────────┤
 │ 0       4     magic        'PHCM'                │  协议魔数
-│ 4       1     version      0x01                  │  协议版本
+│ 4       1     version      0x01 / 0x02           │  协议版本
 │ 5       1     type         0x01=video            │  通道类型
 │                   0x02=audio                      │
 │                   0x03=control                    │
@@ -45,26 +45,31 @@
 │                   0x03=aac                        │
 │ 7       1     flags        0x01=keyframe         │  帧标志
 │ 8       4     sequence     u32                    │  序列号
-│ 12      8     pts          u64 (微秒)            │  时间戳
-│ 20      4     payload_len  u32                    │  负载长度
+│ 12      8     pts_us       u64 (微秒)            │  时间戳
+│ 20      8     pts_ns       u64 (纳秒)            │  批次 3.2.0.3g+:
+│                   Camera2 Image.getTimestamp,     │  单调时钟, 算端到端时延
+│                   0x01 版本该字段不存在            │
+│ 28      4     payload_len  u32                    │  负载长度
 ├──────────────────────────────────────────────────┤
-│ 24      N     payload      二进制媒体数据          │
+│ 32      N     payload      二进制媒体数据          │
 └──────────────────────────────────────────────────┘
 ```
 
-> 总头 24 字节，**所有字段小端序**。
+> 总头 32 字节（v2，3.2.0.3g 起），**所有字段小端序**。
+> 老版本 24 字节头（v1，3.2.0.3a~3.2.0.3f）仍兼容，新 receiver 通过 version 自动识别。
 
 ### 2.2 字段详解
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | magic | 是 | 固定 `b'PHCM'`，用于识别协议 |
-| version | 是 | 当前固定 `0x01`，未来扩展用 |
+| version | 是 | v1=0x01 (24 字节头), v2=0x02 (32 字节头, 含 pts_ns) |
 | type | 是 | 见上表。MVP-1 只用 0x01 (video) |
 | codec | 是 | 见上表。MVP-1 只用 0x01 (raw_rgb) |
 | flags | 是 | bit 0 = 关键帧，bit 1-7 预留 |
 | sequence | 是 | 从 0 开始的 u32 帧编号，溢出回卷 |
-| pts | 是 | 帧时间戳（微秒），从发送端启动开始算 |
+| pts_us | 是 | 帧时间戳（微秒），从发送端启动开始算 |
+| pts_ns | v2 必填 | Camera2 Image.getTimestamp() 纳秒（单调时钟）。PC 端用此 + time.monotonic_ns 算端到端时延（首次收到时校准 offset）|
 | payload_len | 是 | 后续 payload 的字节数 |
 
 ---

@@ -405,7 +405,9 @@ class MainActivity : AppCompatActivity() {
                     InAppLogStore.i(TAG, "[3.2.0.3f-DEBUG] 帧#$cameraFrameCount sActive=$sActive egl=${r != null} enc=${enc != null}")
                 }
                 if (sActive) {
-                    StreamingService.submitFrame(yuv, w, h)
+                    // 批次 3.2.0.3g: 传 image.timestamp (纳秒, Camera2 单调时钟)
+                    //  PC 端用这个 + 解码时间算端到端时延
+                    StreamingService.submitFrame(yuv, w, h, image.timestamp)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "[3.2.0.2] 提取真实帧异常", e)

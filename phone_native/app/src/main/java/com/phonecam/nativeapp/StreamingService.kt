@@ -65,24 +65,48 @@ class StreamingService : Service() {
         //   解决: 提交任务到 eglExecutor (单线程), 由 EGL owner thread 调 drawYuv
         @Volatile var sEglExecutor: java.util.concurrent.ExecutorService? = null
 
+        // 批次 3.2.0.3g 帧率统计: 监听 listener 线程 / EGL owner thread / H264Encoder-OutputLoop
+        //  注意: 这些 ++ 不是线程安全的, 读到的 fps 是近似值 (单线程自己加自己读)
+        @Volatile var sFrameSubmitCount: Long = 0   // listener 调用 submitFrame 次数
+        @Volatile var sFrameEncodeCount: Long = 0   // EGL owner thread drawYuv 完成次数
+        @Volatile var sNaluOutputCount: Long = 0    // H264Encoder 吐出 NALU 次数
+        @Volatile var sStartTimeMs: Long = 0L       // 推流启动时间 (SystemClock.elapsedRealtime)
+
+        // 批次 3.2.0.3g 推流时延: listener 提交帧的 Camera2 Image timestamp (纳秒, 单调时钟)
+        //  naluCb.onNalu 读这个写进 PCP header, PC 端算端到端时延
+        @Volatile var sLatestPtsNs: Long = 0L       // 最近一次 submitFrame 携带的 pts_ns (AtomicLong 替代)
+        private val sPtsNsLock = Any()              // 同步 sLatestPtsNs 读写 (避免用 AtomicLong 引起编译器提示)
+
         /**
          * 批次 3.2.0.3f: 跨线程投递一帧 YUV 给 EGL owner thread
          *  listener 线程 (imageReaderHandler) 调这个, 实际 EGL drawYuv 在 EGL owner thread 跑
+         *
+         *  批次 3.2.0.3g: 加 ptsNs 参数 (Camera2 Image.getTimestamp() 纳秒, 单调时钟)
+         *   写进 sLatestPtsNs, naluCb.onNalu 读这个写进 PCP header 算端到端时延
          */
-        fun submitFrame(yuv: ByteArray, w: Int, h: Int) {
+        fun submitFrame(yuv: ByteArray, w: Int, h: Int, ptsNs: Long = 0L) {
             val exec = sEglExecutor
             val renderer = sEglRenderer
             val encoder = sH264Encoder
             if (exec == null || renderer == null || encoder == null || !sActive) return
+            synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
+            sFrameSubmitCount++  // 批次 3.2.0.3g 帧率统计
             exec.execute {
                 try {
                     renderer.drawYuv(yuv, w, h)
                     encoder.encodeFrame(yuv)
+                    sFrameEncodeCount++  // 批次 3.2.0.3g 帧率统计 (EGL owner thread)
                 } catch (e: Exception) {
                     // 批次 3.2.0.3f 关键诊断: 跨线程 EGL 异常具体是什么
                     Log.e(TAG, "[3.2.0.3f] EGL/encoder 异常 (主因很可能是 EGL 跨线程)", e)
                 }
             }
+        }
+
+        // 批次 3.2.0.3g: naluCb.onNalu 调这个读"最近一次 submitFrame 携带的 pts_ns"
+        //  延迟差: 1 帧 (33ms), 对时延统计影响小
+        fun readLatestPtsNs(): Long {
+            return synchronized(sPtsNsLock) { sLatestPtsNs }
         }
 
         // PCP 包统计
@@ -188,12 +212,17 @@ class StreamingService : Service() {
                 val encoder = H264Encoder()
                 val naluCb = object : H264Encoder.NaluCallback {
                     override fun onNalu(nalu: ByteArray, type: Int) {
+                        sNaluOutputCount++  // 批次 3.2.0.3g 帧率统计
                         val seq = sPcpSequence++
                         val pts = System.nanoTime() / 1000L
+                        // 批次 3.2.0.3g: 读最近一次 listener 提交的 pts_ns, 写进 PCP header
+                        //  PC 端用这个 + 解码时间算端到端时延
+                        val ptsNs = readLatestPtsNs()
                         val isKeyframe = (type == 5)  // H.264 NALU type 5 = IDR slice
                         val pkt = PcpPacketWriter.buildPacket(
                             sequence = seq,
                             ptsUs = pts,
+                            ptsNs = ptsNs,
                             payload = nalu,
                             isKeyframe = isKeyframe
                         )
@@ -203,7 +232,7 @@ class StreamingService : Service() {
                             sBytesSentCount += pkt.size
                         }
                         if (seq % 30 == 0) {
-                            InAppLogStore.i(TAG, "[3.2.0.3f-PCP] seq=$seq type=$type keyframe=$isKeyframe bytes=${pkt.size} (累计 $sNaluSentCount 包 / $sBytesSentCount B)")
+                            InAppLogStore.i(TAG, "[3.2.0.3f-PCP] seq=$seq type=$type keyframe=$isKeyframe bytes=${pkt.size} ptsNs=$ptsNs (累计 $sNaluSentCount 包 / $sBytesSentCount B)")
                         }
                     }
                 }
@@ -247,10 +276,18 @@ class StreamingService : Service() {
                 sPcpSequence = 0
                 sNaluSentCount = 0
                 sBytesSentCount = 0L
+                // 批次 3.2.0.3g 帧率统计 reset
+                sFrameSubmitCount = 0
+                sFrameEncodeCount = 0
+                sNaluOutputCount = 0
+                sStartTimeMs = android.os.SystemClock.elapsedRealtime()
 
                 // 6) 翻转 sActive 标志位 → MainActivity listener 看到后会送帧
                 sActive = true
                 InAppLogStore.i(TAG, "[3.2.0.3f] sActive=true, 推流中...")
+
+                // 批次 3.2.0.3g 帧率统计: 启动 1s 定时打印 (主线程 Handler, 1s 一次, 推流期间持续)
+                startStatsTimer()
 
             } catch (e: Exception) {
                 Log.e(TAG, "[3.2.0.3f] 启动异常", e)
@@ -266,6 +303,8 @@ class StreamingService : Service() {
      */
     private fun stopStreamingInternal() {
         sActive = false
+        // 批次 3.2.0.3g: 停帧率统计 timer
+        stopStatsTimer()
         Thread.sleep(200)  // 让 listener 看到 sActive=false 后再释放
         try { sEglExecutor?.shutdownNow() } catch (e: Exception) { Log.w(TAG, "eglExecutor shutdown 异常: ${e.message}") }
         sEglExecutor = null
@@ -276,6 +315,39 @@ class StreamingService : Service() {
         try { sTcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop 异常: ${e.message}") }
         sTcpServer = null
         InAppLogStore.i(TAG, "[3.2.0.3f] 推流已完全停止")
+    }
+
+    // 批次 3.2.0.3g 帧率统计 timer (主线程 Handler, 1s 一次)
+    private val statsHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val statsRunnable: Runnable = object : Runnable {
+        override fun run() {
+            if (!sActive) return
+            val elapsedSec = (android.os.SystemClock.elapsedRealtime() - sStartTimeMs) / 1000.0
+            if (elapsedSec > 0) {
+                val submitFps = sFrameSubmitCount / elapsedSec
+                val encodeFps = sFrameEncodeCount / elapsedSec
+                val naluFps = sNaluOutputCount / elapsedSec
+                val sendFps = sNaluSentCount / elapsedSec
+                val bps = sBytesSentCount * 8.0 / elapsedSec / 1_000.0
+                val eglErr = sEglRenderer?.eglErrorCount ?: 0
+                val eglSwapFail = sEglRenderer?.eglSwapFailCount ?: 0
+                val draws = sEglRenderer?.drawCallCount ?: 0
+                InAppLogStore.i(
+                    TAG,
+                    "[3.2.0.3g-STATS] T=${"%.1f".format(elapsedSec)}s 送帧=${"%.1f".format(submitFps)}fps 编码=${"%.1f".format(encodeFps)}fps " +
+                            "NALU出=${"%.1f".format(naluFps)}fps 发送=${"%.1f".format(sendFps)}fps ${"%.1f".format(bps)}kbps " +
+                            "EGL画=$draws 错误=$eglErr swap失败=$eglSwapFail"
+                )
+            }
+            statsHandler.postDelayed(this, 1000L)
+        }
+    }
+    private fun startStatsTimer() {
+        statsHandler.removeCallbacks(statsRunnable)
+        statsHandler.post(statsRunnable)
+    }
+    private fun stopStatsTimer() {
+        statsHandler.removeCallbacks(statsRunnable)
     }
 
     /**

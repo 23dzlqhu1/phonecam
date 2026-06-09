@@ -72,6 +72,14 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+# 批次 3.2.0.3g 推流时延校准
+#  Camera2 Image.getTimestamp() 是 Android 单调时钟 (CLOCK_MONOTONIC, 纳秒, 设备启动后)
+#  Python time.monotonic_ns() 是 PC 单调时钟 (CLOCK_MONOTONIC, 纳秒, PC 启动后)
+#  两者基准点不同 (设备启动时间差), 不能直接相减
+#  解决: 第一次收到 pts_ns 时记下 offset, 之后时延 = pc_now - offset - pts_ns
+_latency_offset_ns: int | None = None
+
+
 def parse_connect(spec: str) -> tuple[str, int]:
     """解析 host:port 字符串"""
     if ':' not in spec:
@@ -133,9 +141,22 @@ def _run_cli(args):
                     if args.preview:
                         # 统计与叠加信息
                         now = time.time()
-                        # 端到端延迟估算（手机端 PTS 到现在的差）
-                        if frame.pts and last_pts_us != frame.pts:
+                        # 批次 3.2.0.3g 推流时延: 用 Camera2 pts_ns (单调时钟) 算精确时延
+                        #  关键: 两端单调时钟基准不同 (设备启动时间差), 首次收到 pts_ns 时校准
+                        global _latency_offset_ns
+                        latency_ms = None
+                        if frame.pts_ns and frame.pts_ns > 0:
+                            pc_now_ns = time.monotonic_ns()
+                            if _latency_offset_ns is None:
+                                # 首次校准: 假设 0 时延, 记录 offset
+                                _latency_offset_ns = pc_now_ns - frame.pts_ns
+                            phone_ns_aligned = pc_now_ns - _latency_offset_ns
+                            if phone_ns_aligned > frame.pts_ns:
+                                latency_ms = (phone_ns_aligned - frame.pts_ns) / 1_000_000.0
+                        if latency_ms is None:
+                            # 退化: 用 receive_time 估算
                             latency_ms = (now - frame.receive_time) * 1000
+                        if last_pts_us != frame.pts:
                             cv2.putText(
                                 bgr,
                                 f"FPS: {receiver.fps:.1f}  "
