@@ -143,7 +143,7 @@ object PcpPacketWriter {
     fun buildPacket(
         sequence: Int,
         ptsUs: Long,
-        ptsNs: Long,
+        ptsNs: Long = 0L,  // 批次 3.2.0.3h: 加默认值, 兼容 3.2.0.3b 测试包调用 (没真实 Camera2 timestamp)
         payload: ByteArray,
         isKeyframe: Boolean = false,
         codec: Byte = CODEC_H264,

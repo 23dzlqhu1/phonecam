@@ -47,6 +47,10 @@ class TcpStreamServer(
     /**
      * 启动 accept 循环 (非阻塞, 立刻返回)
      * 实际 accept 在独立线程跑 (G-022 防御: 不能在主线程 accept 会 ANR)
+     *
+     * 批次 3.2.0.3h-A1 修复: accept 后不停在原 client 上, 而是用 InputStream.read()
+     *  阻塞等客户端断开, read 返 -1/抛异常 → 关闭 + 清空 clientSocket → 回到 accept()
+     *  接受下一个客户端 (PC 端 phonecam.py 退出重连场景必须支持)
      */
     fun start() {
         if (running) {
@@ -62,20 +66,62 @@ class TcpStreamServer(
                 serverSocket!!.reuseAddress = true
                 serverSocket!!.bind(java.net.InetSocketAddress("0.0.0.0", port), 1)
                 onEvent("ServerSocket 监听 0.0.0.0:$port OK (SO_REUSEADDR)")
+                // 批次 3.2.0.3h-A1: 接受循环持续, 一个 client 断开后立即接下一个
                 while (running) {
-                    val client = serverSocket!!.accept()  // 阻塞, 客人来之前一直等
+                    val client: Socket = try {
+                        serverSocket!!.accept()  // 阻塞, 等客人进门
+                    } catch (e: Exception) {
+                        if (running) {
+                            onEvent("[3.2.0.3h] accept 异常: ${e.javaClass.simpleName}: ${e.message}")
+                            Thread.sleep(500)  // 短暂退避, 避免死循环刷屏
+                        }
+                        continue
+                    }
                     if (!running) {
-                        client.close()
+                        try { client.close() } catch (_: Exception) {}
                         break
                     }
-                    onEvent("客户端连接: ${client.remoteSocketAddress}")
+                    onEvent("[3.2.0.3h] 客户端连接: ${client.remoteSocketAddress}")
                     clientSocket = client
+
+                    // 阻塞等客户端断开 (对端 close 时 read() 返 -1, 或抛 SocketException)
+                    var clientAlive = true
+                    val reason: String = try {
+                        val monitor = client.getInputStream()
+                        val buf = ByteArray(1024)
+                        // read() 阻塞; 对端 close 时返 -1; 网络异常抛 IOException
+                        while (running && clientAlive && client.isConnected && !client.isClosed) {
+                            val n = try {
+                                monitor.read(buf)
+                            } catch (ie: Exception) {
+                                clientAlive = false
+                                "对端 read 异常: ${ie.javaClass.simpleName}: ${ie.message}"
+                                break
+                            }
+                            if (n == -1) {
+                                clientAlive = false
+                                "对端 close (read=-1)"
+                                break
+                            }
+                            // n > 0: MVP-2 协议是单向推流, 客户端不应发数据, 忽略
+                        }
+                        "client 监控循环结束 (alive=$clientAlive)"
+                    } catch (e: Exception) {
+                        "[3.2.0.3h] client 监控线程异常: ${e.javaClass.simpleName}: ${e.message}"
+                    }
+
+                    // 清理当前 client, accept() 接下一个
+                    try { client.close() } catch (_: Exception) {}
+                    if (clientSocket === client) clientSocket = null
+                    onEvent("[3.2.0.3h] 客户端已断开: $reason, 等待下一个连接")
                 }
             } catch (e: Exception) {
                 if (running) {
-                    onEvent("异常 (accept loop): ${e.javaClass.simpleName}: ${e.message}")
-                    Log.e(tag, "accept loop 异常", e)
+                    onEvent("[3.2.0.3h] accept loop 顶层异常: ${e.javaClass.simpleName}: ${e.message}")
+                    Log.e(tag, "accept loop 顶层异常", e)
                 }
+            } finally {
+                onEvent("[3.2.0.3h] accept 线程退出")
             }
         }, "TcpStreamServer-Accept")
         acceptThread?.start()
@@ -92,14 +138,15 @@ class TcpStreamServer(
     /**
      * 发送 1 个 PCP 包到当前客户端 (线程安全: 同步访问 clientSocket)
      *
-     * @param packet 完整的 [24 字节头][payload] 字节数组 (PcpPacketWriter.buildPacket 输出)
+     * 批次 3.2.0.3h-A1 修复: 发送失败时 (Broken pipe / Socket closed) 立即关 socket + 清字段,
+     *  让 accept 循环在 client 监控 read() 返 -1 后重新接下一个客户端
+     * 静默: 没有客户端时返 false 但不打印日志, 避免 30ms 一次的日志风暴
+     *
+     * @param packet 完整的 [32 字节头][payload] 字节数组 (PcpPacketWriter.buildPacket 输出)
      * @return true=成功, false=失败 (无客户端/已断)
      */
     fun sendPacket(packet: ByteArray): Boolean {
-        val client = clientSocket ?: run {
-            onEvent("sendPacket 失败: 无客户端连接")
-            return false
-        }
+        val client = clientSocket ?: return false  // 批次 3.2.0.3h-A1: 静默不报错
         return try {
             synchronized(client) {
                 client.getOutputStream().apply {
@@ -107,10 +154,13 @@ class TcpStreamServer(
                     flush()
                 }
             }
-            onEvent("已发送: ${packet.size} 字节")
             true
         } catch (e: Exception) {
-            onEvent("sendPacket 异常: ${e.javaClass.simpleName}: ${e.message}")
+            // 批次 3.2.0.3h-A1: 客户端断, 关 socket + 清空 clientSocket
+            //  accept 循环的 InputStream.read() 会同时返 -1, 触发重新 accept
+            onEvent("[3.2.0.3h] sendPacket 客户端断开: ${e.javaClass.simpleName}: ${e.message}")
+            try { client.close() } catch (_: Exception) {}
+            if (clientSocket === client) clientSocket = null
             false
         }
     }

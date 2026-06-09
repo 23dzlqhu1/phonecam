@@ -688,7 +688,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 InAppLogStore.i(TAG, "[3.2.0.3b] 启动 TcpStreamServer 监听 9999")
-                val server = TcpStreamServer(port = 9998) { status ->
+                val server = TcpStreamServer(port = 9999) { status ->  // 批次3.2.0.3h: 修正 9998→9999, 避免与StreamingService抢端口
                     InAppLogStore.i(TAG, "[3.2.0.3b] $status")
                 }
                 server.start()
