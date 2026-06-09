@@ -41,7 +41,7 @@
 | [G-007](#g-007windows-防火墙拦截-gradle-daemon-127001-通信) | Windows 防火墙拦截 Gradle daemon 127.0.0.1 通信 | 2026-06-08 |
 | [G-008](#g-008flutter-启动时扫微信小程序字体缓存路径会报错但用默认字体兜底) | Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底） | 2026-06-08 |
 | [G-009](#g-009stream_serverdart临时占位-避免-shelfrequest--httprequest-类型冲突) | `stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突） | 2026-06-08 |
-| [G-010](#g-010mvp-2-手机端从-flutter-切到-kotlin-原生的路线重置adr-006) | **MVP-2 手机端从 Flutter 切到 Kotlin 原生**（路线重置 ADR-006，旧 `phone/` 冻结 + 新建 `phone_native/`） | 2026-06-08 |
+| [G-010](#g-010mvp-2-手机端从-flutter-切到-kotlin-原生的路线重置adr-006) | **MVP-2 手机端从 Flutter 切到 Kotlin 原生**（路线重置 ADR-006，旧 `phone/` 2026-06-09 已 git rm） | 2026-06-08→06-09 |
 | [G-011](#g-011gradle-813-wrapper-缓存不完整-gradlewrapperdistsgradle-813-bin-只有-lck--part-没有解压目录) | **Gradle 8.13 wrapper 缓存不完整**（`~/.gradle/wrapper/dists/` 只有 .lck + .part） | 2026-06-08 |
 | [G-012](#g-012agp-installdebug-在-oppo-真机报-installexception--99绕路-adb-install--r) | **AGP `installDebug` 在 OPPO 真机报 `InstallException: -99`**（绕路 `adb install -r`） | 2026-06-08 |
 | [G-013](#g-013surfaceview-vs-textureview-选型camera2-预览选-surfaceviewyuv-直送-surface-零拷贝) | SurfaceView vs TextureView 选型（Camera2 预览选 SurfaceView：YUV 直送 Surface 零拷贝） | 2026-06-08 |
@@ -356,15 +356,15 @@ MVP-2 的核心能力（Camera2 API、MediaCodec 硬编码、PCP TCP 发送）**
 采用 ADR-006 方案 C：
 - 新建 `phone_native/` 目录，Kotlin 原生 Android 工程
 - 包名 `com.phonecam.nativeapp`（避免 Java/Kotlin 关键字 `native`）
-- 旧 `phone/` 冻结作 legacy，**不删除**（保留对照、Gradle 镜像/JBR 防火墙踩坑经验、`H264EncoderPlugin.kt` 编码逻辑参考）
-- 旧 `phone/` 等 `phone_native/` 跑通后再统一加 deprecation 注释
+- 旧 `phone/` 2026-06-09 计划 **git rm**（决策翻转；保留 git 历史即可 checkout 旧源码）
+- ~~旧 phone/ 等 phone_native/ 跑通后再统一加 deprecation 注释~~ (2026-06-09 直接 git rm)
 - 电脑端（`desktop/`）Python 不动，PCP 协议不动
 - 复用 `phone/` 的 Gradle 阿里云镜像 + daemon 防火墙配置
 
 **教训**：
 - **链路选型要看本质**：MVP-2 本质 = Android 视频采集编码项目，不是"App + UI 项目"。当 UI 需求 ≤ 1 屏时，原生 Kotlin 链路更短更优
 - **跨层代价要算清**：Dart ↔ Kotlin 跨层每次 MethodChannel 调用都有序列化/反序列化，对 30fps 视频流影响虽小但累积
-- **不要在新栈没跑通时删旧栈**：旧 `phone/` 保留作对照，新 `phone_native/` 跑通后再统一标 legacy
+- ~~不要在新栈没跑通时删旧栈~~ (2026-06-09 phone_native/ 跑通后已 git rm)
 - **包名避开关键字**：`native` 是 JNI 关键字，做包名会有命名冲突警告（`com.phonecam.native` → `com.phonecam.nativeapp`）
 - **MVP 阶段不要追求产品化 UI**：MVP-2 阶段 TextView 够用，省下的时间专注链路跑通
 
@@ -733,4 +733,3 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 - `open()` 创建完 cameraHandler 后检查 flag，如果 true 就 `startListenerRetryLoop(handler)`
 - 重试 loop：每 500ms 检查 `currentPreviewSize != null && captureSession != null && imageReader == null`，最多 12 次 (6s)，成功就 setupImageReaderInternal
 - ✅ 验证手段：logcat 看 `setOnImageAvailableListener retry #N ps=1280x720 cs=READY` 一直到 `preview+imageReader started`，然后看到 `onImageAvailable` 回调
-

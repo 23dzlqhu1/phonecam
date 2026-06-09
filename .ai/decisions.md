@@ -170,7 +170,7 @@ MVP-2 目标：手机端采集真实摄像头画面 → 硬编码 H.264 → PCP 
   - Step C：PcpPacketWriter.kt 24 字节头
   - Step D：TcpStreamServer.kt 监听 9999
   - Step E：链路串联 + desktop PcpReceiver 看到真实画面
-- [ ] **收尾**：phone_native/ 跑通后，统一给旧 phone/ 加 deprecation 注释（"MVP-2 起请用 phone_native/"），更新 README.md / specs/项目结构.md
+- [x] **收尾**：phone_native/ 跑通后，2026-06-09 决议将旧 `phone/` 整体 git rm（不再仅冻结），更新 README.md / context.md / gotchas.md / G-010 描述
 
 ---
 

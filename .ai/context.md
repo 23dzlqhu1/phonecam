@@ -68,7 +68,7 @@
 | **PCP (TCP + 二进制)** | ✅ 当前 | `desktop/receiver.py::PcpReceiver`（24 字节头 + payload） | MVP-1 启用 |
 
 **AI 工作流提醒**：
-- 看到 `phone/lib/stream_server.dart` 不要"修复"它（旧 `phone/` 整体冻结作 legacy，详见 ADR-006）
+- ~~`phone/lib/stream_server.dart` 已删除 2026-06-09~~ (历史参考：旧 `phone/` 整体已 git rm, ADR-006)
 - 不要建议 MJPEG 或 WebSocket 方案
 - 涉及协议的问题先看 docs/protocol.md
 
@@ -168,7 +168,7 @@
 - ❌ 不要一次写超过 200 行代码
 - ❌ 不要创建 README.md 除非用户明确要（已有根目录 README）
 - ❌ 不要把构建产物（zip、exe、apk）提交到 git
-- ❌ 不要修改 `phone/android/` 和 `phone/ios/` 下的原生工程文件（除非用户明确要）
+- ❌ ~~不要修改 `phone/android/` 和 `phone/ios/`~~ (作废 — 2026-06-09 phone/ 已 git rm)
 - ❌ 不要假设用户有 Git LFS / Docker / macOS / Linux 环境
 
 ---
