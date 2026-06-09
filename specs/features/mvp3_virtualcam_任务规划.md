@@ -6,7 +6,7 @@
 
 **作者**: Claude Code (Tech Lead)
 **日期**: 2026-06-09
-**总工时**: ~270 分钟 (4.5 小时)
+**总工时**: ~270 分钟 (4.5 小时) — 实际: 代码+测试+文档约 90 分钟, 真机联调 T-4/T-5 跳过
 
 ---
 
@@ -56,8 +56,9 @@ flowchart LR
 
 ---
 
-### 🔒 Task-1: virtual_camera.py 核心库改造 (TDD 驱动)
+### Task-1: virtual_camera.py 核心库改造 (TDD 驱动)
 
+**状态**: ✅ 完成 (2026-06-09, commit `9dcc71a`)
 **通俗解释**: 让"虚拟摄像头开关"在各种异常情况下都不让程序崩溃——没装依赖就跳过、没装 OBS 也跳过、非 Windows 跳过——程序的其他部分照常工作。
 
 **对应 AC**: AC-006, AC-007, AC-008, AC-012, AC-013, AC-014
@@ -86,13 +87,14 @@ flowchart LR
 **测试文件**: `desktop/tests/test_virtual_camera.py` (新)
 
 **完成标准**:
-- [ ] 所有 8 个验证标准转成 pytest 用例并通过
-- [ ] `python -m pytest desktop/tests/test_virtual_camera.py -v` 全绿
+- [x] 所有 8 个验证标准转成 pytest 用例并通过
+- [x] `python -m unittest desktop/tests/test_virtual_camera.py -v` 全绿 (17/17)
 
 ---
 
 ### Task-2: phonecam.py 集成 (TDD 驱动)
 
+**状态**: ✅ 完成 (2026-06-09, commit `9dcc71a`)
 **通俗解释**: 让 phonecam.py 启动时多一个 `--virtual-cam` 开关。用户开开关, 程序就把手机画面同步到 Windows 虚拟摄像头; 不开, 照常只在预览窗口看。
 
 **对应 AC**: AC-001, AC-004, AC-005, AC-010, AC-011
@@ -120,12 +122,14 @@ flowchart LR
 **测试文件**: `desktop/tests/test_phonecam_integration.py` (新, mock 框架)
 
 **完成标准**:
-- [ ] 所有 8 个验证标准转成测试并通过
-- [ ] 集成测试 mock 路径覆盖 缺依赖/缺 OBS/正常 三种
+- [x] 所有 8 个验证标准转成测试并通过
+- [x] 集成测试 mock 路径覆盖 缺依赖/缺 OBS/正常 三种
 
 ---
 
 ### Task-3: 装 OBS Studio (联调前置)
+
+**状态**: ✅ 完成 (2026-06-09, 设备已存在) — 实际不需要装, PC 端 OBS Studio 已预装, pyvirtualcam 真环境验证通过。
 
 **通俗解释**: 装上 OBS 这款免费直播软件, 它会自带一个叫 "OBS Virtual Camera" 的虚拟摄像头, 我们的程序才能把手机画面喂给腾讯会议/Zoom。
 
@@ -145,12 +149,14 @@ flowchart LR
 - [ ] Windows 相机 App 看到 "OBS Virtual Camera" 设备
 
 **完成标准**:
-- [ ] mvp3_dryrun.py 输出含 "OBS Virtual Camera"
-- [ ] 桌面有 OBS Studio 快捷方式
+- [x] mvp3_dryrun.py 输出含 "OBS Virtual Camera"
+- [x] 桌面有 OBS Studio 快捷方式 (设备已存在)
 
 ---
 
 ### Task-4: 真机联调 (Windows 相机 App 验证)
+
+**状态**: ⏸️ 跳过 (2026-06-09, 用户决定) — 原因: 时间/设备限制
 
 **通俗解释**: 拿真手机连 USB, 跑起 phonecam.py, 然后打开 Windows 自带"相机"App 看虚拟摄像头画面是不是手机摄像头。
 
@@ -180,12 +186,16 @@ flowchart LR
 - [ ] AC-005: Ctrl+C 干净退出
 
 **完成标准**:
-- [ ] 5 个 AC 全部截图/录屏存档
-- [ ] 终端日志完整截图
+- [ ] 5 个 AC 全部截图/录屏存档 — **跳过**
+- [ ] 终端日志完整截图 — **跳过**
+
+> 详见 `docs/03.3虚拟摄像头/mvp3_pyvirtualcam.md` 第 4 节。
 
 ---
 
 ### Task-5: 端到端联调 (腾讯会议验证)
+
+**状态**: ⏸️ 跳过 (2026-06-09, 用户决定) — 原因: 时间/设备限制
 
 **通俗解释**: 装腾讯会议, 加入或创建会议, 看右下角视频小窗是不是手机画面。
 
@@ -210,14 +220,16 @@ flowchart LR
 - [ ] 延迟 < 200ms (粗测, 手掌拍打同步)
 
 **完成标准**:
-- [ ] 腾讯会议下拉框截图存档
-- [ ] 主持人视角画面截图存档
+- [ ] 腾讯会议下拉框截图存档 — **跳过**
+- [ ] 主持人视角画面截图存档 — **跳过**
 
-**风险提示**: ⚠️ 腾讯会议版本可能要求"以管理员身份运行"才能识别 OBS Virtual Camera, 遇权限问题右键管理员启动。
+> 详见 `docs/03.3虚拟摄像头/mvp3_pyvirtualcam.md` 第 4 节。
 
 ---
 
 ### Task-6: 联调记录 + README 更新
+
+**状态**: ✅ 完成 (2026-06-09)
 
 **通俗解释**: 把今天怎么把虚拟摄像头跑通的全过程记录下来, 写进项目的 docs 目录和 README, 下次别人/未来的你打开项目能快速复现。
 
@@ -244,9 +256,9 @@ flowchart LR
 4. **git push** (如果用户授权)
 
 **完成标准**:
-- [ ] 联调记录文档完整
-- [ ] README.md 有 MVP-3 小节
-- [ ] git commit 成功
+- [x] 联调记录文档完整 (`docs/03.3虚拟摄像头/mvp3_pyvirtualcam.md`)
+- [x] README.md 有 MVP-3 小节
+- [ ] git commit 成功 — 待执行
 
 ---
 
@@ -287,12 +299,13 @@ flowchart LR
 
 ## 5. 验证计划 (动态化)
 
-| 检查项 | 任务 | AC | 通过标准 |
-|--------|------|-----|---------|
-| virtual_camera 单测 | T-1 | AC-006, 007, 008, 012, 013, 014 | `pytest desktop/tests/test_virtual_camera.py` 全绿 |
-| phonecam 集成测 | T-2 | AC-001, 004, 010, 011 | `pytest desktop/tests/test_phonecam_integration.py` 全绿 |
-| 相机 App 联调 | T-4 | AC-001, 002, 003, 004, 005 | 截图/录屏存档 |
-| 腾讯会议联调 | T-5 | AC-002, 003 | 截图存档 |
+| 检查项 | 任务 | AC | 通过标准 | 实际结果 |
+|--------|------|-----|---------|---------|
+| virtual_camera 单测 | T-1 | AC-006, 007, 008, 012, 013, 014 | `unittest tests.test_virtual_camera` 全绿 | ✅ 17/17 |
+| phonecam 集成测 | T-2 | AC-001, 004, 010, 011 | `unittest tests.test_phonecam_integration` 全绿 | ✅ 13/13 |
+| 相机 App 联调 | T-4 | AC-001, 002, 003, 004, 005 | 截图/录屏存档 | ⏸️ 跳过 (用户决定) |
+| 腾讯会议联调 | T-5 | AC-002, 003 | 截图存档 | ⏸️ 跳过 (用户决定) |
+| 真实环境 sanity | T-3 | AC-001, 012 | `mvp3_real_check.py` 拿到 'OBS Virtual Camera' | ✅ 通过 |
 
 ---
 
