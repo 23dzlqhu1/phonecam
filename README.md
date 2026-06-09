@@ -32,7 +32,7 @@
 | [`specs/`](specs/) | 👥 人 + AI 共用 | 产品概述、技术选型、项目结构 |
 | [`desktop/`](desktop/) | 💻 开发者（电脑端）| Windows 端 Python 代码 |
 | ~~[`phone/`]~~ | 📱 旧 Flutter 工程（已删除 2026-06-09）| 2026-06-09 `git rm -r phone/`，保留 git 历史可 checkout；`phone_native/` 是替代品 |
-| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 + 3.2.0.2 + 3.2.0.3a + **3.2.0.3b ✅ 2026-06-09**, v0.2.8-mvp2-batch3.2.0.3b) |
+| [`phone_native/`](phone_native/) | 📱 开发者（手机端 Kotlin 原生）| MVP-2 Kotlin App: 相机预览 + 4 屏完整 (Phase X+Y + 批次 3.1 + 3.2.0.1 + 3.2.0.2 + 3.2.0.3a + 3.2.0.3b + **3.2.0.3c ✅ 2026-06-09**, v0.2.8-mvp2-batch3.2.0.3c) |
 | [`tests/`](tests/) | 🧪 测试工程师 | Mock 设备、性能测试工具 |
 | [`scripts/`](scripts/) | 🔧 所有人 | 构建、安装脚本 |
 
@@ -78,7 +78,7 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 |------|------|------|
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + 批次 3.2.0.3a ✅ + **批次 3.2.0.3b ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 12 截图 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码 + PcpPacketWriter 24 字节头字节级正确 + **TcpStreamServer 监听 9999 + 客户端连上发 1 个测试包**，v0.2.8-mvp2-batch3.2.0.3b）。下一批次：3.2.0.3c 真链路接线 → 3d 电脑端联调 |
+| **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅ + 批次 3.2.0.3a ✅ + 批次 3.2.0.3b ✅ + **批次 3.2.0.3c ✅**（2026-06-09 phone_native/ 4 屏完整 + 跨屏状态同步 + 真机验收 12 截图 + H264Encoder 单帧 H.264 + EGL 零拷贝 + Camera2 ImageReader 真实帧 EGL 编码 + PcpPacketWriter 24 字节头字节级正确 + TcpStreamServer 监听 9999 + 客户端连上发 1 个测试包 + **推流按钮状态机接通 Camera2→EGL→H264→PCP→TCP 5 节点真链路**，v0.2.8-mvp2-batch3.2.0.3c）。下一批次：3.2.0.3d 电脑端联调验证 |
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ⬜ 待开始 |
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 

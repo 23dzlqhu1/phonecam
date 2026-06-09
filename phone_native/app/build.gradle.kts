@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 12                          // 批次 3.2.0.3b: TcpStreamServer 监听 9999 + AndroidManifest INTERNET 权限 + MainActivity 8s 自动测试
-        versionName = "0.2.8-mvp2-batch3.2.0.3b"
+        versionCode = 13                          // 批次 3.2.0.3c: 真链路接线 — 推流按钮状态机 (start/stopStreaming) 接 Camera2→EGL→H264→PCP→TCP
+        versionName = "0.2.8-mvp2-batch3.2.0.3c"
     }
 
     buildTypes {
