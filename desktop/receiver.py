@@ -4,28 +4,29 @@
 PhoneCam Protocol (PCP) - 自研传输协议
 =====================================
 
-MVP-1 协议规范（24 字节定长头 + payload）：
+当前主协议 PCP v2 = 32 字节头；v1 24 字节仅兼容。
 
 ```
 ┌──────────────────────────────────────────────────┐
 │ Offset  Size  Field                               │
 ├──────────────────────────────────────────────────┤
 │ 0       4     magic       'PHCM' (0x4D434850)     │  协议魔数
-│ 4       1     version     0x01                    │  协议版本
+│ 4       1     version     0x02                    │  协议版本
 │ 5       1     type        0x01=video / 0x02=audio │  通道类型
 │ 6       1     codec       0x01=raw_rgb / 0x02=h264│  编码格式
 │ 7       1     flags       0x01=keyframe           │  帧标志
 │ 8       4     sequence    u32 (序列号)             │  丢帧检测
-│ 12      8     pts         u64 (时间戳 us)          │  同步音视频
-│ 20      4     payload_len u32 (负载长度)           │  变长负载
+│ 12      8     pts_us      u64 (时间戳 us)          │  同步音视频
+│ 20      8     pts_ns      u64 (时间戳 ns)          │  端到端时延
+│ 28      4     payload_len u32 (负载长度)           │  变长负载
 ├──────────────────────────────────────────────────┤
-│ 24      N     payload     二进制媒体数据           │
+│ 32      N     payload     二进制媒体数据           │
 └──────────────────────────────────────────────────┘
 ```
 
-MVP-1 范围：仅 video + raw_rgb（即每帧 640x480x3 = 921600 字节 RGB）
-MVP-2 范围：+ h264 视频
-MVP-3 范围：+ audio (AAC)
+MVP-1 范围：假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示）
+MVP-2 范围：真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解）
+MVP-3 范围：虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera）
 """
 
 import socket

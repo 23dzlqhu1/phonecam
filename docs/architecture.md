@@ -24,7 +24,7 @@
 │              电脑端 (Python)                                          │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐     │
 │  │ PcpReceiver│→ │ PyAV/av    │→ │ pyvirtualcam│→ │ 腾讯会议   │     │
-│  │ 24B 头解析 │  │ H.264 解码 │  │ 虚拟摄像头  │  │ / OBS      │     │
+│  │ 32B 头解析 │  │ H.264 解码 │  │ 虚拟摄像头  │  │ / OBS      │     │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -39,7 +39,7 @@
 | CameraController | CameraController.kt | Camera2 生命周期、预览、ImageReader 监听 |
 | EglRenderer | EglRenderer.kt | EGL/OpenGL ES YUV→Surface 零拷贝渲染 |
 | H264Encoder | H264Encoder.kt | MediaCodec H.264 硬编码（createInputSurface）|
-| **PcpPacketWriter** | **PcpPacketWriter.kt** | **PCP 24 字节头打包（buildHeader/buildPacket），批次 3.2.0.3a 新增** |
+| **PcpPacketWriter** | **PcpPacketWriter.kt** | **PCP 32 字节头打包（buildHeader/buildPacket），批次 3.2.0.3a 新增** |
 | **TestPcpPackets** | **TestPcpPackets.kt** | **PCP 打包单元自检（写 2 个测试包到 .pcp 文件），批次 3.2.0.3a 新增** |
 | **TcpStreamServer** | **TcpStreamServer.kt** | **TCP 服务端（ServerSocket 监听 9999 + accept + sendPacket），批次 3.2.0.3b 新增** |
 | **推流按钮状态机** | **MainActivity.kt: startStreaming / stopStreaming** | **真链路 6 步启动 + 反向释放（Camera2→EGL→H264→PCP→TCP 持续推流），批次 3.2.0.3c 新增** |
@@ -56,7 +56,7 @@
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| PcpReceiver | receiver.py | TCP+PCP 24 字节头接收（H.264 帧 + 命令）|
+| PcpReceiver | receiver.py | TCP+PCP 32 字节头接收（H.264 帧 + 命令）|
 | H264Decoder | h264_decoder.py | PyAV/av 软/硬解码 H.264 → BGR numpy |
 | **video_frame_to_bgr (H.264 分支)** | **receiver.py** | **CODEC_H264 走 H264Decoder 单例 (懒加载) → BGR numpy，批次 3.2.0.3d 新增** |
 | PhoneCam | phonecam.py | 主程序入口（argparse + 主循环）|
@@ -81,11 +81,11 @@ I420 planar ByteArray (Y 平面 + U 平面 + V 平面，无 padding)
 EGL Surface (绑定到 MediaCodec.createInputSurface())
     ↓ MediaCodec (H.264 硬编码, color_format=Surface, bitrate=4Mbps)
 H.264 压缩帧 (NV12/I420 → IDR/P/B frames, 49KB/帧 平均)
-    ↓ (✅ 3.2.0.3c) NaluCallback → PcpPacketWriter.buildPacket() — 24 字节头 (sequence++ / pts=nanoTime/1000 / isKeyframe=type==5) + NALU payload
-PCP 帧 (magic='PHCM' + version=0x01 + type=0x01 + codec=0x02 + flags + sequence + pts + payload_len + NALU)
+    ↓ (✅ 3.2.0.3c) NaluCallback → PcpPacketWriter.buildPacket() — 32 字节头 (sequence++ / pts_us / pts_ns / isKeyframe) + NALU payload
+PCP 帧 (magic='PHCM' + version=0x02 + type=0x01 + codec=0x02 + flags + sequence + pts_us + pts_ns + payload_len + NALU)
     ↓ (✅ 3.2.0.3b) TcpStreamServer.sendPacket() → 0.0.0.0:9999
 电脑端 Socket (adb reverse tcp:9999 tcp:9999 → 127.0.0.1:9999)
-    ↓ (✅ 3.2.0.3 已实现) PcpReceiver._parse_pcp_stream() — 24 字节头 unpack + NALU payload
+    ↓ (✅ 3.2.0.3 已实现) PcpReceiver._parse_pcp_stream() — 32 字节头 unpack + NALU payload
 VideoFrame dataclass (codec=CODEC_H264, data=NALU bytes, sequence, pts, is_keyframe)
     ↓ (✅ 3.2.0.3d) video_frame_to_bgr() — 走 CODEC_H264 分支 → H264Decoder 单例 (懒加载, 线程安全) → PyAV decode → BGR numpy (1280×720×3)
 BGR numpy array
@@ -124,11 +124,11 @@ Zoom / 腾讯会议 / OBS 识别为 "PhoneCam Camera"
 
 ### 3. PCP vs HTTP MJPEG / WebSocket
 
-**选 PCP (TCP + 24 字节头 + payload)**：
+**选 PCP (TCP + v2 32 字节头 + payload)**：
 
 | 方案 | 优点 | 缺点 |
 |------|------|------|
-| **PCP** ✅ | 24 字节头 + 二进制 payload，新手 30 分钟看懂；TCP 单连接；可演进 | 自研协议，要维护 |
+| **PCP** ✅ | v2 32 字节头 + 二进制 payload，新手 30 分钟看懂；TCP 单连接；可演进 | 自研协议，要维护 |
 | HTTP MJPEG (旧) | 实现简单 | 带宽 5-8 倍（每帧 JPEG header 重复），无硬件编码 |
 | WebSocket (旧) | 全双工，浏览器友好 | shelf.Request ↔ HttpRequest 类型冲突（G-009），APK 大 |
 
@@ -146,7 +146,7 @@ Zoom / 腾讯会议 / OBS 识别为 "PhoneCam Camera"
 
 ## 相关文档
 
-- 协议规范：[protocol.md](protocol.md)（PCP 24 字节头 + payload）
+- 协议规范：[protocol.md](protocol.md)（PCP v2 32 字节头 + payload）
 - 优化路线：[optimization_plan.md](optimization_plan.md)（v1.0 目标）
 - 架构演进史：[.ai/decisions.md ADR-006](../.ai/decisions.md)
 - 实现陷阱：[.ai/gotchas.md G-010/G-020/G-021](../.ai/gotchas.md)
