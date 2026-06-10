@@ -83,7 +83,7 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
 **当前进度总结**：MVP-1、MVP-2 已实现闭环，核心视频传输链路稳定。目前处于 MVP-3 阶段，重点是解决虚拟摄像头在实际会议软件中的表现。
-**协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（24 字节头 + TCP）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
+**协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（v2 32 字节头 + TCP，兼容 v1 24 字节头）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---
 

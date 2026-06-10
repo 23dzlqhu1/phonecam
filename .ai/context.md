@@ -65,7 +65,7 @@
 |------|------|---------|------|
 | HTTP MJPEG | ❌ 已废弃 | 原 `desktop/receiver.py::MjpegReceiver` 已删除 | — |
 | WebSocket + H.264 | ❌ 已废弃 | phone/lib/stream_server.dart 已删除；`desktop/h264_receiver.py` 已删除 | MVP-2 改为新建 `phone_native/` Kotlin 原生重写为 TCP+PCP |
-| **PCP (TCP + 二进制)** | ✅ 当前 | `desktop/receiver.py::PcpReceiver`（24 字节头 + payload） | MVP-1 启用 |
+| **PCP (TCP + 二进制)** | ✅ 当前 | `desktop/receiver.py::PcpReceiver`（v2 32 字节头 + payload，兼容 24 字节头） | MVP-1 启用 v1，MVP-2 起启用 v2 |
 
 **AI 工作流提醒**：
 - ~~`phone/lib/stream_server.dart` 已删除 2026-06-09~~ (历史参考：旧 `phone/` 整体已 git rm, ADR-006)

@@ -41,10 +41,10 @@ import java.nio.ByteOrder
  *   - 3.2.0.3d: 电脑端 video_frame_to_bgr 加 H.264 分支
  *
  * 关键约束 (G-001 防御):
- *   - HEADER_SIZE 必须 = 24
- *   - 字段顺序必须 = magic(4)+version(1)+type(1)+codec(1)+flags(1)+sequence(4)+pts(8)+payload_len(4)
+ *   - HEADER_SIZE 必须 = 32
+ *   - 字段顺序必须 = magic(4)+version(1)+type(1)+codec(1)+flags(1)+sequence(4)+pts_us(8)+pts_ns(8)+payload_len(4)
  *   - 字节序 = 小端 (little-endian)
- *   - 任何字段错位都会导致电脑端 struct.unpack 报 "unpack requires a buffer of 23 bytes" 或字段值错位
+ *   - 任何字段错位都会导致电脑端 struct.unpack 报长度异常或字段值错位
  */
 object PcpPacketWriter {
 

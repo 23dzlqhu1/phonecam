@@ -55,8 +55,8 @@
 └──────────────────────────────────────────────────┘
 ```
 
-> 总头 32 字节（v2，3.2.0.3g 起），**所有字段小端序**。
-> 老版本 24 字节头（v1，3.2.0.3a~3.2.0.3f）仍兼容，新 receiver 通过 version 自动识别。
+> **主协议结构：总头 32 字节（v2），所有字段小端序**。
+> 注：老版本 24 字节头（v1，缺 pts_ns 字段）目前作为历史版本兼容保留，接收端通过 version 自动识别。
 
 ### 2.2 字段详解
 
@@ -117,20 +117,21 @@ TCP 监听 9999 ←──── 局域网直连 ────→  192.168.x.x:999
 ```python
 import struct
 
-# 24 字节定长头：magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts(Q) + payload_len(I)
-HEADER_STRUCT = struct.Struct('<4sBBBBIQI')
+# 32 字节主协议头：magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts_us(Q) + pts_ns(Q) + payload_len(I)
+HEADER_STRUCT = struct.Struct('<4sBBBBIQQI')
 
 # 接收
-header_buf = bytearray(24)
-sock.recv_into(header_buf, 24)
-magic, ver, ptype, codec, flags, seq, pts, plen = HEADER_STRUCT.unpack(bytes(header_buf))
+header_buf = bytearray(32)
+sock.recv_into(header_buf, 32)
+magic, ver, ptype, codec, flags, seq, pts_us, pts_ns, plen = HEADER_STRUCT.unpack(bytes(header_buf))
 payload = sock.recv(plen)
 ```
 
-### 4.2 手机端（Dart）
+### 4.2 手机端（Kotlin 原生）
 
-MVP-2 会重写 [`phone/lib/stream_server.dart`](../phone/lib/stream_server.dart)，
-届时会替换为 TCP + PCP 头。**MVP-1 不写手机端**，用 `tests/mock_phone/` 模拟。
+当前手机端位于 `phone_native/`，完全由 Kotlin 原生实现。
+MVP-2 使用 `MediaCodec` 硬编码 H.264，并通过 TCP 发送封装好的 PCP 报文。
+核心组包逻辑见 [`PcpPacketWriter.kt`](../phone_native/app/src/main/java/com/phonecam/nativeapp/PcpPacketWriter.kt)。
 
 ### 4.3 Mock 端（Python，MVP-1 用）
 
@@ -142,8 +143,11 @@ MVP-2 会重写 [`phone/lib/stream_server.dart`](../phone/lib/stream_server.dart
 
 ```python
 MAGIC = b'PHCM'
-HEADER_SIZE = 24
-VERSION = 0x01
+HEADER_SIZE = 32
+VERSION = 0x02
+
+HEADER_SIZE_V1 = 24  # 兼容保留
+VERSION_V1 = 0x01    # 兼容保留
 
 TYPE_VIDEO  = 0x01
 TYPE_AUDIO  = 0x02
@@ -199,11 +203,12 @@ FLAG_KEYFRAME = 0x01
 - 实现：`phone/lib/stream_server.dart` v0.5
 - 状态：**MVP-2 待重写为 TCP + PCP**
 
-### v0.6（当前）— PCP
+### v0.6（当前）— PCP v2
 
-- 24 字节头 + TCP + raw_rgb（MVP-1）/ H.264（MVP-2）/ AAC（MVP-3）
+- 32 字节头 + TCP + raw_rgb（MVP-1）/ H.264（MVP-2）/ AAC（MVP-3）
+- 兼容 24 字节头（v1）
 - 实现：`desktop/receiver.py::PcpReceiver`
-- 状态：**MVP-1 启用**
+- 状态：**MVP-2 完成，MVP-3 进行中**
 
 ---
 
