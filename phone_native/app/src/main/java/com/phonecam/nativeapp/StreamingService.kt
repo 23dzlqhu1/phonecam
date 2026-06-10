@@ -185,7 +185,7 @@ class StreamingService : Service() {
                 InAppLogStore.i(TAG, "[3.2.0.3f] Service worker thread 启动, 6 步走起")
 
                 // 1) TCP server 起来
-                val server = TcpStreamServer(port = 9998) { status ->
+                val server = TcpStreamServer(port = 9999) { status ->
                     InAppLogStore.i(TAG, "[3.2.0.3f-TCP] $status")
                 }
                 server.start()

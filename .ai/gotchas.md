@@ -39,9 +39,6 @@
 | [G-005](#g-005ai-edit-工具有时会静默回退文件) | AI Edit 工具有时会静默回退文件 | 2026-06-07 |
 | [G-006](#g-006任何更新都要同步全部文档元规则) | **元规则**：任何更新都要同步全部文档 | 2026-06-07 |
 | [G-007](#g-007windows-防火墙拦截-gradle-daemon-127001-通信) | Windows 防火墙拦截 Gradle daemon 127.0.0.1 通信 | 2026-06-08 |
-| [G-008](#g-008flutter-启动时扫微信小程序字体缓存路径会报错但用默认字体兜底) | Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底） | 2026-06-08 |
-| [G-009](#g-009stream_serverdart临时占位-避免-shelfrequest--httprequest-类型冲突) | `stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突） | 2026-06-08 |
-| [G-010](#g-010mvp-2-手机端从-flutter-切到-kotlin-原生的路线重置adr-006) | **MVP-2 手机端从 Flutter 切到 Kotlin 原生**（路线重置 ADR-006，旧 `phone/` 2026-06-09 已 git rm） | 2026-06-08→06-09 |
 | [G-011](#g-011gradle-813-wrapper-缓存不完整-gradlewrapperdistsgradle-813-bin-只有-lck--part-没有解压目录) | **Gradle 8.13 wrapper 缓存不完整**（`~/.gradle/wrapper/dists/` 只有 .lck + .part） | 2026-06-08 |
 | [G-012](#g-012agp-installdebug-在-oppo-真机报-installexception--99绕路-adb-install--r) | **AGP `installDebug` 在 OPPO 真机报 `InstallException: -99`**（绕路 `adb install -r`） | 2026-06-08 |
 | [G-013](#g-013surfaceview-vs-textureview-选型camera2-预览选-surfaceviewyuv-直送-surface-零拷贝) | SurfaceView vs TextureView 选型（Camera2 预览选 SurfaceView：YUV 直送 Surface 零拷贝） | 2026-06-08 |
@@ -265,108 +262,7 @@ netsh advfirewall firewall show rule name="Java Daemon Allow Loopback"
 
 ---
 
-## G-008：Flutter 启动时扫微信小程序字体缓存路径会报错（用默认字体兜底）
 
-**日期**：2026-06-08
-**场景**：在装了微信 / 微信小程序的 Android 设备上跑 Flutter App
-**症状**（logcat 大量重复）：
-```
-E/flutter (xxx): [ERROR:flutter/txt/src/txt/fontmgr_default_android.cc(429)] value OnePlus
-E/flutter (xxx): [ERROR:flutter/txt/src/txt/fontmgr_default_android.cc(431)] fontXmlName /data/user/999/com.tencent.mm/code_cache/flutter_PLC110/com.tencent.mm:appbrand0/flutter_custom_fonts2.xml
-E/flutter (xxx): [ERROR:flutter/txt/src/txt/fontmgr_default_android.cc(599)] use default font mgr
-```
-日志中还能看到 `value OnePlus`（即使手机是 OPPO）和 `com.tencent.mm:appbrand0` 路径。
-
-**根因**：
-- Flutter 引擎启动时扫描 `/data/user/*/*/code_cache/flutter_*/` 下所有 xml 字体配置
-- `com.tencent.mm`（微信）`appbrand0`（小程序）`flutter_custom_fonts2.xml` 路径残留
-- 微信小程序引擎用过 Flutter，把自定义字体配置写到了这路径，格式与原生 Flutter 不兼容 → 解析报错
-- **关键**：Flutter 不会因此 crash，会 `use default font mgr` 兜底用系统默认字体
-
-**修复**：
-**不用修**。日志报错但不影响 App 业务功能，文字照样显示。
-如果实在太吵：
-```bash
-# 卸载微信（最直接）/ 清掉微信小程序缓存（部分机型）
-adb shell pm clear com.tencent.mm
-```
-但通常**不建议**为这点日志清微信数据。
-
-**教训**：
-- 看到 `com.tencent.mm:appbrand0` 字体错误 = 用户装过微信小程序，**不是 PhoneCam 的 bug**
-- 判断标准：App 业务是否正常。状态文字、按钮、摄像头预览都正常 → 字体错误可忽略
-- 真要消除：清微信数据（重装微信即可）
-
----
-
-## G-009：`stream_server.dart` 临时占位（避免 shelf.Request ↔ HttpRequest 类型冲突）
-
-**日期**：2026-06-08
-**场景**：MVP-1 写过的 `phone/lib/stream_server.dart` 用了 `package:shelf` + `package:web_socket_channel`，但 `WebSocketTransformer.upgrade()` 接收的是 `dart:io.HttpRequest`，shelf 库传入的是 `shelf.Request`（封装类型），Dart 2.18+ 类型系统**严格**不兼容。
-
-**症状**：
-```
-Error: The argument type 'Request' can't be assigned to the parameter type 'HttpRequest'.
-  - 'Request' is from 'package:shelf/src/request.dart'
-  - 'HttpRequest' is from 'dart:_http'
-```
-
-**根因**：
-- shelf 1.4.2 的 `Request` 是 `dart:io.HttpRequest` 的封装类型（不是子类，是 has-a）
-- `WebSocketTransformer.upgrade(HttpRequest)` 是 `dart:io` 的 API，**不接收** shelf 的 `Request`
-- `shelf.Request` 内部通过 `request.context['io.http_request']` 暴露原始 `HttpRequest`，但键名可能因 shelf 版本不同
-
-**修复**（临时，因为 stream_server.dart 已冻结，MVP-2 Step 3 才完整重写为 TCP+PCP）：
-```dart
-shelf.Response _handleRequest(shelf.Request request) {
-  // ⚠️ 临时修复：MVP-1 frozen 文件，仅消除编译错误
-  // 真实功能在 MVP-2 重写为 TCP + PCP 时实现（见 stream_server.dart 顶部 deprecation 警告）
-  return shelf.Response.notFound('Stream server is frozen, MVP-2 will rewrite to TCP+PCP');
-}
-```
-
-**为什么这样改是安全的**：
-- `main.dart` 调 `_server.sendH264Frame(frame)` 但**不调** `_server.start()`（`start()` 才需要 `_handleRequest`）
-- 所以 `_handleRequest` 永远不会被调用，**保留 404 兜底即可**
-- Step 3 会完全重写整个文件，删除 shelf / web_socket_channel 依赖，换成 `dart:io.Socket` + 自写 PCP 24 字节头
-
-**教训**：
-- 冻结文件遇到编译错误：**最小修复**，不优化、不重构
-- 判断"最小修复"是否安全：调用方是否真用了这个方法？查 main.dart 的引用
-- 类型冲突调试时先看 `package:xxx/src/yyy.dart` 找根类层级关系，别直接 cast（cast 可能在运行时崩）
-
-
----
-
-## G-010：MVP-2 手机端从 Flutter 切到 Kotlin 原生（路线重置 ADR-006）
-
-**日期**：2026-06-08
-**场景**：MVP-1 完成、PCP 协议 + 电脑端 OpenCV 跑通后，准备进入 MVP-2 实现真实摄像头画面链路
-**症状**：
-- 旧 `phone/lib/stream_server.dart` 顶部已写明"MVP-2 要完全重写为 TCP+PCP 24 字节头"（即本身就要删/大改）
-- `camera_service.dart` 走 Dart Camera 插件拿 YUV → MethodChannel 调 Kotlin 编码器，跨语言数据拷贝
-- `h264_encoder.dart` 是 MethodChannel 壳，**核心 MediaCodec 编码逻辑在 Kotlin**
-- 实际数据流：Dart YUV420 → Kotlin MediaCodec → Dart → Socket，**跨 3 层语言**（Dart → Kotlin → Dart → TCP）
-- 旧 phone/ 路线与"链路跑通"目标有冗余：MVP-2 UI 只 1 屏（开始/停止 + 状态），Dart 包装 UI 价值低
-
-**根因**：
-MVP-2 的核心能力（Camera2 API、MediaCodec 硬编码、PCP TCP 发送）**都是 Android 系统 API**，用 Kotlin 直接调就是 3 跳（Camera2 → MediaCodec → Socket），引入 Flutter/Dart 是为了 UI 跨平台，但 MVP-2 阶段不需要漂亮 UI（只需"开始/停止 + 状态文字"）。
-
-**修复**：
-采用 ADR-006 方案 C：
-- 新建 `phone_native/` 目录，Kotlin 原生 Android 工程
-- 包名 `com.phonecam.nativeapp`（避免 Java/Kotlin 关键字 `native`）
-- 旧 `phone/` 2026-06-09 计划 **git rm**（决策翻转；保留 git 历史即可 checkout 旧源码）
-- ~~旧 phone/ 等 phone_native/ 跑通后再统一加 deprecation 注释~~ (2026-06-09 直接 git rm)
-- 电脑端（`desktop/`）Python 不动，PCP 协议不动
-- 复用 `phone/` 的 Gradle 阿里云镜像 + daemon 防火墙配置
-
-**教训**：
-- **链路选型要看本质**：MVP-2 本质 = Android 视频采集编码项目，不是"App + UI 项目"。当 UI 需求 ≤ 1 屏时，原生 Kotlin 链路更短更优
-- **跨层代价要算清**：Dart ↔ Kotlin 跨层每次 MethodChannel 调用都有序列化/反序列化，对 30fps 视频流影响虽小但累积
-- ~~不要在新栈没跑通时删旧栈~~ (2026-06-09 phone_native/ 跑通后已 git rm)
-- **包名避开关键字**：`native` 是 JNI 关键字，做包名会有命名冲突警告（`com.phonecam.native` → `com.phonecam.nativeapp`）
-- **MVP 阶段不要追求产品化 UI**：MVP-2 阶段 TextView 够用，省下的时间专注链路跑通
 
 ## G-011：Gradle 8.13 wrapper 缓存不完整（`~/.gradle/wrapper/dists/gradle-8.13-bin/` 只有 `.lck` + `.part` 没有解压目录）
 
@@ -733,3 +629,18 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 - `open()` 创建完 cameraHandler 后检查 flag，如果 true 就 `startListenerRetryLoop(handler)`
 - 重试 loop：每 500ms 检查 `currentPreviewSize != null && captureSession != null && imageReader == null`，最多 12 次 (6s)，成功就 setupImageReaderInternal
 - ✅ 验证手段：logcat 看 `setOnImageAvailableListener retry #N ps=1280x720 cs=READY` 一直到 `preview+imageReader started`，然后看到 `onImageAvailable` 回调
+
+---
+
+## 🗄️ 归档
+
+这里存放已经完全过时、且不具参考价值的历史踩坑记录。
+
+### [已归档] G-008：Flutter 启动时扫微信小程序字体缓存路径会报错
+（与当前纯原生架构无关）
+
+### [已归档] G-009：`stream_server.dart` 临时占位
+（与当前纯原生架构无关）
+
+### [已归档] G-010：MVP-2 手机端从 Flutter 切到 Kotlin 原生
+（路线转换已完成，`phone/` 已移除）

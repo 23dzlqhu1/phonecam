@@ -169,7 +169,6 @@ desktop/phonecam.py
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `tests/mock_phone/mock_phone_server.py` | 新建 | 生成假视频帧并发送 |
-| `tests/legacy/test_vcam*.py` | 参考 | 已有 OpenCV 窗口显示代码可参考 |
 | `desktop/receiver.py` | 重构 | 实现 PCP 协议解析 |
 | `desktop/phonecam.py` | 重构 | 命令行入口 + 窗口显示 |
 | `tests/README.md` | 更新 | 写明 mock 工具怎么用 |

@@ -9,7 +9,7 @@
 协议：PCP（PhoneCam Protocol），见 receiver.py 顶部文档
 """
 
-__version__ = "0.6.0-mvp3"
+__version__ = "0.6.1-mvp3"
 
 import argparse
 import sys

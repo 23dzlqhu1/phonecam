@@ -57,3 +57,10 @@ PhoneCam-v*-*.zip
 
 # === 验证产物（不入仓，保留在本地调试） ===
 tests/output/
+
+# === 调试和日志产物 ===
+*dump*.xml
+logcat*.txt
+*.err
+*.out
+*.pcp

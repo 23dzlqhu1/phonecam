@@ -258,32 +258,32 @@ class PcpReceiver:
         协议格式见模块顶部文档。
         批次 3.2.0.3g: 根据 version 自动选 HEADER_SIZE (v1=24, v2=32)
         """
-        # 批次 3.2.0.3g: 先读 4 字节 magic + 1 字节 version, 决定用哪个 HEADER_SIZE
-        #  这样做: 老的 24 字节头 (version=1) 也能被新 receiver 解析
+        # 批次 3.2.0.3h fix: 把 first5 read 移到循环里, 每个包都重新读 5 字节
+        #  旧代码: first5 在循环外读 1 次, 第 2 个包开始 magic 错位, 整条流崩溃
         first5 = bytearray(5)
-        self._recv_exact(sock, first5, 5)
-        magic = bytes(first5[:4])
-        if magic != MAGIC:
-            raise ValueError(f"协议魔数错误: {magic!r}，期望 {MAGIC!r}")
-        version = first5[4]
-        if version == VERSION_V1:
-            header_size = HEADER_SIZE_V1
-            struct_cls = self.HEADER_STRUCT_V1
-        elif version == VERSION:
-            header_size = HEADER_SIZE
-            struct_cls = self.HEADER_STRUCT
-        else:
-            raise ValueError(f"协议版本不支持: {version}")
-
+        first5_magic = bytearray(4)
         recv_into = sock.recv_into  # 局部变量，加速
-        header_buf = bytearray(header_size)
+        header_buf = bytearray(32)  # 完整头 (v1=24, v2=32 都用 32 字节, 读满后再按 version 切)
 
         while self._running:
-            # 1) 把剩下的 (header_size-5) 字节补齐
-            #    已经读了 magic+version 共 5 字节
-            self._recv_exact(sock, header_buf, header_size)
-            # 拼回完整头
-            full_header = bytes(first5) + bytes(header_buf)
+            # 1) 每个包都重新读 5 字节 (magic + version)
+            self._recv_exact(sock, first5, 5)
+            magic = bytes(first5[:4])
+            if magic != MAGIC:
+                raise ValueError(f"协议魔数错误: {magic!r}，期望 {MAGIC!r}")
+            version = first5[4]
+            if version == VERSION_V1:
+                header_size = HEADER_SIZE_V1
+                struct_cls = self.HEADER_STRUCT_V1
+            elif version == VERSION:
+                header_size = HEADER_SIZE
+                struct_cls = self.HEADER_STRUCT
+            else:
+                raise ValueError(f"协议版本不支持: {version}")
+
+            # 2) 读剩下 (header_size - 5) 字节
+            self._recv_exact(sock, header_buf, header_size - 5)
+            full_header = bytes(first5) + bytes(header_buf[:header_size - 5])
             if header_size == HEADER_SIZE_V1:
                 _magic, _ver, ptype, codec, flags, sequence, pts, payload_len = \
                     struct_cls.unpack(full_header)

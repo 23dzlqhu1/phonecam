@@ -48,11 +48,11 @@
 |------|------|--------|
 | **MVP-0** 项目骨架闭环 | ✅ 完成 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 全部到位 |
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
-| **MVP-2** 真实摄像头画面 | 🟡 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + **批次 3.2.0.2 ✅ 2026-06-09**（v0.2.8-mvp2-batch3.2.0.2：phone_native/ 接 Camera2 ImageReader 真实帧 → EglRenderer → H.264 → 文件 → OpenCV 解码验证通过）| phone_native/ Kotlin App 已在 OPPO PLC110 真机跑通：MainActivity 真实摄像头预览（30.76 FPS） + SettingsActivity 4 分区 9 项 + ConnectActivity IP/Port + DebugActivity 实时日志 + AboutActivity 版本信息。批次 3.1 加 H264Encoder.kt (MediaCodec ByteBuffer mode) + TestYuvFrames.kt + Layer C 调试入口，输出 442B H.264 单帧。**批次 3.2.0.1** EGL 零拷贝 + YUV shader 渲染 + NALU 回调。**批次 3.2.0.2** 接 Camera2 ImageReader YUV_420_888 真实帧：新增 Yuv420Extractor.kt（处理 rowStride/pixelStride/NV12 适配）+ CameraController 加 setOnImageAvailableListener + pendingListenerRetry 机制（处理 open() 与 listener 注册的 race condition）+ MainActivity 加 3s 自动触发（绕开 OPPO ColorOS 5s 自动 swipe-up 把 app 推到后台的问题）+ Layer C 改 "🎬 拍 1 帧 (3.2 真实)"。真机跑通：1280x720 真实摄像头帧 → ImageReader → I420 → EglRenderer 画到 MediaCodec InputSurface → 编码 → NALU 回调 → 写 test_3_2_2_camera.h264（49788 字节 / 1 帧）。OpenCV 解码验证 3 判据全过：解码成功 + mean=108.4 (非黑) + std=45.3 (真实画面 > 测试图)。下一批次：3.2.0.3 端到端闭环（长时连拍 → 实时传输到电脑） |
-| **MVP-3** 虚拟摄像头闭环 | ⬜ 待开始 | pyvirtualcam 集成 + 腾讯会议 / OBS 能选 "PhoneCam Camera" |
+| **MVP-2** 真实摄像头画面 | ✅ **完成** | 链路端到端闭环达成（手机端 Kotlin/Camera2/MediaCodec → TCP PCP v2 → 电脑端 PyAV 硬件解码）。 |
+| **MVP-3** 虚拟摄像头闭环 | 🟡 **进行中** | 已接入 pyvirtualcam，OBS Virtual Camera 可被识别，待进一步真机联调验证。 |
 | **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
 
-**当前正在做**：MVP-0 ✅ + MVP-1 ✅（2026-06-07）→ **MVP-2 批次 2 ✅ + Phase X ✅ + Phase Y ✅ + 批次 3.1 ✅ + 批次 3.2.0.1 ✅ + 批次 3.2.0.2 ✅**（2026-06-09）→ **批次 3.2.0.3a ✅ 2026-06-09**（PcpPacketWriter 24 字节头字节级正确）→ **批次 3.2.0.3b ✅ 2026-06-09**（TcpStreamServer 监听 0.0.0.0:9999 + accept loop + sendPacket API）→ **批次 3.2.0.3c ✅ 2026-06-09**（MainActivity 推流按钮状态机 startStreaming 6 步启动 + stopStreaming 反向释放，PCP 桥在 H264Encoder.NaluCallback 内打 24 字节头 sequence++ / pts=nanoTime/1000 / isKeyframe=type==5，接通 Camera2→EglRenderer→H264Encoder→PcpPacketWriter→TcpStreamServer 5 节点真链路）→ **批次 3.2.0.3d ✅ 2026-06-09**（desktop/receiver.py::video_frame_to_bgr 加 CODEC_H264 分支 + H264Decoder module-level 单例懒加载，PC 端 E2E 验证脚本 verify_3_2_3d_e2e.py：PyAV libx264 编码 30 帧 1280×720 彩色渐变 H.264 → 装 24 字节 PCP 头 → 喂 video_frame_to_bgr → 30/30 帧解出，验证：分辨率 1280×720 / 第 1 帧 BGR (40,42,197) 红色调非黑 / 帧间色差 21.3 / H264Decoder 软解兜底）。**MVP-2 端到端闭环达成**。下一阶段：MVP-3 虚拟摄像头 (pyvirtualcam)。
+**当前正在做**：MVP-1、MVP-2 已实现闭环，核心视频传输链路稳定。目前处于 MVP-3 阶段，重点是解决虚拟摄像头在实际会议软件中的表现。
 
 ---
 
@@ -64,7 +64,7 @@
 | 协议 | 状态 | 关键文件 | 计划 |
 |------|------|---------|------|
 | HTTP MJPEG | ❌ 已废弃 | 原 `desktop/receiver.py::MjpegReceiver` 已删除 | — |
-| WebSocket + H.264 | ⚠️ 已废弃 | `phone/lib/stream_server.dart` 已冻结（旧 `phone/` Flutter 整体作 legacy，ADR-006）；`desktop/h264_receiver.py` 顶部有 deprecation 警告 | MVP-2 改为新建 `phone_native/` Kotlin 原生重写为 TCP+PCP |
+| WebSocket + H.264 | ❌ 已废弃 | phone/lib/stream_server.dart 已删除；`desktop/h264_receiver.py` 已删除 | MVP-2 改为新建 `phone_native/` Kotlin 原生重写为 TCP+PCP |
 | **PCP (TCP + 二进制)** | ✅ 当前 | `desktop/receiver.py::PcpReceiver`（24 字节头 + payload） | MVP-1 启用 |
 
 **AI 工作流提醒**：
@@ -184,4 +184,4 @@
 
 ---
 
-**最后更新**：2026-06-08（批次 3.1 收尾：H264Encoder 单帧 H.264 验证 + OpenCV 解码 Y 渐变吻合 + G-019 记录 NV12 像素填充坑）
+**最后更新**：2026-06-10（P0 清理：完成 MainActivity.kt 测试方法移除，项目减法与废弃文件/测试/日志清理）

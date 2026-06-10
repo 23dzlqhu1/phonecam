@@ -14,13 +14,14 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 13                          // 批次 3.2.0.3c: 真链路接线 — 推流按钮状态机 (start/stopStreaming) 接 Camera2→EGL→H264→PCP→TCP
-        versionName = "0.2.8-mvp2-batch3.2.0.3c"
+        versionCode = 16                          // 批次 3.2.0.3h: 注释 8s auto-test 避免占 9999 阻塞推流
+        versionName = "0.2.8-mvp2-batch3.2.0.3h-portfix3"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false               // MVP 阶段不上 R8 压缩
+            signingConfig = signingConfigs.getByName("debug") // 暂用 debug 签名，保证导出的 APK 任何手机都能直接装
         }
         debug {
             isDebuggable = true

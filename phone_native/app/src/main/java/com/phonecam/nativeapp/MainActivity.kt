@@ -21,8 +21,7 @@ import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+
 
 /**
  * MainActivity —— phone_native/ Phase X 主界面
@@ -75,14 +74,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var settings: SettingsStore
     private var currentLensPref: String = "back"  // 用于 Layer B 状态显示
 
-    // --- 批次 3.2.0.2 真实摄像头帧缓存 ---
-    // ImageReader listener 会把最近一帧 YUV 缓存到这里, 按按钮时立刻拿走编码
-    // 用 @Volatile 保证跨线程可见: listener 在 ImageReader 线程, 编码在 EGL-Test 线程
-    @Volatile private var lastCameraYuv: ByteArray? = null
+    // --- 摄像头帧状态 (ImageReader 线程写, 主线程读) ---
     @Volatile private var cameraW: Int = 0
     @Volatile private var cameraH: Int = 0
     @Volatile private var cameraFrameCount: Int = 0
-    @Volatile private var cameraFrameReady: CountDownLatch? = null  // 按按钮时 set, listener 收到帧 countDown
 
     // 批次 3.2.0.3f: 推流状态/句柄全部移到 StreamingService (sActive/sH264Encoder/sEglRenderer/sTcpServer)
     //  避免 Oplus Hans 冻结, 见 StreamingService.kt 注释
@@ -168,32 +163,7 @@ class MainActivity : AppCompatActivity() {
                 StreamingService.start(this)
             }
         }
-        // 长按 → 拍 1 帧 (老调试入口, 保留供 3.2.0.3c 期间验证单帧链路)
-        btnPush.setOnLongClickListener {
-            onEncodeOneFrameCameraEglTest()
-            true
-        }
 
-        // 批次 3.2.0.2: OPPO ColorOS 会在 5s 后自动 swipe-up 把 app 推到后台
-        // → 改成"启动后 3s 自动跑一次"不依赖用户 tap
-        Handler(Looper.getMainLooper()).postDelayed({
-            InAppLogStore.i(TAG, "[3.2.0.2-AUTO] 3s 自动触发真实摄像头 EGL 编码")
-            onEncodeOneFrameCameraEglTest()
-        }, 3000)
-
-        // 批次 3.2.0.3a: 6s 后再触发 PCP 打包单元自检 (在 3.2.0.2 之后跑, 避免抢 IO)
-        //  3.2.0.3a 只写文件, 不接网络, 不依赖 Camera2
-        Handler(Looper.getMainLooper()).postDelayed({
-            InAppLogStore.i(TAG, "[3.2.0.3a-AUTO] 6s 自动触发 PCP 打包单元自检")
-            onEncodeOneFramePcpTest()
-        }, 6000)
-
-        // 批次 3.2.0.3b: 8s 后启动 TcpStreamServer 监听 9999, 客户端连上发 1 个测试包
-        //  adb reverse tcp:9999 tcp:9999 → PC 端 127.0.0.1:9999 → 手机端 0.0.0.0:9999
-        Handler(Looper.getMainLooper()).postDelayed({
-            InAppLogStore.i(TAG, "[3.2.0.3b-AUTO] 8s 自动启动 TcpStreamServer 监听 9999")
-            onTcpStreamServerTest()
-        }, 8000)
 
         // 批次 3.2.0.3f: 注册 broadcast receiver (调试备用入口, 走 StreamingService)
         //  用法: adb shell am broadcast -a com.phonecam.START_STREAMING
@@ -387,13 +357,10 @@ class MainActivity : AppCompatActivity() {
                 val w = image.width
                 val h = image.height
                 val yuv = Yuv420Extractor.imageToI420(image)
-                lastCameraYuv = yuv
                 cameraW = w
                 cameraH = h
                 cameraFrameCount++
-                // 如果测试方法在等帧, 唤醒
-                cameraFrameReady?.countDown()
-                InAppLogStore.d(TAG, "[3.2.0.2] 真实帧 #$cameraFrameCount ${w}x${h} -> ${yuv.size} 字节 I420")
+                InAppLogStore.d(TAG, "帧 #$cameraFrameCount ${w}x${h} -> ${yuv.size} 字节 I420")
 
                 // 批次 3.2.0.3f: 推流状态下把 YUV 投递给 StreamingService.submitFrame
                 //  Service 持 EglRenderer, submitFrame 内部把任务投到 EGL owner thread
@@ -431,309 +398,5 @@ class MainActivity : AppCompatActivity() {
         errorPlaceholder.visibility = View.GONE
     }
 
-    /**
-     * 批次 3.2.0.1 调试入口: EGL 零拷贝渲染验证 → 1 帧 H.264
-     *
-     * 流程 (零基础版):
-     *   1) TestYuvFrames 生成水平渐变 YUV (跟 3.1 一样的源数据)
-     *   2) H264Encoder.start() 拿到 InputSurface
-     *   3) EglRenderer 把 YUV 通过 GPU shader 画到 InputSurface
-     *   4) EGL swap → MediaCodec 自动编码 → NaluCallback 拿到 NALU
-     *   5) 写到 /sdcard/Android/data/com.phonecam.nativeapp/files/test_3_2_egl.h264
-     *
-     * 验证目标:
-     *   - EGL 初始化通 (Display + Config + Context + WindowSurface + MakeCurrent)
-     *   - YUV shader 通 (3 个 LUMINANCE 纹理 + BT.601 YUV→RGB)
-     *   - 编码链路通 (跟 3.1 一样的 SPS + PPS + IDR NALU 字节)
-     *   - G-019 自动消失: shader 处理 NV12 适配, 不需要 CPU 拷贝 YUV
-     */
-    private fun onEncodeOneFrameEglTest() {
-        Thread {
-            try {
-                InAppLogStore.i(TAG, "[3.2.0.1] EGL 渲染验证开始")
-                val w = 1280
-                val h = 720
-                val yuv = TestYuvFrames.buildGradientYuv420(w, h)
-                InAppLogStore.i(TAG, "[3.2.0.1] 测试 YUV 已生成: ${yuv.size} 字节 (${w}x${h})")
-
-                // 1) 准备 NALU 收集器
-                val baos = java.io.ByteArrayOutputStream()
-                var naluCount = 0
-
-                // 2) start encoder (拿到 inputSurface)
-                val encoder = H264Encoder()
-                val inputSurface = encoder.start(w, h, object : H264Encoder.NaluCallback {
-                    override fun onNalu(nalu: ByteArray, type: Int) {
-                        baos.write(nalu)
-                        naluCount++
-                        InAppLogStore.i(TAG, "[3.2.0.1] NALU #$naluCount type=$type size=${nalu.size}")
-                    }
-                })
-
-                // 3) 用 EglRenderer 画一帧 YUV 到 inputSurface
-                val renderer = EglRenderer(inputSurface)
-                renderer.drawYuv(yuv, w, h)
-                InAppLogStore.i(TAG, "[3.2.0.1] EGL 已画 1 帧到 Surface")
-
-                // 4) 通知编码器喂一帧 (EGL 路径: encodeFrame 只更新 pts 计数, 实际数据已 swap)
-                encoder.encodeFrame(yuv)
-                Thread.sleep(500)  // 等编码器把 1 帧压完吐出来
-
-                // 5) 停 encoder + 释放 EGL
-                encoder.stop()
-                renderer.release()
-
-                // 6) 保存到 App 私有目录
-                val outDir = getExternalFilesDir(null)
-                if (outDir == null) {
-                    InAppLogStore.e(TAG, "[3.2.0.1] getExternalFilesDir(null) 返回 null")
-                    return@Thread
-                }
-                if (!outDir.exists()) outDir.mkdirs()
-                val outFile = java.io.File(outDir, "test_3_2_egl.h264")
-                java.io.FileOutputStream(outFile).use { fos ->
-                    fos.write(baos.toByteArray())
-                }
-                InAppLogStore.i(TAG, "[3.2.0.1] 已写入: ${outFile.absolutePath} (${baos.size()} 字节, $naluCount 个 NALU)")
-
-                runOnUiThread {
-                    Toast.makeText(this, "EGL OK: ${baos.size()}B / $naluCount NALU\n${outFile.absolutePath}", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "[3.2.0.1] EGL 渲染异常", e)
-                runOnUiThread {
-                    Toast.makeText(this, "异常: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.apply { name = "EGL-Test-Thread" }.start()
-    }
-
-    /**
-     * 批次 3.2.0.2 调试入口: 真实摄像头 → EGL 零拷贝 H.264 编码 → 1 帧存盘
-     *
-     * 流程:
-     *   1) 通知 listener 准备 latch 等下 1 帧
-     *   2) 主线程等 latch (最多 3s)
-     *   3) 拿最近 1 帧真实 YUV (已是 I420 格式)
-     *   4) 跟 3.2.0.1 一样: H264Encoder.start + EglRenderer.drawYuv + encodeFrame + stop
-     *   5) 写到 test_3_2_2_camera.h264
-     *
-     * 验证目标:
-     *   - Camera2 ImageReader 出帧链路通 (YUV_420_888 + NV12 适配)
-     *   - Yuv420Extractor 提取 I420 字节数组正确
-     *   - EglRenderer 把真实摄像头帧正确编码 H.264
-     *   - OpenCV 解码后不再是"水平渐变测试图", 而是真实摄像头画面
-     */
-    private fun onEncodeOneFrameCameraEglTest() {
-        Thread {
-            try {
-                InAppLogStore.i(TAG, "[3.2.0.2] 真实摄像头 EGL 编码验证开始")
-                val w = cameraW
-                val h = cameraH
-                if (w <= 0 || h <= 0) {
-                    InAppLogStore.e(TAG, "[3.2.0.2] 相机未 ready (w=$w h=$h), 等 1.5s 后重试")
-                    Thread.sleep(1500)
-                    val w2 = cameraW
-                    val h2 = cameraH
-                    if (w2 <= 0 || h2 <= 0) {
-                        runOnUiThread {
-                            Toast.makeText(this, "相机未就绪, 请稍候再试", Toast.LENGTH_SHORT).show()
-                        }
-                        return@Thread
-                    }
-                }
-                val wFinal = if (w > 0) w else cameraW
-                val hFinal = if (h > 0) h else cameraH
-
-                // 1) 准备 latch 等下一帧 (给 listener 一点时间)
-                val latch = CountDownLatch(1)
-                cameraFrameReady = latch
-                val yuv0 = lastCameraYuv
-                if (yuv0 == null) {
-                    InAppLogStore.i(TAG, "[3.2.0.2] 还没收到帧, 等 latch (最多 3s)")
-                    val got = latch.await(3, TimeUnit.SECONDS)
-                    cameraFrameReady = null
-                    if (!got) {
-                        runOnUiThread {
-                            Toast.makeText(this, "3s 内没收到真实帧", Toast.LENGTH_SHORT).show()
-                        }
-                        return@Thread
-                    }
-                }
-                val yuv = lastCameraYuv ?: run {
-                    InAppLogStore.e(TAG, "[3.2.0.2] latch 已唤醒但 lastCameraYuv 仍为 null")
-                    return@Thread
-                }
-                InAppLogStore.i(TAG, "[3.2.0.2] 已拿真实帧: ${yuv.size} 字节 (${wFinal}x${hFinal})")
-
-                // 2) start encoder
-                val baos = java.io.ByteArrayOutputStream()
-                var naluCount = 0
-                val encoder = H264Encoder()
-                val inputSurface = encoder.start(wFinal, hFinal, object : H264Encoder.NaluCallback {
-                    override fun onNalu(nalu: ByteArray, type: Int) {
-                        baos.write(nalu)
-                        naluCount++
-                        InAppLogStore.i(TAG, "[3.2.0.2] NALU #$naluCount type=$type size=${nalu.size}")
-                    }
-                })
-
-                // 3) EglRenderer 画真实帧
-                val renderer = EglRenderer(inputSurface)
-                renderer.drawYuv(yuv, wFinal, hFinal)
-                InAppLogStore.i(TAG, "[3.2.0.2] EGL 已画 1 帧真实摄像头到 Surface")
-
-                // 4) 通知编码器喂一帧
-                encoder.encodeFrame(yuv)
-                Thread.sleep(500)
-
-                // 5) 停
-                encoder.stop()
-                renderer.release()
-
-                // 6) 保存
-                val outDir = getExternalFilesDir(null)
-                if (outDir == null) {
-                    InAppLogStore.e(TAG, "[3.2.0.2] getExternalFilesDir(null) 返回 null")
-                    return@Thread
-                }
-                if (!outDir.exists()) outDir.mkdirs()
-                val outFile = java.io.File(outDir, "test_3_2_2_camera.h264")
-                java.io.FileOutputStream(outFile).use { fos ->
-                    fos.write(baos.toByteArray())
-                }
-                InAppLogStore.i(TAG, "[3.2.0.2] 已写入: ${outFile.absolutePath} (${baos.size()} 字节, $naluCount 个 NALU)")
-
-                runOnUiThread {
-                    Toast.makeText(this, "相机EGL OK: ${baos.size()}B / $naluCount NALU\n${outFile.absolutePath}", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "[3.2.0.2] 异常", e)
-                runOnUiThread {
-                    Toast.makeText(this, "异常: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.apply { name = "CameraEGL-Test-Thread" }.start()
-    }
-
-    /**
-     * 批次 3.2.0.3a 单元自检: PcpPacketWriter 写 2 个 PCP 包到文件供 Python 校验
-     *
-     * 流程:
-     *   1) TestPcpPackets.writeTestPcpFile 写 2 帧 (keyframe + P-frame) 到 .pcp 文件
-     *   2) adb pull 到电脑 → tests/output/verify_pcp_packet.py 用 struct.unpack 校验 8 字段全等
-     *
-     * 验证目标:
-     *   - PcpPacketWriter 24 字节头打包字节级与 desktop/receiver.py::HEADER_STRUCT 一致
-     *   - magic='PHCM' / version=0x01 / type=0x01 / codec=0x02 / flags=0x01(帧1)/0(帧2)
-     *   - sequence u32 / pts u64 / payload_len u32 都小端序正确
-     *
-     * 不做 (后续批次):
-     *   - 3.2.0.3b: 不再写文件, 改用 TcpStreamServer 发字节
-     *   - 3.2.0.3c: 接 Camera2 持续推流
-     */
-    private fun onEncodeOneFramePcpTest() {
-        Thread {
-            try {
-                InAppLogStore.i(TAG, "[3.2.0.3a] PCP 打包单元自检开始")
-
-                val outDir = getExternalFilesDir(null)
-                if (outDir == null) {
-                    InAppLogStore.e(TAG, "[3.2.0.3a] getExternalFilesDir(null) 返回 null")
-                    return@Thread
-                }
-                if (!outDir.exists()) outDir.mkdirs()
-                val outFile = java.io.File(outDir, "test_3_2_3a_packets.pcp")
-
-                val (packetCount, totalBytes) = TestPcpPackets.writeTestPcpFile(outFile)
-                InAppLogStore.i(TAG, "[3.2.0.3a] 已写入: ${outFile.absolutePath} ($packetCount 包 / $totalBytes 字节)")
-
-                runOnUiThread {
-                    Toast.makeText(
-                        this,
-                        "PCP OK: $packetCount 包 / $totalBytes 字节\n${outFile.absolutePath}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "[3.2.0.3a] 异常", e)
-                runOnUiThread {
-                    Toast.makeText(this, "PCP 异常: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.apply { name = "PCP-Test-Thread" }.start()
-    }
-
-    /**
-     * 批次 3.2.0.3b 单跑通: 启动 TcpStreamServer 监听 9999, 客户端连上后发 1 个 "Hello PCP" 测试包
-     *
-     * 流程:
-     *   1) TcpStreamServer.start() → ServerSocket 监听 0.0.0.0:9999
-     *   2) 用户在 PC 端 adb reverse tcp:9999 tcp:9999 + 启动客户端 (Python/PowerShell TcpClient)
-     *   3) 客户端连上 → server.accept() 收到 → 立刻用 PcpPacketWriter 打个 "Hello PCP" 包
-     *      (sequence=0, pts=System.nanoTime()/1000, payload=15 字节明文) 发过去
-     *   4) server 持续运行 60s 让用户验证多次, 然后 stop() 关闭
-     *
-     * 验证目标:
-     *   - ServerSocket 监听 9999 OK
-     *   - accept() 能拿到 PC 端的连接
-     *   - getOutputStream().write() 写出去 24+N 字节, PC 端 recv() 能收到
-     *   - 收到的字节 = PcpPacketWriter.buildPacket 输出 (G-001 防御: 可再用 Python struct.unpack 校验)
-     *
-     * 不做 (后续批次):
-     *   - 3.2.0.3c: 接 Camera2 持续推流 (这个测试方法不接相机, 客户端连上就发 1 包然后等)
-     *   - 3.2.0.3d: 电脑端 PcpReceiver 解码
-     */
-    private fun onTcpStreamServerTest() {
-        Thread {
-            try {
-                InAppLogStore.i(TAG, "[3.2.0.3b] 启动 TcpStreamServer 监听 9999")
-                val server = TcpStreamServer(port = 9999) { status ->  // 批次3.2.0.3h: 修正 9998→9999, 避免与StreamingService抢端口
-                    InAppLogStore.i(TAG, "[3.2.0.3b] $status")
-                }
-                server.start()
-
-                // 等客户端连上 (最多 30s, 给用户 adb reverse + 启动客户端的时间)
-                val deadline = System.currentTimeMillis() + 30_000
-                while (!server.isClientConnected() && System.currentTimeMillis() < deadline) {
-                    Thread.sleep(200)
-                }
-                if (!server.isClientConnected()) {
-                    InAppLogStore.e(TAG, "[3.2.0.3b] 30s 内无客户端连接, 请确认 adb reverse tcp:9999 tcp:9999 + 客户端已启动")
-                    runOnUiThread {
-                        Toast.makeText(this, "TcpStreamServer 30s 无连接", Toast.LENGTH_LONG).show()
-                    }
-                    return@Thread
-                }
-
-                // 客户端连上了, 构造 1 个 "Hello PCP" 测试包发送
-                val testPayload = "Hello-PCP-3.2.0.3b".toByteArray()
-                val testPacket = PcpPacketWriter.buildPacket(
-                    sequence = 0,
-                    ptsUs = System.nanoTime() / 1000,  // 当前时间戳 (微秒)
-                    payload = testPayload,
-                    isKeyframe = true
-                )
-                val ok = server.sendPacket(testPacket)
-                InAppLogStore.i(TAG, "[3.2.0.3b] 测试包发送 ${if (ok) "成功" else "失败"}: ${testPacket.size} 字节 (payload='${testPayload.toString(Charsets.UTF_8)}')")
-
-                runOnUiThread {
-                    Toast.makeText(this, "TCP 服务端 OK: 已发 ${testPacket.size}B 测试包", Toast.LENGTH_LONG).show()
-                }
-
-                // 保持 server 运行 60s, 让用户可以从 PC 端多次连接验证
-                Thread.sleep(60_000)
-                server.stop()
-                InAppLogStore.i(TAG, "[3.2.0.3b] 服务端已 stop()")
-            } catch (e: Exception) {
-                Log.e(TAG, "[3.2.0.3b] 异常", e)
-                runOnUiThread {
-                    Toast.makeText(this, "TCP 异常: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.apply { name = "TcpStreamServer-Test-Thread" }.start()
-    }
-
-    // 批次 3.2.0.3f: startStreaming() / stopStreaming() / stopStreamingInternal() 3 个方法已迁到 StreamingService
-    //  MainActivity 这里只留推流按钮 onClick 调 StreamingService.start/stop, 见 onCreate() 169-180 行
+    // 推流逻辑在 StreamingService 中实现，MainActivity 仅通过 onClick 调用 StreamingService.start/stop
 }
