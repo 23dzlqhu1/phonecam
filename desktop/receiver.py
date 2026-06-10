@@ -228,6 +228,9 @@ class PcpReceiver:
                 delay = self._reconnect_delay
                 logger.info("已连接，开始接收 PCP 帧...")
 
+                # 阶段 1: 连接成功后立即向手机端反向请求关键帧，以实现画面秒开
+                self._send_keyframe_request(sock)
+
                 self._parse_pcp_stream(sock)
 
             except (ConnectionRefusedError, socket.timeout, OSError) as e:
@@ -318,6 +321,9 @@ class PcpReceiver:
             # 6) 丢帧统计
             if self._last_sequence >= 0 and sequence > self._last_sequence + 1:
                 self._lost_count += (sequence - self._last_sequence - 1)
+                # 阶段 1: 检测到网络丢帧时，立即向手机端反向发起关键帧请求，缩短卡顿/花屏时长
+                logger.warning(f"[PCP] 检测到丢帧: sequence 预期 {self._last_sequence + 1} 实际 {sequence}，发起 I 帧请求")
+                self._send_keyframe_request(sock)
             self._last_sequence = sequence
 
             # 7) 存储 + 回调
@@ -391,6 +397,14 @@ class PcpReceiver:
             self._fps = self._frame_count / elapsed
             self._frame_count = 0
             self._last_fps_time = now
+
+    def _send_keyframe_request(self, sock: socket.socket):
+        """阶段 1: 反向控制指令 - 通过已连接的 socket 发送关键帧 (PLI) 请求"""
+        try:
+            sock.sendall(b"PLI\n")
+            logger.info("[PCP] 已发送关键帧请求指令 (PLI)")
+        except Exception as e:
+            logger.warning(f"[PCP] 发送关键帧请求指令失败: {e}")
 
 
 # ============== 帧转 numpy 工具 ==============

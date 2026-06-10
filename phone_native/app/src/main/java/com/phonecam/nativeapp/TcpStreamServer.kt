@@ -34,7 +34,8 @@ import java.net.Socket
  */
 class TcpStreamServer(
     private val port: Int = 9999,
-    private val onEvent: (String) -> Unit = {}
+    private val onEvent: (String) -> Unit = {},
+    private val onCommand: (String) -> Unit = {}
 ) {
 
     private val tag = "TcpStreamServer"
@@ -103,7 +104,13 @@ class TcpStreamServer(
                                 "对端 close (read=-1)"
                                 break
                             }
-                            // n > 0: MVP-2 协议是单向推流, 客户端不应发数据, 忽略
+                            if (n > 0) {
+                                // 阶段 1: 解析客户端发来的反向控制指令 (以 US_ASCII 解码)
+                                val text = String(buf, 0, n, Charsets.US_ASCII)
+                                if (text.contains("PLI")) {
+                                    onCommand("PLI")
+                                }
+                            }
                         }
                         "client 监控循环结束 (alive=$clientAlive)"
                     } catch (e: Exception) {

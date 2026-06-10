@@ -109,6 +109,16 @@ class StreamingService : Service() {
             return synchronized(sPtsNsLock) { sLatestPtsNs }
         }
 
+        /**
+         * 阶段 1: 反向控制指令 - 触发强制输出关键帧
+         */
+        fun triggerKeyframeRequest() {
+            val encoder = sH264Encoder
+            if (sActive && encoder != null) {
+                encoder.requestKeyframe()
+            }
+        }
+
         // PCP 包统计
         @Volatile var sPcpSequence: Int = 0
         @Volatile var sNaluSentCount: Int = 0
@@ -184,10 +194,19 @@ class StreamingService : Service() {
             try {
                 InAppLogStore.i(TAG, "[3.2.0.3f] Service worker thread 启动, 6 步走起")
 
-                // 1) TCP server 起来
-                val server = TcpStreamServer(port = 9999) { status ->
-                    InAppLogStore.i(TAG, "[3.2.0.3f-TCP] $status")
-                }
+                // 1) TCP server 起来 (注册 onCommand 监听 PC 端的反向控制指令)
+                val server = TcpStreamServer(
+                    port = 9999,
+                    onEvent = { status ->
+                        InAppLogStore.i(TAG, "[3.2.0.3f-TCP] $status")
+                    },
+                    onCommand = { cmd ->
+                        if (cmd == "PLI") {
+                            InAppLogStore.i(TAG, "[CONTROL] 收到 PC 端 PLI 指令，请求立即输出 I 帧")
+                            triggerKeyframeRequest()
+                        }
+                    }
+                )
                 server.start()
                 sTcpServer = server
 

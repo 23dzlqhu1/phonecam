@@ -127,6 +127,23 @@ class H264Encoder {
     }
 
     /**
+     * 阶段 1: 动态向 MediaCodec 请求输出关键帧 (I 帧)
+     * 用于接收端网络发生抖动/丢包/重连时的瞬时自修复
+     */
+    fun requestKeyframe() {
+        val codecInstance = codec ?: return
+        if (!running) return
+        try {
+            val b = android.os.Bundle()
+            b.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+            codecInstance.setParameters(b)
+            Log.i(TAG, "[CONTROL] 成功向 MediaCodec 强制发起 I 帧请求")
+        } catch (e: Exception) {
+            Log.e(TAG, "[CONTROL] 向 MediaCodec 请求 I 帧异常: ${e.message}", e)
+        }
+    }
+
+    /**
      * 停止编码器 (释放 codec + Surface + 后台线程)
      * 调用后 codec / inputSurface 句柄全部清空, 可重新 start()
      */
