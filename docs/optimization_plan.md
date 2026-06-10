@@ -1,127 +1,59 @@
-# PhoneCam 优化计划：追赶 Iriun Webcam
+# PhoneCam 长期优化与技术栈演进规划 (v1.0)
 
-> ⚠️ **本文档部分已实现**：v0.4 MVP 目标（HTTP MJPEG → H.264 私有 TCP）在 v0.2.8-mvp2-batch3.2.0.2（2026-06-09）已达成。
+> 📌 **架构基准**：当前已完成 MVP-2/MVP-3 端到端闭环（Kotlin 原生 App + EGL + MediaCodec 硬编 → PCP 私有 TCP 协议 → PC 端 PyAV 硬件解码 + pyvirtualcam）。
 >
-> 📌 **当前权威路线**：[`specs/MVP路线图.md`](../specs/MVP路线图.md) 批次 3.2.0.3（端到端闭环）+ 3.3（虚拟摄像头）+ 3.4（产品化）
->
-> 📌 **当前架构**：[`docs/architecture.md`](architecture.md)（Kotlin + EGL + MediaCodec + PCP）
->
-> **本文档保留**作为 v1.0 性能优化目标参考（延迟、CPU、APK 体积、虚拟摄像头驱动等）。
+> **本文档作用**：定义 MVP 闭环后，迈向商业级、产品级 v1.0 版本时，从 CTO 视角确立的 5 大核心技术栈优化方向。
 
 ---
 
-## 技术差距分析
+## 技术差距与上演化矩阵
 
-| 维度 | MVP-0 旧版 | 当前 v0.2.8 | v1.0 目标 | 状态 |
-|------|-------------|-------------|-----------|------|
-| 视频编码 | JPEG | **H.264 硬编** (MediaCodec) | H.264 硬编 | ✅ MVP-2 达成 |
-| 传输协议 | HTTP MJPEG | **私有 TCP + PCP 24B 头** (待 3.2.0.3 联调) | 私有 TCP | 🟡 协议 OK，待链路 |
-| 虚拟摄像头 | pyvirtualcam (需OBS) | pyvirtualcam (待 MVP-3 集成) | 自研驱动 | ⬜ MVP-3 |
-| 电脑端 | Python (150MB) | Python | exe (5MB) | ⬜ MVP-4 |
-| 手机端 | Flutter + camera | **Kotlin 原生 + Camera2 + MediaCodec** | 同左 | ✅ MVP-2 达成 (ADR-006) |
-
----
-
-## Phase 5: H.264 编码（带宽降 80%）
-
-### Task 5.1: 手机端 MediaCodec 编码器
-- Android MediaCodec H.264 硬编码
-- Platform Channel 桥接 Dart ↔ Kotlin
-- 带宽: 3-5Mbps → 0.5-1Mbps
-
-### Task 5.2: 电脑端 FFmpeg 解码器
-- PyAV/FFmpeg H.264 解码
-- 硬件解码优先 (NVDEC/QSV)
-- 延迟 <10ms
-
-### Task 5.3: IDR 帧管理
-- 每 2 秒强制 IDR 帧
-- 断线重连请求 IDR
+| 维度 | MVP-2/3 现状 | v1.0 演进规划 | 优化收益 |
+|------|-------------|--------------|---------|
+| **PC 端语言** | Python (~50MB - 100MB) | **Rust** / **C++** | 包体积降至 <5MB，摆脱杀毒软件误报，消除 GIL，硬解零拷贝显存直通 |
+| **虚拟相机驱动** | pyvirtualcam (强依赖 OBS 驱动) | **Windows Virtual Camera API** (自研/自注册驱动) | 零第三方依赖安装，一键可用，设备管理器显示自定义名 "PhoneCam Camera" |
+| **网络传输协议** | TCP (PCP 协议 v2) | **UDP** / **SRT** / **QUIC** (WebRTC 备选) | 消除队头阻塞，弱网抖动不堆积时延，首帧秒开 |
+| **视频编码格式** | H.264 (AVC) | **H.265 (HEVC)** / **AV1** 自动协商 | 同等画质下带宽减少 50%，显著降低无线 WiFi 环境丢包率 |
+| **交互控制链路** | 单向推流 (无反向信道) | **双向指令信道** (TCP 信令/反向 UDP) | 支持实时关键帧请求 (PLI/FIR)，断线或卡顿瞬时恢复画面，自适应码率调整 |
 
 ---
 
-## Phase 6: WebSocket 传输
+## v1.0 架构级优化方向详解
 
-### Task 6.1: WebSocket 双向通信
-- 二进制帧: H.264 NAL 数据
-- 文本帧: 控制信令 (JSON)
-- 延迟降低 30%
+### 1. 电脑端语言：Python 重构为 Rust/C++
+* **痛点**：
+  - PyInstaller 打包带有的 Python 解释器及 C 依赖库（OpenCV, PyAV 等）体积巨大，不利于下载和分发。
+  - Windows Defender 极易对 PyInstaller 打包产物触发误报，严重阻碍普通用户安装。
+  - 难以实现全链路 GPU 零拷贝。
+* **演进规划**：
+  - 用 **Rust**（结合 `windows-rs` 和 FFmpeg 绑定）或 **C++** 重写 PC 客户端。
+  - **核心链路显存直通**：直接在 GPU 上进行 DXVA/D3D11VA 硬解码，并将解码后的 D3D11 Texture 指针直接送至虚拟摄像头，彻底免除显存与内存（CPU）之间的数据拷贝。
 
-### Task 6.2: 自适应码率
-- RTT 检测 → 动态调整码率
-- 丢包 >5% → 降低帧率
+### 2. 虚拟相机驱动：脱离 OBS 强依赖，实现自研自注册
+* **痛点**：
+  - 必须要求用户电脑上已安装 OBS 虚拟摄像头，这不仅违背了“3分钟一键上手”的原则，且摄像头名称在系统中只能写死为 `"OBS Virtual Camera"`。
+* **演进规划**：
+  - 利用 Windows 10/11 的 **Windows Virtual Camera (vcam) API** 或编写极简的 **MFT (Media Foundation Transform)** 虚拟相机驱动组件。
+  - 在电脑端客户端安装包（如使用 NSIS 制作的极简安装包）内封装驱动注册脚本。安装后系统直接识别 **“PhoneCam Camera”** 设备，提供商业化级用户感知。
 
----
+### 3. 传输协议与防抖：基于 UDP/QUIC 替换 TCP
+* **痛点**：
+  - TCP 的强可靠性在实时音视频场景是双刃剑。一旦网络发生丢包，TCP 的队头阻塞（Head-of-Line Blocking）和重传机制会导致视频接收被迫挂起，画面发生瞬间“卡顿”后又“加速追赶”，在 WiFi 局域网下延迟波动极大。
+* **演进规划**：
+  - 核心视频传输链路改用 **UDP**、**SRT (Secure Reliable Transport)** 或 **QUIC**。
+  - **核心思想：丢帧不补**。遇到丢包时，直接丢弃受损帧并立即显示最新的网络包，用轻微的局部花屏（可通过下一个 I 帧修复）来保障端到端延迟绝对恒定，避免卡顿堆积。
 
-## Phase 7: 虚拟摄像头驱动
+### 4. 视频编码升级：支持 H.265 (HEVC) / AV1 自动协商
+* **痛点**：
+  - H.264 在 1080p 分辨率下带宽要求较高，在拥堵的局域网无线信道中容易增大网络丢包的概率。
+* **演进规划**：
+  - 手机端 `MediaCodec` 开启 H.265 硬件编码支持，PC 端通过 D3D11VA 开启 H.265 硬解。
+  - 建立连接时进行 SDP 协商：若双端硬件支持，优先使用 **H.265** 或 **AV1** 编码。同等画质下带宽开销缩减一半，极大改善 WiFi 模式的抗网络拥堵表现。
 
-### Task 7.1: DirectShow Source Filter (Windows)
-- C++ COM 组件
-- 注册为系统摄像头
-- 显示 "PhoneCam Camera"
-
-### Task 7.2: Python-C++ 桥接
-- ctypes 调用 DLL
-- 发送 BGR 帧数据
-
----
-
-## Phase 8: 打包优化
-
-### Task 8.1: PyInstaller 打包 exe
-- 单文件 exe (~50MB)
-- 包含所有依赖
-- UPX 压缩
-
-### Task 8.2: NSIS 安装程序
-- 一键安装 + 驱动注册
-- 桌面快捷方式
-- 卸载清理
-
-### Task 8.3: 自动更新
-- 检查 GitHub Releases
-- 增量更新
-
----
-
-## Phase 9: 体验优化
-
-### Task 9.1: 零配置连接
-- USB 插入自动连接
-- 无需手动操作
-
-### Task 9.2: 画面增强
-- 镜像/翻转
-- 亮度/对比度
-- 美颜
-
-### Task 9.3: 音频传输
-- 手机麦克风 → AAC → 电脑
-- VB-Audio 虚拟设备
-
-### Task 9.4: GUI 美化
-- CustomTkinter 或 Wails
-- 现代化界面
-
----
-
-## 执行顺序
-
-1. Phase 5 (H.264) — 核心竞争力
-2. Phase 8 (打包) — 分发必需
-3. Phase 6 (WebSocket) — 体验优化
-4. Phase 7 (驱动) — 产品级标志
-5. Phase 9 (体验) — 持续迭代
-
----
-
-## 预期最终效果
-
-| 维度 | v0.4 | v1.0 | Iriun |
-|------|------|------|-------|
-| 带宽 | 3-5Mbps | 0.5-1Mbps | 0.5-1Mbps |
-| 延迟 | ~100ms | ~50ms | ~50ms |
-| 安装 | 手动 | 一键 | 一键 |
-| 包大小 | 150MB | 50MB | 5MB |
-| 虚拟摄像头 | 需OBS | 自带 | 自带 |
-| 开源 | ✅ | ✅ | ❌ |
+### 5. 双向控制信道：新增反向信令链路
+* **痛点**：
+  - 当前推流为单向链路。当 PC 解码器遭遇首帧启动、重连或丢包导致花屏时，必须被动等待手机端配置的固定关键帧间隔（如 2 秒一次的 I 帧），无法做到“卡顿瞬时恢复”。
+* **演进规划**：
+  - 建立并行的轻量级双向控制信道（可基于 TCP socket）。
+  - **关键帧请求机制 (PLI/FIR)**：当 PC 接收端检测到花屏、丢包或首次连接启动时，立即发送 `Request_Keyframe` 指令，手机端编码器收到指令后，通过 `Bundle` 立即强制触发一个 I 帧（键值 `MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME`），实现**瞬间秒开和秒级花屏自修复**。
+  - **自适应码率 (ABR)**：PC 端反馈当前的 RTT（往返时延）和丢包率，反向微调手机端的视频编码码率。
