@@ -61,9 +61,9 @@ class MdnsDiscovery:
         self._thread = threading.Thread(target=self._mdns_listen, daemon=True)
         self._thread.start()
 
-        # 方法2: 子网扫描（备用，兼容性更好）
-        self._scan_thread = threading.Thread(target=self._subnet_scan_loop, daemon=True)
-        self._scan_thread.start()
+        # 方法2: 子网扫描（由于代理环境下易产生 false positive，在 MVP 阶段默认禁用）
+        # self._scan_thread = threading.Thread(target=self._subnet_scan_loop, daemon=True)
+        # self._scan_thread.start()
 
     def stop(self):
         """停止发现"""
