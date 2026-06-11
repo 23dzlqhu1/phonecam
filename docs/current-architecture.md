@@ -1,6 +1,6 @@
 # PhoneCam 当前架构图
 
-> **最后更新**: 2026-06-11
+> **最后更新**: 2026-06-11（MVP-3 真机验证通过；G-025 设备兼容性问题已记录；MVP-4 进行中）
 > **基于**: 实际代码审计，非文档声明。见 `desktop/` 和 `phone_native/` 源码。
 
 ---
@@ -253,7 +253,7 @@ StreamingService.stopStreamingInternal()
 
 | 编号 | 类型 | 描述 | 影响 | 文件 |
 |------|------|------|------|------|
-| D-01 | 全局状态 | StreamingService companion object 有 17 个 static var | 跨线程共享可变状态，紧耦合 | StreamingService.kt |
+| D-01 | 全局状态 | StreamingService companion object 有 17 个 static var（已通过 StreamingStateSnapshot 减少直接读取耦合） | 跨线程共享可变状态，紧耦合 | StreamingService.kt |
 | D-02 | 紧耦合 | MainActivity 直接读取 StreamingService.sXXX | 重构困难 | MainActivity.kt |
 | D-03 | 协议双端 | PCP 协议在 Python 和 Kotlin 各自定义 | 变更需同步修改两端 | receiver.py, PcpPacketWriter.kt |
 | D-04 | 虚拟摄像头 | pyvirtualcam 依赖 OBS Virtual Camera 后端 | 用户必须安装 OBS | virtual_camera.py |
@@ -261,3 +261,4 @@ StreamingService.stopStreamingInternal()
 | D-06 | Android 复杂性 | 前台 Service + companion object + 多 Activity | 生命周期管理复杂 | StreamingService.kt |
 | D-07 | 连接占位 | ConnectActivity 手动连接是模拟（1.5s delay + toast） | WiFi 连接不可用 | ConnectActivity.kt |
 | D-08 | SPS/PPS | 关键帧前拼接缓存的 SPS/PPS | 丢帧后解码器可能需要等待下一个关键帧 | H264Encoder.kt, H264Decoder |
+| D-09 | 设备兼容性 | G-025: 旧设备 MediaCodec 编码器产出损坏 H.264（EglRenderer→InputSurface 路径花屏/彩色噪点），新设备同代码正常 | 某些设备无法使用，需标注设备兼容性或提供 ByteBuffer 编码 fallback | H264Encoder.kt, EglRenderer.kt |

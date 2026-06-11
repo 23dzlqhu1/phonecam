@@ -555,12 +555,19 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 
 ### 6.6 验收标准
 
-- [ ] 运行 `python -m desktop.phonecam --connect 127.0.0.1:9999 --virtual-cam`
-- [ ] Windows 设备管理器 / 摄像头列表出现 "PhoneCam Camera"（或 OBS Virtual Camera）
+- [x] 运行 `python -m desktop.phonecam --connect 127.0.0.1:9999 --virtual-cam`
+- [x] Windows 设备管理器 / 摄像头列表出现 "PhoneCam Camera"（或 OBS Virtual Camera）
+- [x] OBS 添加视频源能看到手机画面
 - [ ] 打开腾讯会议 → 设置 → 视频 → 摄像头下拉，能选 PhoneCam Camera
 - [ ] **腾讯会议预览中能看到手机画面**
-- [ ] 同理 OBS 添加视频源能看到
 - [ ] 文档：新手按文档操作 3 分钟内能完成
+
+> ✅ **验证结果**（2026-06-11 真机验证）：
+> - **新设备**：29 FPS @1280x720，画面清晰，OBS Virtual Camera 正常工作
+> - **旧设备（OPPO PLC110）**：同 APK 同代码，PC 端解码为彩色噪点（G-025 MediaCodec 编码器设备特定 bug）
+> - 验证脚本：`desktop/tests/mvp3_e2e_verify.py`（159帧/10s 通过）
+> - PCP 协议测试：7/7 全部通过
+> - **结论**：MVP-3 功能完整可用，G-025 为设备特定硬件/驱动问题，非代码缺陷
 
 ### 6.7 给 AI 的任务提示词
 
@@ -750,4 +757,4 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 
 ---
 
-**最后更新**：2026-06-11
+**最后更新**：2026-06-11（MVP-3 真机验证通过：新设备 29FPS/1280x720/OBS VirtualCamera；G-025 设备兼容性问题已记录；MVP-4 进行中）

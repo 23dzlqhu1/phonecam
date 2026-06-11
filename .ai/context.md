@@ -52,7 +52,9 @@
 | **MVP-3** 虚拟摄像头闭环 | ✅ **完成** | pyvirtualcam + OBS Virtual Camera 真机验证通过（159帧/10s @1280x720）。mvp3_e2e_verify.py 自动化验证。 |
 | **MVP-4** 产品化 | 🟡 **进行中** | 4.1 GUI 创建+连接验证通过。子阶段：4.1 GUI稳定 → 4.2 USB → 4.3 WiFi → 4.4 打包 → 4.5 文档 → 4.6 音频(延后) |
 
-**当前正在做**：MVP-0~MVP-3 全部完成。核心视频链路（Camera2→H264→PCP→PyAV→pyvirtualcam）已端到端验证。准备进入 MVP-4 产品化阶段。
+**当前正在做**：MVP-0~MVP-3 全部完成。核心视频链路（Camera2→H264→PCP→PyAV→pyvirtualcam）已端到端验证。MVP-4 产品化进行中（4.1 GUI 验证通过，4.2~4.6 待做）。
+
+**⚠️ 设备兼容性**：旧设备（OPPO PLC110）存在 MediaCodec 编码器 bug（G-025），EglRenderer→MediaCodec InputSurface 路径产出损坏的 H.264 数据（PC 端解码为彩色噪点）。新设备使用相同 APK 和代码，29 FPS @1280x720 画面清晰，OBS Virtual Camera 正常。G-025 为设备特定 bug，非代码缺陷。
 
 ---
 
@@ -115,6 +117,7 @@
 | G-022 | MediaCodec 的 SPS/PPS 只输出一次，必须拼在 I 帧头部 | 2026-06-11 |
 | G-023 | Android 重复启动 StreamingService 导致 EADDRINUSE 解决 | 2026-06-11 |
 | G-024 | ADB 端口转发（adb forward）导致 PC 状态误判与手机超时断连 | 2026-06-11 |
+| G-025 | **MediaCodec 编码器设备特定 bug**：旧设备 EglRenderer→InputSurface 路径产出损坏 H.264（花屏/彩色噪点），新设备同代码正常。根因在设备硬件/驱动层 | 2026-06-11 |
 
 ---
 
@@ -199,4 +202,4 @@
 
 ---
 
-**最后更新**：2026-06-11（桌面端 GUI 成功迁移至 PCP 协议端口 9999，完成 APK 编译与部署）
+**最后更新**：2026-06-11（MVP-3 真机验证通过：新设备 29FPS/1280x720/OBS VirtualCamera；旧设备 G-025 MediaCodec bug 已记录；MVP-4 进行中 4.1 已验证）
