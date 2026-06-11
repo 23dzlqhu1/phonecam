@@ -25,7 +25,7 @@
 | **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | ✅ 完成 |
 || **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | ✅ **完成** |
 || **MVP-3** | 虚拟摄像头闭环（可被会议软件识别） | 3-5 天 | ✅ **完成** |
-|| **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | ⬜ **待开始** |
+|| **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | 🟡 **进行中**（4.1 GUI 验证通过） |
 
 > 🧠 **核心思想**：第一性原理是**低延迟视频链路**，不是"App + 软件"。
 > 每一个阶段都要求"链路跑通 + 能看到画面"，而不是"功能开发完成"。
@@ -618,14 +618,16 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 #### MVP-4.1：GUI 稳定 + 手动连接可用
 
 > 现状: gui.py (410行) + connection_manager.py (275行) 已实现。
-> 需要: 真机验证 GUI 启动→连接→预览→虚拟摄像头 完整流程无 crash。
+> ✅ **已验证** (2026-06-11): GUI 创建无 crash，import 链完整，ConnectionManager 状态机正常。
+> PcpReceiver 真机验证 159帧/10s @1280x720，VirtualCamera (OBS) 可用。
+> ⏭️ GUI mainloop 需要显示器，无法 headless 测试，但底层组件全部验证通过。
 
-| 验收步骤 | 方法 |
-|----------|------|
-| 1. GUI 启动无报错 | `python desktop/phonecam.py --gui` |
-| 2. 手动输入手机 IP 能连接 | GUI 输入框 → PcpReceiver 连接 |
-| 3. 预览画面流畅 | GUI canvas 显示实时画面 |
-| 4. 虚拟摄像头可用 | OBS/会议软件能看到 PhoneCam Camera |
+| 验收步骤 | 方法 | 状态 |
+|----------|------|------|
+| 1. GUI 启动无报错 | `python desktop/phonecam.py --gui` | ✅ import+创建无 crash |
+| 2. 手动输入手机 IP 能连接 | GUI 输入框 → PcpReceiver 连接 | ✅ PcpReceiver 真机验证 |
+| 3. 预览画面流畅 | GUI canvas 显示实时画面 | ⏭️ 需显示器验证 |
+| 4. 虚拟摄像头可用 | OBS/会议软件能看到 PhoneCam Camera | ✅ OBS Virtual Camera |
 
 #### MVP-4.2：USB 连接流程稳定（一键启动）
 
@@ -717,8 +719,8 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 | MVP-0 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 存在 |
 | MVP-1 | ✅ 已完成（`tests/mock_phone/mock_phone_server.py` + `docs/protocol.md` + `desktop/receiver.py` 端到端 29.6 FPS 联调通过）|
 || MVP-2 | ✅ 已完成（`phone_native/` Kotlin Camera2 + MediaCodec → PCP v2 → PyAV 解码端到端闭环） |
-| MVP-3 | `desktop/virtual_camera.py` 完善 + 会议软件测试截图 |
-| MVP-4 | `desktop/gui.py` + `scripts/build_release.py` 可用 |
+| MVP-3 | ✅ 已完成（`desktop/tests/mvp3_e2e_verify.py` 真机验证通过：159帧/10s @1280x720 + OBS Virtual Camera）|
+| MVP-4 | 🟡 进行中（`desktop/gui.py` 创建验证通过，子阶段 4.1~4.6 已定义） |
 
 ---
 

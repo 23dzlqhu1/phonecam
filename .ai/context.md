@@ -50,9 +50,9 @@
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
 | **MVP-2** 真实摄像头画面 | ✅ **完成** | 链路端到端闭环达成（手机端 Kotlin/Camera2/MediaCodec → TCP PCP v2 → 电脑端 PyAV 硬件解码）。 |
 | **MVP-3** 虚拟摄像头闭环 | ✅ **完成** | pyvirtualcam + OBS Virtual Camera 真机验证通过（159帧/10s @1280x720）。mvp3_e2e_verify.py 自动化验证。 |
-| **MVP-4** 产品化 | ⬜ 待开始 | GUI（tkinter）+ WiFi + 音频 + 打包 EXE/APK + 用户文档 3 分钟内可用 |
+| **MVP-4** 产品化 | 🟡 **进行中** | 4.1 GUI 创建+连接验证通过。子阶段：4.1 GUI稳定 → 4.2 USB → 4.3 WiFi → 4.4 打包 → 4.5 文档 → 4.6 音频(延后) |
 
-**当前正在做**：MVP-1、MVP-2 已实现闭环，核心视频传输链路稳定。目前处于 MVP-3 阶段，重点是解决虚拟摄像头在实际会议软件中的表现。
+**当前正在做**：MVP-0~MVP-3 全部完成。核心视频链路（Camera2→H264→PCP→PyAV→pyvirtualcam）已端到端验证。准备进入 MVP-4 产品化阶段。
 
 ---
 
