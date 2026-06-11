@@ -61,6 +61,56 @@ class TcpStreamServer(
         running = true
         acceptThread = Thread({
             try {
+                // 1) 尝试作为 Client 连接 127.0.0.1:9999 (适用于 adb reverse 模式)
+                var connectedAsClient = false
+                try {
+                    onEvent("[TCP] 正在尝试 Client 模式连接 127.0.0.1:$port ...")
+                    val socket = Socket()
+                    socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 1000)
+                    clientSocket = socket
+                    connectedAsClient = true
+                    onEvent("[TCP] Client 模式连接成功: ${socket.remoteSocketAddress}")
+                } catch (e: Exception) {
+                    onEvent("[TCP] Client 模式连接失败: ${e.message}，降级为 Server 模式")
+                }
+
+                if (connectedAsClient) {
+                    // Client 模式下的监控与重连循环
+                    var firstTime = true
+                    while (running) {
+                        val client = clientSocket
+                        if (client == null || client.isClosed) {
+                            // 自动重连
+                            if (!firstTime) {
+                                onEvent("[TCP] Client 模式连接断开，1s 后尝试重连...")
+                                Thread.sleep(1000)
+                            } else {
+                                firstTime = false
+                            }
+                            if (!running) break
+                            try {
+                                val socket = Socket()
+                                socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 2000)
+                                clientSocket = socket
+                                onEvent("[TCP] Client 模式重连成功: ${socket.remoteSocketAddress}")
+                                runClientMonitor(socket)
+                            } catch (e: Exception) {
+                                // 忽略单次重连失败，继续循环
+                            }
+                        } else {
+                            if (firstTime) {
+                                firstTime = false
+                                runClientMonitor(client)
+                            } else {
+                                Thread.sleep(200)
+                            }
+                        }
+                    }
+                    onEvent("[TCP] Client 模式线程退出")
+                    return@Thread
+                }
+
+                // 2) 降级为 Server 模式 (适用于 WiFi 模式)
                 // 批次 3.2.0.3f: 用 bind() + setReuseAddress(true), 避免上次连接 TIME_WAIT (60s) 内 bind 同端口失败
                 //  ServerSocket(port) 旧构造不暴露底层 SO_REUSEADDR
                 serverSocket = java.net.ServerSocket()
@@ -85,42 +135,7 @@ class TcpStreamServer(
                     onEvent("[3.2.0.3h] 客户端连接: ${client.remoteSocketAddress}")
                     clientSocket = client
 
-                    // 阻塞等客户端断开 (对端 close 时 read() 返 -1, 或抛 SocketException)
-                    var clientAlive = true
-                    val reason: String = try {
-                        val monitor = client.getInputStream()
-                        val buf = ByteArray(1024)
-                        // read() 阻塞; 对端 close 时返 -1; 网络异常抛 IOException
-                        while (running && clientAlive && client.isConnected && !client.isClosed) {
-                            val n = try {
-                                monitor.read(buf)
-                            } catch (ie: Exception) {
-                                clientAlive = false
-                                "对端 read 异常: ${ie.javaClass.simpleName}: ${ie.message}"
-                                break
-                            }
-                            if (n == -1) {
-                                clientAlive = false
-                                "对端 close (read=-1)"
-                                break
-                            }
-                            if (n > 0) {
-                                // 阶段 1: 解析客户端发来的反向控制指令 (以 US_ASCII 解码)
-                                val text = String(buf, 0, n, Charsets.US_ASCII)
-                                if (text.contains("PLI")) {
-                                    onCommand("PLI")
-                                }
-                            }
-                        }
-                        "client 监控循环结束 (alive=$clientAlive)"
-                    } catch (e: Exception) {
-                        "[3.2.0.3h] client 监控线程异常: ${e.javaClass.simpleName}: ${e.message}"
-                    }
-
-                    // 清理当前 client, accept() 接下一个
-                    try { client.close() } catch (_: Exception) {}
-                    if (clientSocket === client) clientSocket = null
-                    onEvent("[3.2.0.3h] 客户端已断开: $reason, 等待下一个连接")
+                    runClientMonitor(client)
                 }
             } catch (e: Exception) {
                 if (running) {
@@ -132,6 +147,44 @@ class TcpStreamServer(
             }
         }, "TcpStreamServer-Accept")
         acceptThread?.start()
+    }
+
+    private fun runClientMonitor(client: Socket) {
+        var clientAlive = true
+        val reason: String = try {
+            val monitor = client.getInputStream()
+            val buf = ByteArray(1024)
+            // read() 阻塞; 对端 close 时返 -1; 网络异常抛 IOException
+            while (running && clientAlive && client.isConnected && !client.isClosed) {
+                val n = try {
+                    monitor.read(buf)
+                } catch (ie: Exception) {
+                    clientAlive = false
+                    "对端 read 异常: ${ie.javaClass.simpleName}: ${ie.message}"
+                    break
+                }
+                if (n == -1) {
+                    clientAlive = false
+                    "对端 close (read=-1)"
+                    break
+                }
+                if (n > 0) {
+                    // 阶段 1: 解析客户端发来的反向控制指令 (以 US_ASCII 解码)
+                    val text = String(buf, 0, n, Charsets.US_ASCII)
+                    if (text.contains("PLI")) {
+                        onCommand("PLI")
+                    }
+                }
+            }
+            "client 监控循环结束 (alive=$clientAlive)"
+        } catch (e: Exception) {
+            "[3.2.0.3h] client 监控线程异常: ${e.javaClass.simpleName}: ${e.message}"
+        }
+
+        // 清理当前 client
+        try { client.close() } catch (_: Exception) {}
+        if (clientSocket === client) clientSocket = null
+        onEvent("[3.2.0.3h] 客户端已断开: $reason")
     }
 
     /**

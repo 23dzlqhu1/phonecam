@@ -213,38 +213,63 @@ class PcpReceiver:
     # ----------------- 接收循环 -----------------
 
     def _receive_loop(self):
-        """主循环：自动重连 + 解析"""
+        """主循环：自动重连 + 解析 (重构为支持 127.0.0.1 Server 模式和 WiFi Client 模式)"""
         delay = self._reconnect_delay
 
         while self._running:
             sock = None
             try:
-                self._state = ReceiverState.CONNECTING
-                logger.info(f"连接: {self.host}:{self.port}")
-
-                sock = socket.create_connection(
-                    (self.host, self.port),
-                    timeout=10,
-                )
+                if self.host == '127.0.0.1':
+                    # ── USB Mode (TCP Server) ──
+                    self._state = ReceiverState.CONNECTING
+                    logger.info(f"[PCP] 启动 TCP 服务端，监听 {self.host}:{self.port}")
+                    
+                    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    server_sock.bind((self.host, self.port))
+                    server_sock.listen(1)
+                    server_sock.settimeout(0.5)
+                    
+                    while self._running:
+                        try:
+                            sock, addr = server_sock.accept()
+                            logger.info(f"[PCP] 手机已连接: {addr}")
+                            break
+                        except socket.timeout:
+                            continue
+                    
+                    server_sock.close()
+                    
+                    if not self._running or not sock:
+                        continue
+                else:
+                    # ── WiFi Mode (TCP Client) ──
+                    self._state = ReceiverState.CONNECTING
+                    logger.info(f"[PCP] 连接: {self.host}:{self.port}")
+                    sock = socket.create_connection(
+                        (self.host, self.port),
+                        timeout=10,
+                    )
+                
+                # ── Connected State (Common) ──
                 sock.settimeout(30)
-
                 self._state = ReceiverState.CONNECTED
                 self._reconnect_count = 0
                 delay = self._reconnect_delay
-                logger.info("已连接，开始接收 PCP 帧...")
-
+                logger.info("[PCP] 连接已建立，开始接收 PCP 帧...")
+                
                 # 阶段 1: 连接成功后立即向手机端反向请求关键帧，以实现画面秒开
                 self._send_keyframe_request(sock)
-
                 self._parse_pcp_stream(sock)
-
-            except (ConnectionRefusedError, socket.timeout, OSError) as e:
-                self._error = f"连接失败: {e}"
+                
+            except (ConnectionRefusedError, socket.timeout, OSError, ConnectionError) as e:
+                self._error = str(e)
                 self._state = ReceiverState.RECONNECTING
+                logger.warning(f"[PCP] 连接异常: {e}")
             except Exception as e:
-                self._error = f"错误: {e}"
+                self._error = str(e)
                 self._state = ReceiverState.RECONNECTING
-                logger.exception("接收异常")
+                logger.exception("[PCP] 接收异常")
             finally:
                 if sock:
                     try:
@@ -252,13 +277,18 @@ class PcpReceiver:
                     except OSError:
                         pass
 
+            # ── Error Handle & Sleep ──
             if self._running and self._state == ReceiverState.RECONNECTING:
                 self._reconnect_count += 1
-                logger.warning(
-                    f"{self._error}，{delay:.1f}秒后重连 (第{self._reconnect_count}次)"
-                )
-                time.sleep(delay)
-                delay = min(delay * 1.5, self._max_delay)
+                # USB 模式下不需要指数退避延时，因为 Server 可以直接重新监听
+                if self.host == '127.0.0.1':
+                    time.sleep(0.1)  # 极短时间防止 CPU 暴涨
+                else:
+                    logger.warning(
+                        f"[PCP] {self._error}，{delay:.1f}秒后重连 (第{self._reconnect_count}次)"
+                    )
+                    time.sleep(delay)
+                    delay = min(delay * 1.5, self._max_delay)
 
     def _parse_pcp_stream(self, sock: socket.socket):
         """从已连接的 socket 读取 PCP 帧

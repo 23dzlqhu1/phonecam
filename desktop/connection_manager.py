@@ -18,8 +18,8 @@ from usb_handler import find_usb_tether_interface, scan_usb_subnet
 logger = logging.getLogger(__name__)
 
 
-def setup_adb_forward():
-    """自动寻找 adb 并设置端口转发"""
+def setup_adb_reverse():
+    """自动寻找 adb 并设置端口反向代理"""
     import os
     import shutil
     import subprocess
@@ -46,16 +46,20 @@ def setup_adb_forward():
             pass
 
     if not adb_path:
-        logger.warning("[ADB] 未在 PATH 或 local.properties 中找到 adb，无法自动建立端口转发")
+        logger.warning("[ADB] 未在 PATH 或 local.properties 中找到 adb，无法自动建立端口反向代理")
         return False
 
     try:
         logger.info(f"[ADB] 正在启动 adb server...")
         subprocess.run([adb_path, "start-server"], timeout=10)
 
-        logger.info(f"[ADB] 正在自动建立端口转发: {adb_path} forward tcp:9999 tcp:9999")
+        # 清除已有的 reverse 代理，防止冲突
+        logger.info(f"[ADB] 清除已有的端口反向代理: {adb_path} reverse --remove tcp:9999")
+        subprocess.run([adb_path, "reverse", "--remove", "tcp:9999"], capture_output=True)
+
+        logger.info(f"[ADB] 正在自动建立端口反向代理: {adb_path} reverse tcp:9999 tcp:9999")
         result = subprocess.run(
-            [adb_path, "forward", "tcp:9999", "tcp:9999"],
+            [adb_path, "reverse", "tcp:9999", "tcp:9999"],
             capture_output=True,
             text=True,
             timeout=10
@@ -141,9 +145,8 @@ class ConnectionManager:
         self._running = True
         self._set_state(ConnectionState.SEARCHING)
 
-        # 尝试自动设置 ADB 端口转发，提升一键运行体验
-        # G-024: 记录 ADB forward 是否成功，后续不再用 TCP probe 误判
-        self._adb_forward_ok = setup_adb_forward()
+        # 尝试自动设置 ADB 反向代理，提升一键运行体验
+        self._adb_reverse_ok = setup_adb_reverse()
 
         # mDNS 发现
         self._mdns.on_device_found(self._on_mdns_device)
@@ -175,11 +178,10 @@ class ConnectionManager:
         """主连接循环"""
         import socket
         while self._running:
-            # G-024 修复: ADB forward 场景不做 TCP probe
-            #  ADB 本地监听总是立即 accept，TCP probe 是 false positive
-            #  改为: 直接进入 WAITING_FOR_PHONE，等 PcpReceiver 收到真实 PCP 帧后
+            # G-024 修复/重构: adb reverse 场景
+            #  改为: 直接进入 WAITING_FOR_PHONE，等 PcpReceiver (作为 TCP Server) 收到真实 PCP 帧后
             #  由 confirm_stream_active() 转为 CONNECTED
-            if self._adb_forward_ok:
+            if self._adb_reverse_ok:
                 usb_url = 'http://127.0.0.1:9999/video'
                 with self._lock:
                     current = self._info
@@ -191,7 +193,7 @@ class ConnectionManager:
                         self._info = ConnectionInfo(
                             state=ConnectionState.WAITING_FOR_PHONE,
                             device=DiscoveredDevice(
-                                name='ADB Forwarded Device',
+                                name='ADB Reversed Device',
                                 ip='127.0.0.1',
                                 port=9999,
                                 url=usb_url,
@@ -199,7 +201,7 @@ class ConnectionManager:
                             connection_type='usb',
                             url=usb_url,
                         )
-                        logger.info('[ADB] 端口转发就绪，等待手机端推流...')
+                        logger.info('[ADB] 反向代理就绪，等待手机端推流...')
                         self._notify_state_change()
             else:
                 # 检查 USB Subnet
