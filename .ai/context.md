@@ -100,6 +100,21 @@
 | G-004 | HSV→RGB 手写公式的 2D mask 坑 | 2026-06-07 |
 | G-005 | AI Edit 工具有时会静默回退文件 | 2026-06-07 |
 | G-006 | **元规则**：任何更新都要同步全部文档 | 2026-06-07 |
+| G-007 | Windows 防火墙拦截 Gradle daemon 127.0.0.1 通信 | 2026-06-08 |
+| G-011 | Gradle 8.13 wrapper 缓存不完整（只剩 .lck+.part） | 2026-06-08 |
+| G-012 | AGP installDebug OPPO 报错 -99，需用 adb install | 2026-06-08 |
+| G-013 | Camera2 预览选 SurfaceView 零拷贝提升性能 | 2026-06-08 |
+| G-014 | ConstraintLayout 中 SurfaceView 需 clickable=false 避免事件拦截 | 2026-06-08 |
+| G-015 | AlertDialog setSingleChoiceItems checkedItem=-1 占位 | 2026-06-08 |
+| G-016 | ADB 自动化点击利用 uiautomator dump 避免硬编码坐标 | 2026-06-08 |
+| G-017 | Windows PowerShell 编码导致 python 打印 Unicode 报错 | 2026-06-08 |
+| G-018 | Camera 预览区域百分比布局（使用 constraintHeight_percent） | 2026-06-08 |
+| G-019 | YUV420Flexible 底层为 NV12，用 EGL 零拷贝处理 | 2026-06-08 |
+| G-020 | OPPO ColorOS 自动手势防前台冻结，调试用自动测试 | 2026-06-09 |
+| G-021 | setOnImageAvailableListener 调用时 Looper 异步 race 解决 | 2026-06-09 |
+| G-022 | MediaCodec 的 SPS/PPS 只输出一次，必须拼在 I 帧头部 | 2026-06-11 |
+| G-023 | Android 重复启动 StreamingService 导致 EADDRINUSE 解决 | 2026-06-11 |
+| G-024 | ADB 端口转发（adb forward）导致 PC 状态误判与手机超时断连 | 2026-06-11 |
 
 ---
 

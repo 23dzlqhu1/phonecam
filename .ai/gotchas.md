@@ -50,6 +50,9 @@
 | [G-019](#g-019yuv420flexible-底层-oppo-是-nv12pixelstride2-且-u-v-交织) | **YUV420Flexible 底层 OPPO 是 NV12**（pixelStride=2 + UV 交织，源 planar 写入会色相偏蓝）| 2026-06-08 **已通过批次 3.2.0.1 EGL 零拷贝根治** |
 | [G-020](#g-020oppo-coloros-5-秒自动-swipe-up-把无交互-app-推到后台调试期需绕开) | **OPPO ColorOS 5 秒自动 swipe-up 把无交互 app 推到后台**（调试期需绕开：Handler.postDelayed 3s 自动触发） | 2026-06-09 |
 | [G-021](#g-021cameracontrollersetonimageavailablelistener-在-oncreate-调用时-camerahandler-还是-nullopen-之后才能-setupimagereader) | **CameraController.setOnImageAvailableListener 在 onCreate 调用时 cameraHandler 还是 null**（race condition，加 pendingListenerRetry 机制 + 重试 loop 解决） | 2026-06-09 |
+| [G-022](#g-022mediacodec-的-spspps-仅在启动时吐出一次如果错过了会导致-pyav-静默解码失败死机) | **MediaCodec 的 SPS/PPS 仅在启动时吐出一次**（如果 PC 端迟连错过了，会导致 PyAV 静默解码失败死机，必须带外缓存并追加到 I 帧头部） | 2026-06-11 |
+| [G-023](#g-023android-端多线程重复启动-streamingservice-导致-serversocket-端口占用eaddrinuse崩溃) | **Android 端多线程重复启动 StreamingService 导致 ServerSocket 端口占用（EADDRINUSE）崩溃** | 2026-06-11 |
+| [G-024](#g-024adb-端口转发adb-forward导致-pc-连接状态误判与手机端超时断连) | **ADB 端口转发（adb forward）导致 PC 连接状态误判与手机端超时断连** | 2026-06-11 |
 
 ---
 
@@ -644,3 +647,68 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 
 ### [已归档] G-010：MVP-2 手机端从 Flutter 切到 Kotlin 原生
 （路线转换已完成，`phone/` 已移除）
+
+## G-022：MediaCodec 的 SPS/PPS 仅在启动时吐出一次，如果错过了会导致 PyAV 静默解码失败死机
+
+**日期**：2026-06-11
+**场景**：PC 桌面端（PyAV）连接 Android 端接收 H.264 流，OpenCV 画面死活不弹，且虚拟摄像头显示默认 Logo（即接收不到任何画面）。
+**症状**：
+- phonecam.py 中 ideo_frame_to_bgr() 永远返回 None。
+- PyAV 在底层报 解码失败（如果开启 DEBUG 日志的话），由于 	ry-except 捕获，表现为完全静默的黑屏。
+- 手机端明明显示 FPS: 30.0 且不丢包。
+**根因**：
+- 默认情况下，Android MediaCodec 编码器**只会在 \start()\ 之后吐出唯一一次**包含 SPS 和 PPS（BUFFER_FLAG_CODEC_CONFIG）的头部参数集。
+- 如果 Android 端先启动编码器，而 PC 端晚了几秒连接（哪怕只晚了一点），PC 端就会**永久错过**这些必需的解码上下文。
+- PyAV（FFmpeg）对 H.264 的解析非常严格，如果没有收到 SPS/PPS 字典，不管后面的 P 帧和 I 帧数据多么完整，它都会拒绝解码并返回空帧。
+- 此外，之前错误的高频拉取循环（while True 喂重复帧）和缺少 codec.parse()（无法重组分片 NALU）也加剧了这一崩溃情况。
+**修复**：
+1. **防重复解码护城河**：在 phonecam.py 中增加 if last_pts_us != frame.pts 判断，绝不能把同一帧反复丢进有状态的 H264Decoder 中。
+2. **正确解析 Annex-B 流**：在 h264_decoder.py 中引入 codec.parse(nal_data)，使得 FFmpeg 能自己拼接碎片的 NALU 流。
+3. **Android 端带外强行拼装（终极必杀）**：在 H264Encoder.kt 中拦截 BUFFER_FLAG_CODEC_CONFIG，存入 spsPpsCache。此后，只要吐出带 BUFFER_FLAG_KEY_FRAME 的帧（I 帧），就立刻把 spsPpsCache 的字节拷贝到该帧的最前面一并发送！这保证了 PC 端随时连上都能秒出画面。
+**教训**：
+- 处理视频流协议（特别是非标准魔改的 PCP 协议），永远不要相信底层解码器的容错能力。
+- **发送端必须对连接断开、迟延连接负责**，在每一个独立可解码的 GOP 头部（也就是 I 帧头部）都强行带上 SPS/PPS 参数集，是 H.264 跨网络传输中最基础的保活手段。
+
+---
+
+### G-023：Android 端多线程重复启动 StreamingService 导致 ServerSocket 端口占用（EADDRINUSE）崩溃
+**日期**：2026-06-11
+**场景**：PC 端 GUI 或命令行启动连接前，手机端快速多次点击“开始推流”按钮，或在连接未建立的 30s 内重复触发推流启动
+**症状**：
+- 手机端弹窗提示“推流启动失败：30s 无连接”或立即提示“推流启动异常：bind failed: EADDRINUSE”
+- 系统 logcat 日志中出现：`java.net.BindException: bind failed: EADDRINUSE (Address already in use)`
+- 后续即便 PC 端连入，也完全收不到任何视频帧，通道被异常关闭
+**根因**：
+- 手机端的 `sActive` 状态是在推流服务 6 步启动序列的最后一步（已建立 TCP 连接且编码器运行后）才被置为 `true`。
+- 在前几步（特别是第 2 步 `server.isClientConnected()` 阻塞等待连接 of 30 秒超时期间），`sActive` 仍为 `false`。
+- 此时如果用户再次点击“开始推流”按钮，`onStartCommand` 会认为推流尚未开启，并启动第二个后台线程执行相同的 `startStreamingInWorker()` 序列。
+- 第二个线程尝试 `server.start()` 绑定相同的 `9999` 端口，就会因为端口被第一个线程占用而抛出 `BindException` 崩溃，并调用 `stopStreamingInternal()` 将全局变量和套接字（包括第一个线程正在使用的 server）一并关闭，导致两边彻底断连。
+**修复**：
+- 在 `StreamingService` 中引入一个全局 volatile 标志位 `@Volatile var sStarting = false` 用于表示正在启动中。
+- 在 `onStartCommand` 接收 `ACTION_START` 时，判断 `if (sActive || sStarting)` 并直接拦截重复启动指令。
+- 确保在 `startStreamingInWorker` 的所有退出分支（包括成功、超时返回和异常 catch 分支）中，将 `sStarting` 重置为 `false` 并安全清理资源，从而彻底避免并发抢占端口冲突。
+**教训**：
+- 在状态机设计中，**“正在启动中 (Starting)”是一个独立的过渡状态**，绝不能简单地用 `!Active` 代替。
+- 后台服务的启动如果是异步线程执行，主入口（如 `onStartCommand` 或 Button Click）必须做严格的并发拦截，否则在物理按键重复误触或等待期极易引发资源占用异常。
+
+---
+
+### G-024：ADB 端口转发（adb forward）导致 PC 连接状态误判与手机端超时断连
+**日期**：2026-06-11
+**场景**：PC 端启动 GUI 后，自动设置 `adb forward tcp:9999 tcp:9999` 并启动流接收，然后手动在手机端点击“开始推流”。
+**症状**：
+- PC 端 GUI 启动后立即显示“已连接: http://127.0.0.1:9999/video”（绿灯），但画面一直黑屏/无画面输出。
+- 手机端启动推流后，等待 30 秒最终提示“推流启动失败：30s 无连接”。
+**根因**：
+1. **ADB 转发握手假象**：`adb forward` 会让 PC 本地的 ADB Daemon 监听 `127.0.0.1:9999`。PC 端的 `ConnectionManager` 使用 `socket.create_connection` 探测该端口时，**直接与本地 ADB Daemon 完成了 TCP 握手**（即使手机端 app 根本没开）。这导致 PC 端误判连接已建立，提早显示“已连接”并限制了其他连接通道（如 mDNS/WiFi 扫描）。
+2. **连接探针抢占干扰**：`ConnectionManager` 在后台以 3 秒/次的频率使用 `socket.create_connection` 探测 `127.0.0.1:9999`，且连上后立即 `close()`。当手机端启动推流服务开始 `accept()` 时，最先接进来的往往是 PC 的**断开探针**（3秒一次）。手机端将其接受为 client 并进入 1024 字节读循环，但因 PC 探测后已关闭，手机端立即读到 `-1` (EOF) 并断连清理，导致 `StreamingService` 每 200ms 检查的 `isClientConnected()` 在这极瞬期间极难被命中。
+3. **退避等待时间过长**：PC 端的 `PcpReceiver` 因在手机未推流前多次尝试连接失败，其指数退避重连延迟已累积至最大值（`30.0`秒）。当手机端终于开启监听并等待 30 秒时，由于 `PcpReceiver` 处于长达 30 秒 of 重连睡眠中，且每次探测都被 `ConnectionManager` 的 3 秒探针抢占打碎，导致 `PcpReceiver` 极易与手机端 30 秒推流等待窗口完美错开，造成永久握手失败。
+**修复建议**：
+1. **改进 PC 端探针有效性**：在 `ConnectionManager` 探测连接时，若通过 `socket.create_connection` 连上，应立即尝试读取 1 字节或写入测试包。如果手机端未在推流，本地 ADB Daemon 会在尝试连接手机失败后立即 close 链路，此时 `sock.recv(1)` 会立即返回空字节 `b''`（表示 EOF/断开）。只有当 `sock.recv(1)` 阻塞或未返回空字节时，才认为真实推流服务在线。
+2. **优化重连间隔与停止干扰**：
+   - 限制 USB/localhost 通道下 `PcpReceiver` 的最大重连退避时间（例如最多 2 秒），使其能够快速重试响应。
+   - 当检测到已建立连接或推流开启时，应立即挂起 `ConnectionManager` 的 3 秒探针循环，避免探针频繁连接/断开抢占手机端的 `accept()` 槽位。
+**教训**：
+- `adb forward` 映射的是本地端口，普通的 TCP 连接探测（只 connect 不读写）只能证明本地 ADB 进程存活，无法保证 Android 手机端服务存活。
+- 单客户端阻塞式 `accept()` 服务端极易受到高频连接探测的“拒绝服务（DoS）”式抢占干扰。在设计长连接通道时，重试探针必须采用非破坏性握手或在连接成功后立即挂起探针。
+
