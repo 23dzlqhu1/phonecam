@@ -14,7 +14,7 @@ from PIL import Image, ImageTk
 import cv2
 import numpy as np
 
-from receiver import MjpegReceiver
+from receiver import PcpReceiver, video_frame_to_bgr
 from virtual_camera import VirtualCamera
 from connection_manager import ConnectionManager, ConnectionState, ConnectionInfo
 
@@ -46,7 +46,7 @@ class PhoneCamGUI:
 
         # 状态
         self._manager: Optional[ConnectionManager] = None
-        self._receiver: Optional[MjpegReceiver] = None
+        self._receiver: Optional[PcpReceiver] = None
         self._vcam: Optional[VirtualCamera] = None
         self._is_connected = False
         self._current_frame: Optional[np.ndarray] = None
@@ -158,15 +158,23 @@ class PhoneCamGUI:
                                    relief='flat', font=('Segoe UI', 10))
         self._flip_btn.pack(side='left', padx=4)
 
+        self._rotate_btn = tk.Button(btn_frame, text="旋转 0°", width=8,
+                                     command=self._toggle_rotation,
+                                     bg=COLORS['border'], fg=COLORS['text'],
+                                     relief='flat', font=('Segoe UI', 10))
+        self._rotate_btn.pack(side='left', padx=4)
+
         self._quit_btn = tk.Button(btn_frame, text="退出", width=6,
                                    command=self._quit,
                                    bg=COLORS['danger'], fg='white',
                                    relief='flat', font=('Segoe UI', 10))
         self._quit_btn.pack(side='left', padx=4)
 
-        # 翻转/镜像状态
+        # 翻转/镜像/旋转状态
         self._mirror = False
         self._flip = False
+        self._rotation = 0
+        self._preview_id = None  # Canvas image item ID（用于 itemconfig 避免闪烁）
 
         # 帧率统计
         self._frame_count = 0
@@ -210,9 +218,27 @@ class PhoneCamGUI:
         if self._receiver:
             self._receiver.stop()
 
-        self._receiver = MjpegReceiver(url)
-        self._receiver.on_frame(self._on_frame)
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = parsed.hostname or "127.0.0.1"
+
+        self._receiver = PcpReceiver(host, port=9999)
+        self._receiver.on_frame(self._on_frame_pcp)
         self._receiver.start()
+
+    def _on_frame_pcp(self, frame):
+        """PcpReceiver 的帧回调，参数是 VideoFrame"""
+        bgr_frame = video_frame_to_bgr(frame)
+        if bgr_frame is not None:
+            # 根据手机端的自动旋转信息旋转帧，保证虚拟摄像头和预览都显示正确方向的图像
+            if frame.rotation == 90:
+                bgr_frame = cv2.rotate(bgr_frame, cv2.ROTATE_90_CLOCKWISE)
+            elif frame.rotation == 180:
+                bgr_frame = cv2.rotate(bgr_frame, cv2.ROTATE_180)
+            elif frame.rotation == 270:
+                bgr_frame = cv2.rotate(bgr_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            
+            self._on_frame(bgr_frame)
 
         # 启动虚拟摄像头
         if not self._vcam:
@@ -225,11 +251,12 @@ class PhoneCamGUI:
 
     def _on_frame(self, frame: np.ndarray):
         """收到新帧"""
+        safe_frame = frame.copy()  # 深拷贝隔离网络线程
         with self._frame_lock:
-            self._current_frame = frame
+            self._current_frame = safe_frame
 
         if self._vcam and self._vcam.is_open:
-            self._vcam.send(frame)
+            self._vcam.send(safe_frame)
 
         self._frame_count += 1
 
@@ -261,12 +288,20 @@ class PhoneCamGUI:
         self.root.after(33, self._update_loop)
 
     def _display_frame(self, frame: np.ndarray):
-        """在 Canvas 上显示帧"""
+        """在 Canvas 上显示帧（使用 itemconfig 避免撕裂）"""
         try:
             if self._mirror:
                 frame = cv2.flip(frame, 1)
             if self._flip:
                 frame = cv2.flip(frame, 0)
+
+            # 根据用户手动旋转设置旋转帧
+            if self._rotation == 90:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            elif self._rotation == 180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            elif self._rotation == 270:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -282,12 +317,18 @@ class PhoneCamGUI:
             img = Image.fromarray(rgb)
             photo = ImageTk.PhotoImage(image=img)
 
-            self._canvas.delete('placeholder')
-            self._canvas.delete('preview')
-            self._canvas.create_image(
-                canvas_w // 2, canvas_h // 2,
-                image=photo, anchor='center', tags='preview'
-            )
+            if self._preview_id is None:
+                # 首帧：创建 image item
+                self._canvas.delete('placeholder')
+                self._preview_id = self._canvas.create_image(
+                    canvas_w // 2, canvas_h // 2,
+                    image=photo, anchor='center'
+                )
+            else:
+                # 后续帧：原地更新，避免 delete+create 闪烁
+                self._canvas.itemconfig(self._preview_id, image=photo)
+                self._canvas.coords(self._preview_id, canvas_w // 2, canvas_h // 2)
+
             self._canvas._photo = photo
         except Exception as e:
             logger.debug(f"显示帧失败: {e}")
@@ -302,6 +343,14 @@ class PhoneCamGUI:
         self._flip = not self._flip
         self._flip_btn.config(
             bg=COLORS['primary'] if self._flip else COLORS['border']
+        )
+
+    def _toggle_rotation(self):
+        """循环切换旋转角度: 0 → 90 → 180 → 270 → 0"""
+        self._rotation = (self._rotation + 90) % 360
+        self._rotate_btn.config(
+            text=f"旋转 {self._rotation}°",
+            bg=COLORS['primary'] if self._rotation != 0 else COLORS['border']
         )
 
     def _on_resolution_change(self, event):

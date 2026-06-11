@@ -158,9 +158,8 @@ class MdnsDiscovery:
             logger.debug(f'[Scan] 子网扫描错误: {e}')
 
     def _try_verify_device(self, ip: str, port: int):
-        """尝试连接并验证是否是 PhoneCam 设备"""
-        import urllib.request
-        import json
+        """尝试连接并验证是否是 PhoneCam 设备 (PCP 裸 TCP 端口 9999)"""
+        import socket
 
         key = f'{ip}:{port}'
         with self._lock:
@@ -168,22 +167,22 @@ class MdnsDiscovery:
                 return
 
         try:
-            url = f'http://{ip}:{port}/info'
-            req = urllib.request.Request(url, method='GET')
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
-                data = json.loads(resp.read().decode())
-                if 'device_name' in data:
-                    device = DiscoveredDevice(
-                        name=data.get('device_name', 'PhoneCam'),
-                        ip=ip,
-                        port=port,
-                        url=f'http://{ip}:{port}/video',
-                    )
-                    with self._lock:
-                        self._devices[key] = device
-                    logger.info(f'[发现设备] {device.name} at {ip}:{port}')
-                    if self._on_device_found:
-                        self._on_device_found(device)
+            target_port = 9999 if port == 8080 else port
+            # 使用 socket 探测端口 9999
+            sock = socket.create_connection((ip, target_port), timeout=1.0)
+            sock.close()
+
+            device = DiscoveredDevice(
+                name='PhoneCam',
+                ip=ip,
+                port=target_port,
+                url=f'http://{ip}:{target_port}/video',
+            )
+            with self._lock:
+                self._devices[key] = device
+            logger.info(f'[发现设备] {device.name} at {ip}:{target_port}')
+            if self._on_device_found:
+                self._on_device_found(device)
         except Exception:
             pass
 

@@ -115,31 +115,62 @@ class ConnectionManager:
 
     def _connection_loop(self):
         """主连接循环"""
+        import socket
         while self._running:
-            # 检查 USB
-            usb_ip = scan_usb_subnet(port=self.port, timeout=1.0)
-            if usb_ip:
-                usb_url = f'http://{usb_ip}:{self.port}/video'
+            # 优先检查 ADB forward 的 localhost:9999
+            adb_forward_active = False
+            try:
+                sock = socket.create_connection(('127.0.0.1', 9999), timeout=0.5)
+                sock.close()
+                adb_forward_active = True
+            except Exception:
+                pass
+
+            if adb_forward_active:
+                usb_url = 'http://127.0.0.1:9999/video'
                 with self._lock:
                     current = self._info
-                    # USB 优先，或当前断开时切换到 USB
                     if (current.connection_type != 'usb' or
-                            current.state != ConnectionState.CONNECTED):
+                            current.state != ConnectionState.CONNECTED or
+                            '127.0.0.1' not in current.url):
                         self._info = ConnectionInfo(
                             state=ConnectionState.CONNECTED,
                             device=DiscoveredDevice(
-                                name='USB Device',
-                                ip=usb_ip,
-                                port=self.port,
+                                name='ADB Forwarded Device',
+                                ip='127.0.0.1',
+                                port=9999,
                                 url=usb_url,
                             ),
                             connection_type='usb',
                             url=usb_url,
                         )
-                        logger.info(f'[USB] 已连接: {usb_url}')
+                        logger.info(f'[ADB] 已连接: {usb_url}')
                         self._notify_state_change()
+            else:
+                # 检查 USB Subnet
+                usb_ip = scan_usb_subnet(port=self.port, timeout=1.0)
+                if usb_ip:
+                    usb_url = f'http://{usb_ip}:{self.port}/video'
+                    with self._lock:
+                        current = self._info
+                        # USB 优先，或当前断开时切换到 USB
+                        if (current.connection_type != 'usb' or
+                                current.state != ConnectionState.CONNECTED):
+                            self._info = ConnectionInfo(
+                                state=ConnectionState.CONNECTED,
+                                device=DiscoveredDevice(
+                                    name='USB Device',
+                                    ip=usb_ip,
+                                    port=self.port,
+                                    url=usb_url,
+                                ),
+                                connection_type='usb',
+                                url=usb_url,
+                            )
+                            logger.info(f'[USB] 已连接: {usb_url}')
+                            self._notify_state_change()
 
-            # 如果没有 USB，检查 mDNS 发现的设备
+            # 如果没有 USB，检查 mDNS 发现 of devices
             if self._info.connection_type != 'usb':
                 devices = self._mdns.devices
                 if devices and self._info.state != ConnectionState.CONNECTED:

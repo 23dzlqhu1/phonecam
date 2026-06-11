@@ -326,18 +326,37 @@ Phase Y 实施 SettingsActivity 时，9 个设置项中有 3 项（码率 / 编�
 
 - [x] 批次 3.2.0.1 实施完毕
 - [x] 批次 3.2.0.2 实施完毕（EglRenderer 接收 Camera2 ImageReader 真实帧 + Yuv420Extractor + race condition 重试机制 + 自动编码绕开 ColorOS 5s swipe-up，49788B H.264 验证通过）
-- [ ] 批次 3.2.0.3：长时连拍（start→encodeFrame 循环→stop 手动）
-- [ ] 批次 3.3：NALU → TCP 发送到 desktop
+- [x] 批次 3.2.0.3：长时连拍（start→encodeFrame 循环→stop 手动）
+- [x] 批次 3.3：NALU → TCP 发送到 desktop
 
 ---
-- [ ] 电脑端是否做 GUI（先 CLI + 简单 tkinter）
+
+## ADR-010：桌面端 GUI 发现与接收模块升级至 PCP 协议 (裸 TCP 9999)
+
+**日期**：2026-06-11
+**状态**：✅ 已确定
+
+### 背景
+电脑端 GUI (`desktop/gui.py`) 原本是为 HTTP MJPEG 开发的，依赖 `MjpegReceiver` 类以及扫描端口 `8080` 上的 HTTP `/info` 接口做设备发现。
+当手机端迁移到 Kotlin 原生 + PCP v2 协议 (`PcpReceiver` 监听 `9999`) 之后，原来的 MJPEG HTTP 协议已被完全废弃并清理，导致 GUI 模块由于找不到 `MjpegReceiver` 报 `ImportError` 无法启动。
+
+### 决策
+1. 彻底将 `gui.py` 的接收端迁移到 `PcpReceiver`，并使用 `video_frame_to_bgr` 提取图片。
+2. 更改 `connection_manager.py`、`usb_handler.py` 和 `discovery.py` 的设备探测和验证接口，使用裸 TCP socket 探测 `9999` 端口，替代原本的 `8080` /info HTTP 接口。
+3. 在 `ConnectionManager` 中增加对 `127.0.0.1:9999` (ADB 端口转发) 的优先探测逻辑，以便在 ADB 转发激活时免子网扫描实现秒连。
+
+### 理由
+- 与手机端彻底统一传输链路至 PCP 协议，不再留有 MJPEG 残余。
+- 通过 socket 直接扫描 TCP 端口更快速，更适应纯 TCP 架构。
+- 保证了 ADB 连线调试和 USB 共享网络在 GUI 下的统一使用体验。
+
+---
+
+## 待决策（TODO）
+
 - [ ] 错误重连策略（断连后 1s / 2s / 5s 重试？）
 - [ ] H.264 码率默认值（建议 4 Mbps for 1080p60）
 - [ ] 关键帧间隔（建议 2 秒）
 - [ ] 音频采样率（建议 44.1kHz，AAC 编码）
 
-## 待决策（TODO）
-
----
-
-**最后更新**：2026-06-07
+**最后更新**：2026-06-11

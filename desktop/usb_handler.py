@@ -115,16 +115,14 @@ def scan_usb_subnet(port: int = 8080, timeout: float = 1.0) -> Optional[str]:
 
 
 def _try_connect(ip: str, port: int, timeout: float) -> bool:
-    """尝试连接验证"""
-    import urllib.request
-    import json
-
+    """尝试连接验证 (PCP 裸 TCP 端口 9999)"""
+    import socket
     try:
-        url = f'http://{ip}:{port}/info'
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode())
-            return 'device_name' in data
+        # 即使端口传入的是 8080，由于 PCP 协议规定，我们也只探测 9999 端口
+        target_port = 9999 if port == 8080 else port
+        sock = socket.create_connection((ip, target_port), timeout=timeout)
+        sock.close()
+        return True
     except Exception:
         return False
 
