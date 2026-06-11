@@ -219,7 +219,7 @@ FLAG_KEYFRAME = 0x01
 - 32 字节头 + TCP + raw_rgb（MVP-1）/ H.264（MVP-2）/ AAC（MVP-3）
 - 兼容 24 字节头（v1）
 - 实现：`desktop/receiver.py::PcpReceiver`
-- 状态：**MVP-2 完成，MVP-3 进行中**
+- 状态：**MVP-2 完成，MVP-3 完成**（2026-06-11 真机验证通过）
 
 ---
 

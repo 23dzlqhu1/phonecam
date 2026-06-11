@@ -79,7 +79,7 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 | **MVP-0** | 项目骨架闭环（文档完整 + 代码可运行） | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
 | **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | ✅ **完成**。链路端到端闭环达成（手机端 Kotlin/Camera2/MediaCodec → TCP PCP v2 → 电脑端 PyAV 硬件解码）。|
-| **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | 🟡 **进行中**。已接入 pyvirtualcam，OBS Virtual Camera 可被识别，待进一步真机联调验证。|
+| **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ✅ **完成**。pyvirtualcam + OBS Virtual Camera 真机验证通过（159帧/10s @1280x720）。|
 | **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ⬜ 待开始 |
 
 **当前进度总结**：MVP-1、MVP-2 已实现闭环，核心视频传输链路稳定。目前处于 MVP-3 阶段，重点是解决虚拟摄像头在实际会议软件中的表现。
