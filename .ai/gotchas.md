@@ -710,5 +710,28 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
    - 当检测到已建立连接或推流开启时，应立即挂起 `ConnectionManager` 的 3 秒探针循环，避免探针频繁连接/断开抢占手机端的 `accept()` 槽位。
 **教训**：
 - `adb forward` 映射的是本地端口，普通的 TCP 连接探测（只 connect 不读写）只能证明本地 ADB 进程存活，无法保证 Android 手机端服务存活。
-- 单客户端阻塞式 `accept()` 服务端极易受到高频连接探测的“拒绝服务（DoS）”式抢占干扰。在设计长连接通道时，重试探针必须采用非破坏性握手或在连接成功后立即挂起探针。
+- 单客户端阻塞式 `accept()` 服务端极易受到高频连接探测的"拒绝服务（DoS）"式抢占干扰。在设计长连接通道时，重试探针必须采用非破坏性握手或在连接成功后立即挂起探针。
+
+---
+
+### G-025: 某些 Android 设备 MediaCodec Surface 模式编码输出花屏
+
+**场景**：手机摄像头预览清晰，但 H.264 编码后传输到 PC 端解码全是彩色噪点花屏。
+**症状**：
+- 手机 App 预览正常（摄像头没问题）
+- H.264 流结构正确（SPS→PPS→IDR→P帧，NALU 大小合理）
+- PyAV 解码无报错，但输出全是随机彩色像素
+- Laplacian sharpness ~32000（正常图像应为 100-1000，噪声 >10000）
+**根因**：特定 Android 设备的 MediaCodec 硬件编码器在 Surface 模式下输出损坏的 H.264 数据。EglRenderer 的 YUV→RGB shader 和纹理上传逻辑本身正确，但编码器内部处理异常。
+**验证**：
+- 换另一台设备，同一份 APK，29 FPS，画面清晰（sharpness ~220）
+- 旧设备 16 FPS + 花屏，新设备 29 FPS + 清晰
+**修复**：
+- 短期：换设备
+- 长期：实现 ByteBuffer 编码路径作为 fallback（绕过 EGL Surface）
+- 或检测编码器厂商/型号，对已知问题设备使用软件编码
+**教训**：
+- MediaCodec 硬件编码器质量因厂商而异，不能假设所有设备都正常工作
+- 需要编码器兼容性测试矩阵
+- `desktop/tests/capture_h264.py` 可用于诊断 H.264 流质量问题
 
