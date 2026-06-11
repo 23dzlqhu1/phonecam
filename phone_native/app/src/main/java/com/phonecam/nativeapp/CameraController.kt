@@ -90,6 +90,9 @@ class CameraController(
     // ===================== 设备方向追踪 (orientation mismatch 修复) =====================
     // 传感器方向 (从 CameraCharacteristics.SENSOR_ORIENTATION 读取, 通常 90 或 270)
     @Volatile var sensorOrientation: Int = 0
+
+    // 传感器活动区域（用于计算裁切区域，修复前置广角畸变）
+    private var sensorActiveRect: android.graphics.Rect? = null
     // 设备当前旋转角度 (由 OrientationEventListener 量化为 0/90/180/270)
     @Volatile var currentDeviceRotation: Int = 0
 
@@ -383,6 +386,11 @@ class CameraController(
                 addTarget(imageReaderSurface)  // 关键: 把 ImageReader 也加进 request
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                // 数字裁切: 裁掉边缘减少前置广角畸变 (G-026)
+                computeCropRegion()?.let {
+                    set(CaptureRequest.SCALER_CROP_REGION, it)
+                    Log.d(TAG, "SCALER_CROP_REGION applied: $it (lens=$lensFacingPref)")
+                }
             }
 
             camera.createCaptureSession(
@@ -491,7 +499,9 @@ class CameraController(
         // 读取传感器方向 (通常 90° 或 270°, 表示传感器相对于设备自然方向的旋转)
         val chars = cm.getCameraCharacteristics(targetId)
         sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        sensorActiveRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         Log.d(TAG, "sensorOrientation=$sensorOrientation for camera $targetId")
+        Log.d(TAG, "sensorActiveRect=$sensorActiveRect")
         texture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
         // 3. 算 letterbox transform（防止 16:9 预览被拉伸到 9:19.5 屏幕）
@@ -556,6 +566,11 @@ class CameraController(
                 // 简单起见：自动对焦 + 自动曝光，后续批次再加手动控制
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                // 数字裁切: 裁掉边缘减少前置广角畸变 (G-026)
+                computeCropRegion()?.let {
+                    set(CaptureRequest.SCALER_CROP_REGION, it)
+                    Log.d(TAG, "SCALER_CROP_REGION applied: $it (lens=$lensFacingPref)")
+                }
             }
 
             camera.createCaptureSession(
@@ -585,6 +600,23 @@ class CameraController(
         } catch (e: CameraAccessException) {
             Log.e(TAG, "createCaptureRequest / createCaptureSession failed: ${e.message}", e)
         }
+    }
+
+    /**
+     * 计算裁切区域：裁掉传感器边缘，减少前置广角镜头畸变。
+     * 前置摄像头裁 20%（各边 10%），后置裁 10%。
+     * 返回 null 表示不裁切。
+     */
+    private fun computeCropRegion(): android.graphics.Rect? {
+        val rect = sensorActiveRect ?: return null
+        val cropFactor = if (lensFacingPref == "front") 0.80f else 0.90f
+        val w = rect.width()
+        val h = rect.height()
+        val newW = (w * cropFactor).toInt()
+        val newH = (h * cropFactor).toInt()
+        val dx = (w - newW) / 2
+        val dy = (h - newH) / 2
+        return android.graphics.Rect(dx, dy, dx + newW, dy + newH)
     }
 
     /**
