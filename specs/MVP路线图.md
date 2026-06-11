@@ -23,9 +23,9 @@
 |------|------|-----------|------|
 | **MVP-0** | 项目骨架闭环（文档 + 最小可运行） | 1-2 天 | ✅ 完成 |
 | **MVP-1** | 假视频流闭环（协议 + 接收） | 3-5 天 | ✅ 完成 |
-| **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | ✅ **完成** |
-| **MVP-3** | 虚拟摄像头闭环（可被会议软件识别） | 3-5 天 | ✅ **完成** |
-| **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | 🟡 **进行中** |
+|| **MVP-2** | 真实摄像头画面闭环 | 5-7 天 | ✅ **完成** |
+|| **MVP-3** | 虚拟摄像头闭环（可被会议软件识别） | 3-5 天 | 🟡 **进行中** |
+|| **MVP-4** | 产品化（GUI / WiFi / 音频 / 打包） | 7-10 天 | ⬜ **待开始** |
 
 > 🧠 **核心思想**：第一性原理是**低延迟视频链路**，不是"App + 软件"。
 > 每一个阶段都要求"链路跑通 + 能看到画面"，而不是"功能开发完成"。
@@ -86,7 +86,7 @@
 - [x] `phone/` 中 `flutter pub get` 可成功（验证骨架可运行）
 - [x] `desktop/` 中 `pip install -r requirements.txt` 可成功
 - [x] `desktop/phonecam.py` 至少有 `--help` 可调用
-- [x] `phone/lib/main.dart` 至少能启动一个空白页
+- [x] ~~`phone/lib/main.dart` 至少能启动一个空白页~~ [已废弃 — 旧 Flutter，MVP-0 验收时有效]
 - [x] README 进度表显示 "MVP-0 ✅"
 - [x] `.ai/context.md` 进度表同步
 
@@ -99,7 +99,7 @@
 1. 验证 phone/ 目录的 Flutter 项目能 `flutter pub get` 通过
 2. 验证 desktop/ 目录的 Python 项目能 `pip install -r requirements.txt` 通过
 3. 检查 desktop/phonecam.py 是否能 `python -m desktop.phonecam --help`
-4. 检查 phone/lib/main.dart 是否有最简可启动的 App
+4. 检查 ~~phone/lib/main.dart~~ [已废弃] 是否有最简可启动的 App（MVP-0 验收时为 Flutter，现已迁移至 phone_native/）
 5. 如有失败，**只修最少代码**让它能跑
 
 禁止：
@@ -162,7 +162,7 @@ desktop/phonecam.py
 - `tests/README.md`（mock 工具说明）
 
 > ⚠️ **MVP-1 不碰 `phone/` 目录**。手机端在 MVP-2 才介入（旧 `phone/` Flutter 工程在 MVP-2 起冻结作 legacy，详见 ADR-006）。
-> 不要参考 `phone/lib/stream_server.dart`（它是 WebSocket 旧实现，MVP-2 重写为 TCP+PCP → 2026-06-08 路线重置后改为新建 `phone_native/` 重写）。
+> 不要参考 `phone/lib/stream_server.dart`（**[已废弃]** 旧 Flutter WebSocket 实现，2026-06-09 phone/ 已 git rm，当前实现见 `phone_native/` Kotlin 原生）。
 
 ### 4.5 输出文件
 
@@ -177,7 +177,7 @@ desktop/phonecam.py
 
 ### 4.6 PCP 协议最小设计（MVP-1 用）
 
-> ⚠️ 本节必须与 [docs/protocol.md](../docs/protocol.md) 一致。
+> ⚠️ 本节记录的是 **MVP-1 阶段的 PCP v1 协议**（24 字节头）。当前版本为 **PCP v2（32 字节头）**，详见 [docs/protocol.md](../docs/protocol.md)。
 > 如果两边冲突，**以 docs/protocol.md 为准**。
 
 ```
@@ -197,13 +197,16 @@ desktop/phonecam.py
 └──────────────────────────────────────────────────┘
 ```
 
-**24 字节头**（8 字段）+ Payload。
+**24 字节头**（8 字段）+ Payload。（**[历史]** MVP-1 使用 PCP v1 24 字节头，当前已升级为 PCP v2 32 字节头）
 
 Python 实现：
 
 ```python
-HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
-# magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts(Q) + payload_len(I)
+# [历史] MVP-1 使用 PCP v1 24 字节头：
+# HEADER_STRUCT = struct.Struct('<4sBBBBIQI')  # 24 字节
+# 当前 PCP v2 使用 32 字节头（见 docs/protocol.md）：
+HEADER_STRUCT = struct.Struct('<4sBBBBIQQI')  # 32 字节
+# magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts_us(Q) + pts_ns(Q) + payload_len(I)
 ```
 
 ### 4.7 验收标准
@@ -284,7 +287,7 @@ phone_native/app/src/main/java/com/phonecam/nativeapp/
         MediaCodec H.264 硬编码（ByteBuffer mode）
             ↓
     PcpPacketWriter.kt
-        24 字节 PCP 头 + H.264 payload
+        32 字节 PCP v2 头 + H.264 payload
             ↓
     TcpStreamServer.kt
         监听 0.0.0.0:9999
@@ -334,7 +337,7 @@ desktop/phonecam.py
 | `phone_native/app/src/main/java/com/phonecam/nativeapp/MainActivity.kt` | 新建 | 极简 UI：开始 / 停止 / 状态 TextView |
 | `phone_native/app/src/main/java/com/phonecam/nativeapp/CameraController.kt` | 新建 | Camera2 打开后置摄像头，YUV 回调 |
 | `phone_native/app/src/main/java/com/phonecam/nativeapp/H264Encoder.kt` | 新建 | MediaCodec 编码 H.264 NALU |
-| `phone_native/app/src/main/java/com/phonecam/nativeapp/PcpPacketWriter.kt` | 新建 | 24 字节 PCP 头打包 |
+|| `phone_native/app/src/main/java/com/phonecam/nativeapp/PcpPacketWriter.kt` | 新建 | 32 字节 PCP v2 头打包（兼容 v1 24 字节） |
 | `phone_native/app/src/main/java/com/phonecam/nativeapp/TcpStreamServer.kt` | 新建 | ServerSocket 监听 9999 |
 | `phone_native/app/src/main/res/layout/activity_main.xml` | 新建 | 1 个 TextView + 2 个 Button |
 | `phone_native/app/src/main/res/values/strings.xml` | 新建 | App 名 |
@@ -351,7 +354,7 @@ desktop/phonecam.py
 - [ ] Camera2 能打开后置摄像头（批次 3）
 - [ ] MediaCodec 能输出 H.264 NALU（批次 4）
 - [ ] TcpStreamServer 监听 9999 端口（批次 5）
-- [ ] PcpPacketWriter 打包 24 字节头（`codec=0x02` H.264）（批次 5）
+- [ ] PcpPacketWriter 打包 32 字节 PCP v2 头（`codec=0x02` H.264）（批次 5）
 - [ ] `adb reverse tcp:9999 tcp:9999` 可用（批次 5）
 - [ ] `desktop/phonecam.py --connect 127.0.0.1:9999 --preview` 能收到 `codec=0x02` 的 PCP 包（批次 5）
 - [ ] OpenCV 窗口显示**手机摄像头实时画面**（批次 5，延迟 < 300ms 可接受）
@@ -619,7 +622,7 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 | WiFi 模式 | P0 | mDNS 自动发现 + WiFi TCP |
 | 音频（AAC 编解码）| P1 | 走相同 PCP 通道 |
 | PyInstaller 打包 EXE | P0 | 一键发布 |
-| Flutter 打包 APK | P0 | 一键发布 |
+|| Kotlin 原生打包 APK | P0 | 一键发布（`phone_native/` Gradle build） |
 | 安装文档 | P0 | 用户能照着做 |
 
 ### 7.4 验收标准
@@ -653,7 +656,7 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 |------|---------|
 | MVP-0 | `specs/技术栈.md` + `specs/项目结构.md` + `specs/MVP路线图.md` 存在 |
 | MVP-1 | ✅ 已完成（`tests/mock_phone/mock_phone_server.py` + `docs/protocol.md` + `desktop/receiver.py` 端到端 29.6 FPS 联调通过）|
-| MVP-2 | `phone/lib/stream_server.dart` 含 H.264 路径 + 文档 |
+|| MVP-2 | ✅ 已完成（`phone_native/` Kotlin Camera2 + MediaCodec → PCP v2 → PyAV 解码端到端闭环） |
 | MVP-3 | `desktop/virtual_camera.py` 完善 + 会议软件测试截图 |
 | MVP-4 | `desktop/gui.py` + `scripts/build_release.py` 可用 |
 
@@ -685,4 +688,4 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 
 ---
 
-**最后更新**：2026-06-07
+**最后更新**：2026-06-11
