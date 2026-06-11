@@ -603,7 +603,7 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 ### 7.1 目标
 
 让"普通用户"能独立完成首次安装连接（< 3 分钟）。
-包括：GUI、WiFi、音频、打包。
+按子阶段拆分，每个子阶段有独立验收标准。
 
 ### 7.2 不做什么（MVP 之后再说）
 
@@ -613,26 +613,86 @@ Zoom / 腾讯会议 / OBS → 看到手机画面
 - ❌ 自动更新
 - ❌ 多设备同时连接
 
-### 7.3 子任务
+### 7.3 子阶段
 
-| 任务 | 优先级 | 备注 |
-|------|--------|------|
-| GUI（tkinter）| P0 | 连接状态、开始/停止按钮 |
-| 系统托盘 | P1 | 最小化到托盘 |
-| WiFi 模式 | P0 | mDNS 自动发现 + WiFi TCP |
-| 音频（AAC 编解码）| P1 | 走相同 PCP 通道 |
-| PyInstaller 打包 EXE | P0 | 一键发布 |
-|| Kotlin 原生打包 APK | P0 | 一键发布（`phone_native/` Gradle build） |
-| 安装文档 | P0 | 用户能照着做 |
+#### MVP-4.1：GUI 稳定 + 手动连接可用
 
-### 7.4 验收标准
+> 现状: gui.py (410行) + connection_manager.py (275行) 已实现。
+> 需要: 真机验证 GUI 启动→连接→预览→虚拟摄像头 完整流程无 crash。
+
+| 验收步骤 | 方法 |
+|----------|------|
+| 1. GUI 启动无报错 | `python desktop/phonecam.py --gui` |
+| 2. 手动输入手机 IP 能连接 | GUI 输入框 → PcpReceiver 连接 |
+| 3. 预览画面流畅 | GUI canvas 显示实时画面 |
+| 4. 虚拟摄像头可用 | OBS/会议软件能看到 PhoneCam Camera |
+
+#### MVP-4.2：USB 连接流程稳定（一键启动）
+
+> 现状: connection_manager.py 已实现 adb reverse。
+> 需要: 真机验证"插 USB → 点 GUI 启动 → 自动连接"流程。
+
+| 验收步骤 | 方法 |
+|----------|------|
+| 1. 手机 USB 连接 + 开 USB 调试 | adb devices 能看到 |
+| 2. 启动 GUI 自动设置 adb reverse | 日志显示 "adb reverse tcp:9999" |
+| 3. 手机端推流后 PC 自动接收 | ConnectionManager 状态 → CONNECTED |
+| 4. 断开重连 | 拔线→插线→自动恢复 |
+
+#### MVP-4.3：WiFi 连接流程
+
+> 现状: PC 端 mDNS 发现已实现 (discovery.py)。Android 端 ConnectActivity 是占位符。
+> 需要: Android 端实现真实连接 + PC 端 mDNS 自动发现。
+
+| 验收步骤 | 方法 |
+|----------|------|
+| 1. 手机和 PC 同一 WiFi | 确认网络互通 |
+| 2. 手机端输入 PC IP 推流 | ConnectActivity 真实连接 |
+| 3. PC 端 mDNS 自动发现手机 | GUI 显示发现的设备 |
+| 4. 点击设备自动连接 | GUI 设备列表 → 连接 → 预览 |
+
+#### MVP-4.4：打包分发
+
+> 现状: phonecam.spec (PyInstaller) 存在。build_release.py 存在。
+> 需要: 验证打包可运行，APK 构建流程可用。
+
+| 验收步骤 | 方法 |
+|----------|------|
+| 1. PyInstaller 打包 EXE | `python scripts/build_release.py` 生成 dist/ |
+| 2. EXE 在无 Python 环境运行 | 裸 Windows 机器双击运行 |
+| 3. Gradle 打包 APK | `cd phone_native && gradlew assembleRelease` |
+| 4. APK 安装到手机 | adb install 成功 |
+
+#### MVP-4.5：用户文档 + 3 分钟首次使用
+
+> 需要: 编写 user-manual.md，实现"零编程基础 3 分钟完成"。
+
+| 验收步骤 | 方法 |
+|----------|------|
+| 1. 用户文档存在 | docs/user-manual.md |
+| 2. 文档覆盖安装→连接→使用 | 完整步骤 |
+| 3. 新用户 3 分钟验证 | 找一个非开发者照文档操作 |
+| 4. README 指向用户文档 | 快速开始链接正确 |
+
+#### MVP-4.6：音频（延后）
+
+> 当前不做。视频链路稳定性优先级高于音频。
+> 等 MVP-4.1~4.5 全部完成后，再评估是否需要音频。
+
+| 前置条件 | 说明 |
+|----------|------|
+| 视频链路稳定 | 720p30 无卡顿无 crash |
+| PCP 已定义音频 codec | CODEC_AAC = 0x03 已声明 |
+| 用户有明确需求 | 非技术用户是否真的需要音频 |
+
+### 7.4 总体验收标准
 
 - [ ] 用户**完全不看代码**，按 README + 安装文档能完成首次连接
 - [ ] 端到端 < 3 分钟
 - [ ] 分发版本：Windows `.exe` + Android `.apk`
 - [ ] GUI 显示连接状态、分辨率、FPS
-- [ ] WiFi 模式下能发现手机
-- [ ] 音频能传到会议软件（用 VB-Cable 之类）
+- [ ] WiFi 模式下能发现手机（MVP-4.3）
+- [ ] 音频能传到会议软件（MVP-4.6，延后）
 
 ---
 
