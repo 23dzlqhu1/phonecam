@@ -50,12 +50,15 @@ def setup_adb_forward():
         return False
 
     try:
+        logger.info(f"[ADB] 正在启动 adb server...")
+        subprocess.run([adb_path, "start-server"], timeout=10)
+
         logger.info(f"[ADB] 正在自动建立端口转发: {adb_path} forward tcp:9999 tcp:9999")
         result = subprocess.run(
             [adb_path, "forward", "tcp:9999", "tcp:9999"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=10
         )
         if result.returncode == 0:
             logger.info("[ADB] 端口转发建立成功")
