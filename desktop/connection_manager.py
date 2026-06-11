@@ -18,6 +18,56 @@ from usb_handler import find_usb_tether_interface, scan_usb_subnet
 logger = logging.getLogger(__name__)
 
 
+def setup_adb_forward():
+    """自动寻找 adb 并设置端口转发"""
+    import os
+    import shutil
+    import subprocess
+
+    # 1. 尝试直接从 PATH 寻找 adb
+    adb_path = shutil.which("adb")
+
+    # 2. 如果 PATH 没有，尝试从 phone_native/local.properties 中寻找 SDK 路径
+    if not adb_path:
+        try:
+            # desktop 目录的上一级是项目根目录，所以用 ..
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            prop_path = os.path.join(base_dir, "phone_native", "local.properties")
+            if os.path.exists(prop_path):
+                with open(prop_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip().startswith("sdk.dir="):
+                            sdk_dir = line.split("=")[1].strip().replace("\\:", ":").replace("\\\\", "\\")
+                            potential_adb = os.path.join(sdk_dir, "platform-tools", "adb.exe" if os.name == 'nt' else 'adb')
+                            if os.path.exists(potential_adb):
+                                adb_path = potential_adb
+                                break
+        except Exception:
+            pass
+
+    if not adb_path:
+        logger.warning("[ADB] 未在 PATH 或 local.properties 中找到 adb，无法自动建立端口转发")
+        return False
+
+    try:
+        logger.info(f"[ADB] 正在自动建立端口转发: {adb_path} forward tcp:9999 tcp:9999")
+        result = subprocess.run(
+            [adb_path, "forward", "tcp:9999", "tcp:9999"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            logger.info("[ADB] 端口转发建立成功")
+            return True
+        else:
+            logger.warning(f"[ADB] 端口转发建立失败: {result.stderr.strip()}")
+    except Exception as e:
+        logger.warning(f"[ADB] 自动建立端口转发异常: {e}")
+
+    return False
+
+
 class ConnectionState(Enum):
     """连接状态"""
     DISCONNECTED = 'disconnected'
@@ -86,6 +136,9 @@ class ConnectionManager:
             return
         self._running = True
         self._set_state(ConnectionState.SEARCHING)
+
+        # 尝试自动设置 ADB 端口转发，提升一键运行体验
+        setup_adb_forward()
 
         # mDNS 发现
         self._mdns.on_device_found(self._on_mdns_device)
