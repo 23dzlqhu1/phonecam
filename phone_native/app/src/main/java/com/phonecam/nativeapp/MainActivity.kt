@@ -156,9 +156,10 @@ class MainActivity : AppCompatActivity() {
         // 推流按钮 → 批次 3.2.0.3f 启前台 StreamingService (走 Service.start/stop, 避免 Oplus Hans 冻结)
         //  Hans 冻结的是非前台任务的子线程, 启前台 Service 后 Hans 不冻
         btnPush.setOnClickListener {
-            if (StreamingService.sStarting) return@setOnClickListener
+            val snap = StreamingService.getStateSnapshot()
+            if (snap.isStarting) return@setOnClickListener
 
-            if (StreamingService.sActive) {
+            if (snap.isActive) {
                 // 先更新 UI 快速反馈
                 btnPush.isEnabled = false
                 btnPush.text = "停止中..."
@@ -186,7 +187,7 @@ class MainActivity : AppCompatActivity() {
                 when (intent.action) {
                     "com.phonecam.START_STREAMING" -> {
                         InAppLogStore.i(TAG, "[3.2.0.3f-BROADCAST] 收到 START_STREAMING, 启 StreamingService")
-                        if (!StreamingService.sActive) {
+                        if (!StreamingService.getStateSnapshot().isActive) {
                             StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
                             StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
                             StreamingService.start(ctx)
@@ -194,7 +195,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     "com.phonecam.STOP_STREAMING" -> {
                         InAppLogStore.i(TAG, "[3.2.0.3f-BROADCAST] 收到 STOP_STREAMING, 停 StreamingService")
-                        if (StreamingService.sActive) StreamingService.stop(ctx)
+                        if (StreamingService.getStateSnapshot().isActive) StreamingService.stop(ctx)
                     }
                 }
             }
@@ -273,11 +274,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updatePushBtnState() {
-        if (StreamingService.sStarting) {
+        val snap = StreamingService.getStateSnapshot()
+        if (snap.isStarting) {
             btnPush.text = "连接中 (等 PC).."
             btnPush.isEnabled = false
             pushIndicator.visibility = View.GONE
-        } else if (StreamingService.sActive) {
+        } else if (snap.isActive) {
             btnPush.text = getString(R.string.layer_c_btn_stop)
             btnPush.isEnabled = true
             pushIndicator.visibility = View.VISIBLE
@@ -391,13 +393,11 @@ class MainActivity : AppCompatActivity() {
                 // 批次 3.2.0.3f: 推流状态下把 YUV 投递给 StreamingService.submitFrame
                 //  Service 持 EglRenderer, submitFrame 内部把任务投到 EGL owner thread
                 //  (EGL context 是 thread-local, listener 线程不能直接调 drawYuv)
-                val sActive = StreamingService.sActive
+                val snap = StreamingService.getStateSnapshot()
                 if (cameraFrameCount % 30 == 0) {
-                    val r = StreamingService.sEglRenderer
-                    val enc = StreamingService.sH264Encoder
-                    InAppLogStore.i(TAG, "[3.2.0.3f-DEBUG] 帧#$cameraFrameCount sActive=$sActive egl=${r != null} enc=${enc != null}")
+                    InAppLogStore.i(TAG, "[3.2.0.3f-DEBUG] 帧#$cameraFrameCount sActive=${snap.isActive}")
                 }
-                if (sActive) {
+                if (snap.isActive) {
                     // 批次 3.2.0.3g: 传 image.timestamp (纳秒, Camera2 单调时钟)
                     //  PC 端用这个 + 解码时间算端到端时延
                     val rotation = cameraController?.getStreamRotation() ?: 0

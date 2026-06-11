@@ -130,6 +130,36 @@ class StreamingService : Service() {
         @Volatile var sBytesSentCount: Long = 0L
 
         /**
+         * 只读状态快照 —— 供 MainActivity UI 更新用，减少直接读取多个 sXXX 字段。
+         * 不替代 submitFrame() 等功能性调用。
+         */
+        data class StreamingStateSnapshot(
+            val isStarting: Boolean,
+            val isActive: Boolean,
+            val cameraWidth: Int,
+            val cameraHeight: Int,
+            val frameSubmitCount: Long,
+            val frameEncodeCount: Long,
+            val naluOutputCount: Long,
+            val naluSentCount: Int,
+            val bytesSentCount: Long,
+            val startTimeMs: Long,
+        )
+
+        fun getStateSnapshot(): StreamingStateSnapshot = StreamingStateSnapshot(
+            isStarting = sStarting,
+            isActive = sActive,
+            cameraWidth = sCameraW,
+            cameraHeight = sCameraH,
+            frameSubmitCount = sFrameSubmitCount,
+            frameEncodeCount = sFrameEncodeCount,
+            naluOutputCount = sNaluOutputCount,
+            naluSentCount = sNaluSentCount,
+            bytesSentCount = sBytesSentCount,
+            startTimeMs = sStartTimeMs,
+        )
+
+        /**
          * 启推流: 外部 (MainActivity onClick) 调这个
          */
         fun start(ctx: Context) {
