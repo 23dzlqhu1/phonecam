@@ -52,6 +52,7 @@ class PhoneCamGUI:
         self._stream_confirmed = False  # G-024: 首帧到达确认标志
         self._current_frame: Optional[np.ndarray] = None
         self._frame_lock = threading.Lock()
+        self._last_gui_state = None
 
         # 配置
         self._width = 640
@@ -279,6 +280,13 @@ class PhoneCamGUI:
 
     def _update_loop(self):
         """定时更新 UI"""
+        # G-024: 主线程轮询连接管理器状态，避开 Tkinter 跨线程通信失效问题
+        if self._manager:
+            info = self._manager.info
+            if info.state != self._last_gui_state:
+                self._last_gui_state = info.state
+                self._update_status_ui(info)
+
         with self._frame_lock:
             frame = self._current_frame
 
