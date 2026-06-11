@@ -30,8 +30,10 @@ from receiver import (
     TYPE_VIDEO,
     CODEC_RAW_RGB,
     FLAG_KEYFRAME,
-    HEADER_STRUCT,
 )
+
+# HEADER_STRUCT 是 PcpReceiver 的类属性，不是模块级常量
+HEADER_STRUCT = PcpReceiver.HEADER_STRUCT
 
 
 # ===== v2 协议头测试（当前主协议） =====
@@ -228,14 +230,25 @@ def test_pcp_receiver_smoke_v1_compat():
         if len(received_frames) >= 2:
             received_event.set()
 
-    receiver = PcpReceiver(host='127.0.0.1', port=19998)
+    # 用不同端口避免和 v2 测试冲突
+    port = 19997
+    receiver = PcpReceiver(host='127.0.0.1', port=port)
     receiver.on_frame(on_frame)
     receiver.start()
 
     try:
-        time.sleep(0.3)
+        time.sleep(0.5)
 
-        sock = socket.create_connection(('127.0.0.1', 19998), timeout=5)
+        # 重试连接（server 可能还没 ready）
+        sock = None
+        for attempt in range(5):
+            try:
+                sock = socket.create_connection(('127.0.0.1', port), timeout=2)
+                break
+            except ConnectionRefusedError:
+                time.sleep(0.2)
+        assert sock is not None, f"无法连接到 {port}"
+
         try:
             for i in range(2):
                 payload = bytes([i] * 100)
@@ -244,6 +257,8 @@ def test_pcp_receiver_smoke_v1_compat():
                     payload=payload, keyframe=(i == 0),
                 )
                 sock.sendall(pkt)
+            # 等接收端处理完再关 socket
+            time.sleep(0.5)
         finally:
             sock.close()
 
