@@ -67,6 +67,7 @@ CODEC_AAC = 0x03      # MVP-3 用
 
 # 帧标志
 FLAG_KEYFRAME = 0x01
+FLAG_ROTATION_MASK = 0x06  # bits 1-2 encode rotation
 
 
 # ============== 状态机 ==============
@@ -103,6 +104,7 @@ class VideoFrame:
     pts: int = 0
     pts_ns: int = 0       # 批次 3.2.0.3g: Camera2 timestamp 纳秒, 算端到端时延
     is_keyframe: bool = False
+    rotation: int = 0         # 0/90/180/270 degrees from phone orientation
     receive_time: float = 0.0  # 接收时刻（用于延迟计算）
 
 
@@ -126,7 +128,9 @@ class PcpReceiver:
     HEADER_STRUCT_V1 = struct.Struct('<4sBBBBIQI')  # 24 字节老版本兼容
 
     def __init__(self, host: str, port: int = 9999,
-                 reconnect_delay: float = 2.0, max_delay: float = 30.0):
+                 reconnect_delay: float = 1.0, max_delay: float = 5.0):
+        # G-024: 缩短重连间隔 (原 2~30s → 1~5s)
+        #  localhost/ADB forward 重连开销极低，快速重试确保手机就绪后 ≤5s 内连通
         self.host = host
         self.port = port
         self._reconnect_delay = reconnect_delay
@@ -307,6 +311,11 @@ class PcpReceiver:
 
             # 5) 构造 VideoFrame
             width, height = self._infer_size(codec, payload_len)
+
+            # 解码旋转信息 (flags bits 1-2)
+            rot_bits = (flags & FLAG_ROTATION_MASK)
+            rotation = {0x00: 0, 0x02: 90, 0x04: 180, 0x06: 270}.get(rot_bits, 0)
+
             frame = VideoFrame(
                 data=payload,
                 width=width,
@@ -316,6 +325,7 @@ class PcpReceiver:
                 pts=pts,
                 pts_ns=pts_ns,  # 批次 3.2.0.3g: 推流时延用
                 is_keyframe=bool(flags & FLAG_KEYFRAME),
+                rotation=rotation,
                 receive_time=time.time(),
             )
 

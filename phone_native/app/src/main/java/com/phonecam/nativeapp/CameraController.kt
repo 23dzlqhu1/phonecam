@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.util.Size
+import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.TextureView
 import java.util.concurrent.atomic.AtomicBoolean
@@ -85,6 +86,28 @@ class CameraController(
 
     // 当前选中的预览尺寸（用于做 TextureView 的 letterbox transform）
     @Volatile private var currentPreviewSize: Size? = null
+
+    // ===================== 设备方向追踪 (orientation mismatch 修复) =====================
+    // 传感器方向 (从 CameraCharacteristics.SENSOR_ORIENTATION 读取, 通常 90 或 270)
+    @Volatile var sensorOrientation: Int = 0
+    // 设备当前旋转角度 (由 OrientationEventListener 量化为 0/90/180/270)
+    @Volatile var currentDeviceRotation: Int = 0
+
+    // OrientationEventListener: 监听设备物理旋转, 量化为 0/90/180/270 四档
+    private val orientationListener: OrientationEventListener by lazy {
+        object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                // 量化到最近的 90° 档位
+                currentDeviceRotation = when {
+                    orientation >= 315 || orientation < 45  -> 0
+                    orientation in 45 until 135             -> 90
+                    orientation in 135 until 225            -> 180
+                    else                                    -> 270
+                }
+            }
+        }
+    }
 
     // ===================== 批次 3.2.0.2 真实帧出帧 (ImageReader) =====================
     // 外部注册 listener 后, 内部会自动创建 ImageReader 并把它的 surface 加到 CaptureSession outputs
@@ -158,6 +181,11 @@ class CameraController(
         }
         Log.d(TAG, "open: start camera thread")
         released = false
+        // 启用设备方向监听
+        if (orientationListener.canDetectOrientation()) {
+            orientationListener.enable()
+            Log.d(TAG, "open: OrientationEventListener enabled")
+        }
         val thread = HandlerThread("CameraThread").also { it.start() }
         cameraThread = thread
         cameraHandler = Handler(thread.looper)
@@ -185,6 +213,8 @@ class CameraController(
         Log.d(TAG, "close")
         // 先把 released 置 true，所有还在飞的 openInternal 回调看到后就直接返回
         released = true
+        // 停用设备方向监听
+        orientationListener.disable()
 
         try {
             captureSession?.close()
@@ -457,6 +487,11 @@ class CameraController(
         val previewSize = choosePreviewSize(cm, targetId)
         currentPreviewSize = previewSize
         Log.d(TAG, "selected preview size: ${previewSize.width}x${previewSize.height}")
+
+        // 读取传感器方向 (通常 90° 或 270°, 表示传感器相对于设备自然方向的旋转)
+        val chars = cm.getCameraCharacteristics(targetId)
+        sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        Log.d(TAG, "sensorOrientation=$sensorOrientation for camera $targetId")
         texture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
         // 3. 算 letterbox transform（防止 16:9 预览被拉伸到 9:19.5 屏幕）
@@ -645,5 +680,21 @@ class CameraController(
                 val area = it.width.toLong() * it.height.toLong()
                 Math.abs(area - targetArea)
             }
+    }
+
+    /**
+     * 计算输出流需要的旋转角度, 使画面在竖屏显示时方向正确.
+     *
+     * 后置摄像头: (sensorOrientation - currentDeviceRotation + 360) % 360
+     * 前置摄像头: (sensorOrientation + currentDeviceRotation) % 360
+     *
+     * 典型场景: sensorOrientation=90, 用户竖屏 (currentDeviceRotation=0) → 返回 90
+     */
+    fun getStreamRotation(): Int {
+        return if (lensFacingPref == "front") {
+            (sensorOrientation + currentDeviceRotation) % 360
+        } else {
+            (sensorOrientation - currentDeviceRotation + 360) % 360
+        }
     }
 }

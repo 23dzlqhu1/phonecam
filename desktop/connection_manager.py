@@ -75,6 +75,7 @@ class ConnectionState(Enum):
     """连接状态"""
     DISCONNECTED = 'disconnected'
     SEARCHING = 'searching'
+    WAITING_FOR_PHONE = 'waiting_for_phone'  # G-024: ADB 已就绪但手机端未推流
     CONNECTED = 'connected'
     RECONNECTING = 'reconnecting'
 
@@ -141,7 +142,8 @@ class ConnectionManager:
         self._set_state(ConnectionState.SEARCHING)
 
         # 尝试自动设置 ADB 端口转发，提升一键运行体验
-        setup_adb_forward()
+        # G-024: 记录 ADB forward 是否成功，后续不再用 TCP probe 误判
+        self._adb_forward_ok = setup_adb_forward()
 
         # mDNS 发现
         self._mdns.on_device_found(self._on_mdns_device)
@@ -173,24 +175,21 @@ class ConnectionManager:
         """主连接循环"""
         import socket
         while self._running:
-            # 优先检查 ADB forward 的 localhost:9999
-            adb_forward_active = False
-            try:
-                sock = socket.create_connection(('127.0.0.1', 9999), timeout=0.5)
-                sock.close()
-                adb_forward_active = True
-            except Exception:
-                pass
-
-            if adb_forward_active:
+            # G-024 修复: ADB forward 场景不做 TCP probe
+            #  ADB 本地监听总是立即 accept，TCP probe 是 false positive
+            #  改为: 直接进入 WAITING_FOR_PHONE，等 PcpReceiver 收到真实 PCP 帧后
+            #  由 confirm_stream_active() 转为 CONNECTED
+            if self._adb_forward_ok:
                 usb_url = 'http://127.0.0.1:9999/video'
                 with self._lock:
                     current = self._info
-                    if (current.connection_type != 'usb' or
-                            current.state != ConnectionState.CONNECTED or
-                            '127.0.0.1' not in current.url):
+                    # 仅在非 WAITING/CONNECTED 时进入等待状态
+                    if current.state not in (
+                        ConnectionState.WAITING_FOR_PHONE,
+                        ConnectionState.CONNECTED,
+                    ):
                         self._info = ConnectionInfo(
-                            state=ConnectionState.CONNECTED,
+                            state=ConnectionState.WAITING_FOR_PHONE,
                             device=DiscoveredDevice(
                                 name='ADB Forwarded Device',
                                 ip='127.0.0.1',
@@ -200,7 +199,7 @@ class ConnectionManager:
                             connection_type='usb',
                             url=usb_url,
                         )
-                        logger.info(f'[ADB] 已连接: {usb_url}')
+                        logger.info('[ADB] 端口转发就绪，等待手机端推流...')
                         self._notify_state_change()
             else:
                 # 检查 USB Subnet
@@ -251,6 +250,16 @@ class ConnectionManager:
         """mDNS 发现设备回调"""
         if self._on_device_found:
             self._on_device_found(device)
+
+    def confirm_stream_active(self):
+        """G-024: PcpReceiver 收到首个合法 PCP 帧后调用，确认真正连通"""
+        with self._lock:
+            if self._info.state == ConnectionState.WAITING_FOR_PHONE:
+                self._info.state = ConnectionState.CONNECTED
+                logger.info('[ADB] PCP 数据已到达，确认连接')
+            else:
+                return  # 已经是 CONNECTED 或其他状态，不重复通知
+        self._notify_state_change()
 
     def _set_state(self, state: ConnectionState):
         with self._lock:

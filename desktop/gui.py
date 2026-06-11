@@ -49,6 +49,7 @@ class PhoneCamGUI:
         self._receiver: Optional[PcpReceiver] = None
         self._vcam: Optional[VirtualCamera] = None
         self._is_connected = False
+        self._stream_confirmed = False  # G-024: 首帧到达确认标志
         self._current_frame: Optional[np.ndarray] = None
         self._frame_lock = threading.Lock()
 
@@ -200,6 +201,16 @@ class PhoneCamGUI:
             self._status_dot.itemconfig(self._dot_id, fill=COLORS['text_muted'])
             self._status_title.config(text="正在搜索设备...")
             self._status_detail.config(text="请确保手机 App 已启动推流")
+        elif info.state == ConnectionState.WAITING_FOR_PHONE:
+            # G-024: ADB 已就绪但手机未推流，琥珀色圆点
+            self._status_dot.itemconfig(self._dot_id, fill='#f59e0b')
+            self._status_title.config(text="等待手机推流...")
+            self._status_detail.config(text="ADB 已就绪，请在手机端点击「开始推流」")
+            # 提前启动 receiver，它会自动重连直到手机端就绪
+            if not self._is_connected:
+                self._is_connected = True
+                self._stream_confirmed = False
+                self._start_receiver(info.url)
         elif info.state == ConnectionState.CONNECTED:
             self._status_dot.itemconfig(self._dot_id, fill=COLORS['success'])
             self._status_title.config(text=f"已连接 ({info.connection_type})")
@@ -230,6 +241,12 @@ class PhoneCamGUI:
         """PcpReceiver 的帧回调，参数是 VideoFrame"""
         bgr_frame = video_frame_to_bgr(frame)
         if bgr_frame is not None:
+            # G-024: 首帧到达 → 确认连接
+            if not self._stream_confirmed:
+                self._stream_confirmed = True
+                if self._manager:
+                    self._manager.confirm_stream_active()
+
             # 根据手机端的自动旋转信息旋转帧，保证虚拟摄像头和预览都显示正确方向的图像
             if frame.rotation == 90:
                 bgr_frame = cv2.rotate(bgr_frame, cv2.ROTATE_90_CLOCKWISE)

@@ -69,11 +69,13 @@ class H264Decoder:
 
         try:
             import av
-            packet = av.Packet(nal_data)
-            for frame in self._codec.decode(packet):
-                # 转换为 BGR numpy 数组
-                bgr = frame.to_ndarray(format='bgr24')
-                return bgr
+            packets = self._codec.parse(nal_data)
+            out_bgr = None
+            for packet in packets:
+                for frame in self._codec.decode(packet):
+                    # 转换为 BGR numpy 数组
+                    out_bgr = frame.to_ndarray(format='bgr24')
+            return out_bgr
         except Exception as e:
             logger.debug(f"解码失败: {e}")
         return None

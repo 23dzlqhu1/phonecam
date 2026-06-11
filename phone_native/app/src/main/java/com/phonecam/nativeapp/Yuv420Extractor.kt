@@ -1,6 +1,7 @@
 package com.phonecam.nativeapp
 
 import android.media.Image
+import android.util.Log
 import kotlin.math.min
 
 /**
@@ -26,6 +27,9 @@ import kotlin.math.min
 object Yuv420Extractor {
     private const val TAG = "Yuv420Extractor"
 
+    // 每 30 帧打一次诊断 log, 避免刷屏
+    private var frameCounter: Long = 0L
+
     /**
      * 把 YUV_420_888 Image 提取成 I420 (YUV420 planar) ByteArray
      *
@@ -38,6 +42,15 @@ object Yuv420Extractor {
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
+
+        // 每 30 帧打一次诊断 log (pixelStride/rowStride), 帮助定位 NV12/NV21 问题
+        frameCounter++
+        if (frameCounter % 30 == 1L) {
+            Log.d(TAG, "imageToI420 frame#$frameCounter ${width}x${height}" +
+                " Y(ps=${yPlane.pixelStride},rs=${yPlane.rowStride})" +
+                " U(ps=${uPlane.pixelStride},rs=${uPlane.rowStride})" +
+                " V(ps=${vPlane.pixelStride},rs=${vPlane.rowStride})")
+        }
 
         val ySize = width * height
         val uvWidth = width / 2
@@ -79,9 +92,12 @@ object Yuv420Extractor {
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        // 紧凑情况 (绝大多数设备): rowStride == pixelStride * planeW
-        // 一次性 bulk get 整个 buffer 就行
-        if (rowStride == pixelStride * planeW) {
+        // 紧凑 planar 快速路径: pixelStride 必须是 1 (真正的 planar 数据)
+        // 且 rowStride == planeW (没有行尾 padding)
+        // 注意: NV12 semi-planar 设备 pixelStride=2, rowStride 可能 == 2*planeW,
+        //  此时 rowStride == pixelStride*planeW 也成立, 但 bulk copy 会把交织的 UV 数据
+        //  原样拷进去, 导致 U/V 平面损坏 → 黑白输出. 所以必须检查 pixelStride==1.
+        if (pixelStride == 1 && rowStride == planeW) {
             // 限制读 length: buffer.remaining() 可能 > planeSize (有 padding)
             // 我们只读 planeSize 字节, 多的 padding 扔掉
             val arr = ByteArray(min(planeSize, buffer.remaining()))

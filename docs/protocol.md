@@ -162,6 +162,17 @@ FLAG_KEYFRAME = 0x01
 
 ---
 
+## 6. 特殊流传输要求 (Streaming Requirements)
+
+### 6.1 H.264 视频流 (`CODEC_H264`)
+- **带外参数集缓存 (SPS/PPS Caching)**：
+  在使用 H.264 编码时，发送端（手机）必须缓存包含 SPS 和 PPS 序列参数集的数据包（通常带有 `BUFFER_FLAG_CODEC_CONFIG` 标志）。
+  **对于所有发送的关键帧（I 帧，`FLAG_KEYFRAME` 置位），发送端必须强制将缓存的 SPS/PPS 字节流拼接到该关键帧 NALU 的最前面一起作为 payload 发送。**
+  这是为了保证接收端（如 FFmpeg/PyAV）在网络重连或丢包错过了流起始点时，依然能够无缝重组解码器上下文。
+- **Annex-B 格式要求**：所有的 payload 都必须保留原生的 `00 00 00 01` 或 `00 00 01` NALU 起始码。
+
+---
+
 ## 6. 帧尺寸约定（MVP-1）
 
 | 分辨率 | 像素数 | RGB 字节数 | 备注 |

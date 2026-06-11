@@ -55,6 +55,7 @@ class StreamingService : Service() {
 
         // 跨 Service 边界给 MainActivity listener 读 (推流资源)
         @Volatile var sActive: Boolean = false
+        @Volatile var sStarting: Boolean = false
         @Volatile var sH264Encoder: H264Encoder? = null
         @Volatile var sEglRenderer: EglRenderer? = null
         @Volatile var sTcpServer: TcpStreamServer? = null
@@ -77,6 +78,9 @@ class StreamingService : Service() {
         @Volatile var sLatestPtsNs: Long = 0L       // 最近一次 submitFrame 携带的 pts_ns (AtomicLong 替代)
         private val sPtsNsLock = Any()              // 同步 sLatestPtsNs 读写 (避免用 AtomicLong 引起编译器提示)
 
+        // 当前旋转角度 (由 CameraController.getStreamRotation() 提供, submitFrame 每帧更新)
+        @Volatile var sCurrentRotation: Int = 0
+
         /**
          * 批次 3.2.0.3f: 跨线程投递一帧 YUV 给 EGL owner thread
          *  listener 线程 (imageReaderHandler) 调这个, 实际 EGL drawYuv 在 EGL owner thread 跑
@@ -84,11 +88,12 @@ class StreamingService : Service() {
          *  批次 3.2.0.3g: 加 ptsNs 参数 (Camera2 Image.getTimestamp() 纳秒, 单调时钟)
          *   写进 sLatestPtsNs, naluCb.onNalu 读这个写进 PCP header 算端到端时延
          */
-        fun submitFrame(yuv: ByteArray, w: Int, h: Int, ptsNs: Long = 0L) {
+        fun submitFrame(yuv: ByteArray, w: Int, h: Int, ptsNs: Long = 0L, rotation: Int = 0) {
             val exec = sEglExecutor
             val renderer = sEglRenderer
             val encoder = sH264Encoder
             if (exec == null || renderer == null || encoder == null || !sActive) return
+            sCurrentRotation = rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
             sFrameSubmitCount++  // 批次 3.2.0.3g 帧率统计
             exec.execute {
@@ -156,10 +161,11 @@ class StreamingService : Service() {
         InAppLogStore.i(TAG, "[3.2.0.3f] onStartCommand action=${intent?.action} (主线程=${android.os.Looper.myLooper() === android.os.Looper.getMainLooper()})")
         when (intent?.action) {
             ACTION_START -> {
-                if (sActive) {
-                    InAppLogStore.w(TAG, "[3.2.0.3f] 已在推流, 忽略重复 START")
+                if (sActive || sStarting) {
+                    InAppLogStore.w(TAG, "[3.2.0.3f] 已在推流或启动中, 忽略重复 START")
                     return START_NOT_STICKY
                 }
+                sStarting = true
                 startForeground(NOTIF_ID, buildNotification("推流中…"))
                 startStreamingInWorker()
             }
@@ -210,16 +216,24 @@ class StreamingService : Service() {
                 server.start()
                 sTcpServer = server
 
-                // 2) 等客户端连上 (30s deadline)
-                val deadline = System.currentTimeMillis() + 30_000
+                // 2) 等客户端连上 (G-024: 30s → 120s, 给 PcpReceiver 重连留足裕量)
+                val deadline = System.currentTimeMillis() + 120_000
+                var waitCount = 0
                 while (!server.isClientConnected() && System.currentTimeMillis() < deadline) {
                     Thread.sleep(200)
+                    waitCount++
+                    // G-024: 每 10s 输出一次等待进度日志
+                    if (waitCount % 50 == 0) {
+                        val elapsed = waitCount * 200 / 1000
+                        InAppLogStore.i(TAG, "[等待连接] 已等待 ${elapsed}s，请确保 PC 端 GUI 已启动...")
+                    }
                 }
                 if (!server.isClientConnected()) {
-                    InAppLogStore.e(TAG, "[3.2.0.3f] 30s 内无客户端连接, 启动失败, 自动 stop")
+                    InAppLogStore.e(TAG, "[3.2.0.3f] 120s 内无客户端连接, 启动失败, 自动 stop")
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        Toast.makeText(this, "推流启动失败: 30s 无连接", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "推流启动失败: 120s 内未收到 PC 端连接", Toast.LENGTH_LONG).show()
                     }
+                    sStarting = false
                     stopStreamingInternal()
                     return@Thread
                 }
@@ -238,13 +252,19 @@ class StreamingService : Service() {
                         //  PC 端用这个 + 解码时间算端到端时延
                         val ptsNs = readLatestPtsNs()
                         val isKeyframe = (type == 5)  // H.264 NALU type 5 = IDR slice
-                        val pkt = PcpPacketWriter.buildPacket(
+                        val flags = PcpPacketWriter.encodeRotationFlags(sCurrentRotation, isKeyframe)
+                        val header = PcpPacketWriter.buildHeader(
                             sequence = seq,
                             ptsUs = pts,
                             ptsNs = ptsNs,
-                            payload = nalu,
-                            isKeyframe = isKeyframe
+                            payloadLen = nalu.size,
+                            codec = PcpPacketWriter.CODEC_H264,
+                            flags = flags,
+                            type = PcpPacketWriter.TYPE_VIDEO
                         )
+                        val pkt = ByteArray(PcpPacketWriter.HEADER_SIZE + nalu.size)
+                        System.arraycopy(header, 0, pkt, 0, PcpPacketWriter.HEADER_SIZE)
+                        System.arraycopy(nalu, 0, pkt, PcpPacketWriter.HEADER_SIZE, nalu.size)
                         val ok = server.sendPacket(pkt)
                         if (ok) {
                             sNaluSentCount++
@@ -284,10 +304,12 @@ class StreamingService : Service() {
                 }
                 if (!rendererLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
                     InAppLogStore.e(TAG, "[3.2.0.3f] 5s 内 EglRenderer 未构造完, 启动失败")
+                    sStarting = false
                     return@Thread
                 }
                 sEglRenderer = rendererHolder[0] ?: run {
                     InAppLogStore.e(TAG, "[3.2.0.3f] EglRenderer 为 null, 启动失败")
+                    sStarting = false
                     return@Thread
                 }
 
@@ -307,10 +329,12 @@ class StreamingService : Service() {
 
                 // 批次 3.2.0.3g 帧率统计: 启动 1s 定时打印 (主线程 Handler, 1s 一次, 推流期间持续)
                 startStatsTimer()
+                sStarting = false
 
             } catch (e: Exception) {
                 Log.e(TAG, "[3.2.0.3f] 启动异常", e)
                 Toast.makeText(this, "推流启动异常: ${e.message}", Toast.LENGTH_LONG).show()
+                sStarting = false
                 stopStreamingInternal()
             }
         }, WORKER_THREAD_NAME).start()
@@ -322,6 +346,7 @@ class StreamingService : Service() {
      */
     private fun stopStreamingInternal() {
         sActive = false
+        sStarting = false
         // 批次 3.2.0.3g: 停帧率统计 timer
         stopStatsTimer()
         Thread.sleep(200)  // 让 listener 看到 sActive=false 后再释放

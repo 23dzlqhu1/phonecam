@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: ImageButton
     private lateinit var btnToggle: ImageButton
     private lateinit var btnPush: Button
+    private lateinit var pushIndicator: View
     private lateinit var footerText: TextView
     private lateinit var errorPlaceholder: LinearLayout
     private lateinit var errorTitle: TextView
@@ -130,6 +131,7 @@ class MainActivity : AppCompatActivity() {
         btnSettings = findViewById(R.id.btnSettings)
         btnToggle = findViewById(R.id.btnToggle)
         btnPush = findViewById(R.id.btnPush)
+        pushIndicator = findViewById(R.id.pushIndicator)
         footerText = findViewById(R.id.footerText)
         errorPlaceholder = findViewById(R.id.errorPlaceholder)
         errorTitle = findViewById(R.id.errorTitle)
@@ -154,9 +156,16 @@ class MainActivity : AppCompatActivity() {
         // 推流按钮 → 批次 3.2.0.3f 启前台 StreamingService (走 Service.start/stop, 避免 Oplus Hans 冻结)
         //  Hans 冻结的是非前台任务的子线程, 启前台 Service 后 Hans 不冻
         btnPush.setOnClickListener {
+            if (StreamingService.sStarting) return@setOnClickListener
+
             if (StreamingService.sActive) {
+                // 先更新 UI 快速反馈
+                btnPush.isEnabled = false
+                btnPush.text = "停止中..."
                 StreamingService.stop(this)
             } else {
+                btnPush.isEnabled = false
+                btnPush.text = "连接中..."
                 // 把 MainActivity 当前的相机实际尺寸塞给 Service, 编码器用真实尺寸
                 StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
                 StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
@@ -253,12 +262,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 启动 1Hz 定时器: 每秒更新 Layer D 时间戳
+     * 启动 1Hz 定时器: 每秒更新 Layer D 时间戳和按钮状态
      */
     private val footerTickRunnable = object : Runnable {
         override fun run() {
             updateFooter()
+            updatePushBtnState()
             mainHandler.postDelayed(this, 1000L)
+        }
+    }
+
+    private fun updatePushBtnState() {
+        if (StreamingService.sStarting) {
+            btnPush.text = "连接中 (等 PC).."
+            btnPush.isEnabled = false
+            pushIndicator.visibility = View.GONE
+        } else if (StreamingService.sActive) {
+            btnPush.text = getString(R.string.layer_c_btn_stop)
+            btnPush.isEnabled = true
+            pushIndicator.visibility = View.VISIBLE
+        } else {
+            btnPush.text = getString(R.string.layer_c_btn_start)
+            btnPush.isEnabled = true
+            pushIndicator.visibility = View.GONE
         }
     }
 
@@ -374,7 +400,8 @@ class MainActivity : AppCompatActivity() {
                 if (sActive) {
                     // 批次 3.2.0.3g: 传 image.timestamp (纳秒, Camera2 单调时钟)
                     //  PC 端用这个 + 解码时间算端到端时延
-                    StreamingService.submitFrame(yuv, w, h, image.timestamp)
+                    val rotation = cameraController?.getStreamRotation() ?: 0
+                    StreamingService.submitFrame(yuv, w, h, image.timestamp, rotation)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "[3.2.0.2] 提取真实帧异常", e)

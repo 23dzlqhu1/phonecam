@@ -129,34 +129,32 @@ def _run_cli(args):
         while True:
             frame = receiver.frame
             if frame is not None:
-                # 转 numpy BGR
-                bgr = video_frame_to_bgr(frame)
+                # 只在帧 pts 更新时才解码，防止重复解同一帧破坏 decoder 状态
+                if last_pts_us != frame.pts or last_pts_us == 0:
+                    # 转 numpy BGR
+                    bgr = video_frame_to_bgr(frame)
 
-                if bgr is not None:
-                    # 虚拟摄像头
-                    if vcam and vcam.is_open:
-                        vcam.send(bgr)
+                    if bgr is not None:
+                        # 虚拟摄像头
+                        if vcam and vcam.is_open:
+                            vcam.send(bgr)
 
-                    # 预览窗口
-                    if args.preview:
-                        # 统计与叠加信息
-                        now = time.time()
-                        # 批次 3.2.0.3g 推流时延: 用 Camera2 pts_ns (单调时钟) 算精确时延
-                        #  关键: 两端单调时钟基准不同 (设备启动时间差), 首次收到 pts_ns 时校准
-                        global _latency_offset_ns
-                        latency_ms = None
-                        if frame.pts_ns and frame.pts_ns > 0:
-                            pc_now_ns = time.monotonic_ns()
-                            if _latency_offset_ns is None:
-                                # 首次校准: 假设 0 时延, 记录 offset
-                                _latency_offset_ns = pc_now_ns - frame.pts_ns
-                            phone_ns_aligned = pc_now_ns - _latency_offset_ns
-                            if phone_ns_aligned > frame.pts_ns:
-                                latency_ms = (phone_ns_aligned - frame.pts_ns) / 1_000_000.0
-                        if latency_ms is None:
-                            # 退化: 用 receive_time 估算
-                            latency_ms = (now - frame.receive_time) * 1000
-                        if last_pts_us != frame.pts:
+                        # 预览窗口
+                        if args.preview:
+                            # 统计与叠加信息
+                            now = time.time()
+                            global _latency_offset_ns
+                            latency_ms = None
+                            if frame.pts_ns and frame.pts_ns > 0:
+                                pc_now_ns = time.monotonic_ns()
+                                if _latency_offset_ns is None:
+                                    _latency_offset_ns = pc_now_ns - frame.pts_ns
+                                phone_ns_aligned = pc_now_ns - _latency_offset_ns
+                                if phone_ns_aligned > frame.pts_ns:
+                                    latency_ms = (phone_ns_aligned - frame.pts_ns) / 1_000_000.0
+                            if latency_ms is None:
+                                latency_ms = (now - frame.receive_time) * 1000
+                            
                             cv2.putText(
                                 bgr,
                                 f"FPS: {receiver.fps:.1f}  "
@@ -172,11 +170,14 @@ def _run_cli(args):
                                 (10, 60),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
                             )
+                            
+                            cv2.namedWindow("PhoneCam (PCP)", cv2.WINDOW_NORMAL)
+                            cv2.setWindowProperty("PhoneCam (PCP)", cv2.WND_PROP_TOPMOST, 1)
                             cv2.imshow("PhoneCam (PCP)", bgr)
                             if cv2.waitKey(1) & 0xFF == ord('q'):
                                 break
 
-                last_pts_us = frame.pts
+                    last_pts_us = frame.pts
 
                 # 5 秒一次日志（直接用 receiver 的滑动窗口 FPS，
                 # 避免本地 frame_count 重复读同一帧导致 FPS 偏高）

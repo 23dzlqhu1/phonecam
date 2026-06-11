@@ -71,6 +71,9 @@ class H264Encoder {
     private var running: Boolean = false
     private var frameIndex: Long = 0
 
+    // SPS/PPS 缓存 (用于追加到每个 I 帧前，防止网络丢包或迟连导致 PC 端永远无法解码)
+    private var spsPpsCache: ByteArray? = null
+
     // ====== 3.2 EGL 路径 API (start / encodeFrame / stop) ======
 
     /**
@@ -202,9 +205,36 @@ class H264Encoder {
                             outBuffer.position(bufferInfo.offset)
                             outBuffer.limit(bufferInfo.offset + bufferInfo.size)
                             outBuffer.get(outBytes)
-                            // 解析 NALU type (第 1 字节低 5 位)
-                            val naluType = outBytes[0].toInt() and 0x1F
-                            callback?.onNalu(outBytes, naluType)
+
+                            // 解析 NALU type (跳过起始码 00 00 00 01 或 00 00 01)
+                            var offset = 0
+                            if (outBytes.size > 4 && outBytes[0].toInt() == 0 && outBytes[1].toInt() == 0 && outBytes[2].toInt() == 0 && outBytes[3].toInt() == 1) {
+                                offset = 4
+                            } else if (outBytes.size > 3 && outBytes[0].toInt() == 0 && outBytes[1].toInt() == 0 && outBytes[2].toInt() == 1) {
+                                offset = 3
+                            }
+                            val naluType = if (offset < outBytes.size) outBytes[offset].toInt() and 0x1F else 0
+
+                            // 缓存 SPS/PPS (BUFFER_FLAG_CODEC_CONFIG)
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                spsPpsCache = outBytes
+                                Log.i(TAG, "已缓存 SPS/PPS 字典, 大小: ${outBytes.size} 字节")
+                            }
+
+                            var finalBytes = outBytes
+                            // 遇到 I 帧 (IDR)，如果存在缓存的 SPS/PPS，则强制将其拼接到头部发送
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                                val spsPps = spsPpsCache
+                                if (spsPps != null) {
+                                    val combined = ByteArray(spsPps.size + outBytes.size)
+                                    System.arraycopy(spsPps, 0, combined, 0, spsPps.size)
+                                    System.arraycopy(outBytes, 0, combined, spsPps.size, outBytes.size)
+                                    finalBytes = combined
+                                    Log.i(TAG, "已为关键帧附加 SPS/PPS 头 (总大小: ${combined.size})")
+                                }
+                            }
+
+                            callback?.onNalu(finalBytes, naluType)
                         }
                         codec?.releaseOutputBuffer(outIndex, false)
                     }

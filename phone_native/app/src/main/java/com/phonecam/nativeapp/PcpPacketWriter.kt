@@ -83,6 +83,25 @@ object PcpPacketWriter {
 
     // 帧标志 (与 desktop/receiver.py FLAG_* 同步)
     const val FLAG_KEYFRAME: Byte = 0x01
+    // 旋转信息掩码: bits 1-2 (0x06) 编码旋转角度
+    //  00 = 0°, 01 = 90°, 10 = 180°, 11 = 270°
+    const val FLAG_ROTATION_MASK: Byte = 0x06
+
+    /**
+     * 把旋转角度 + keyframe 标志合并成 flags 字节.
+     * bit 0: keyframe (1=是)
+     * bits 1-2: rotation (00=0°, 01=90°, 10=180°, 11=270°)
+     */
+    fun encodeRotationFlags(rotation: Int, isKeyframe: Boolean): Byte {
+        val kf = if (isKeyframe) FLAG_KEYFRAME.toInt() else 0
+        val rotBits = when (rotation) {
+            90  -> 0x02
+            180 -> 0x04
+            270 -> 0x06
+            else -> 0x00  // 0 degrees
+        }
+        return (kf or rotBits).toByte()
+    }
 
     // ========== 核心 API ==========
 
