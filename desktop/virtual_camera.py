@@ -1,23 +1,94 @@
-#!/usr/bin/env python3
 """PhoneCam 虚拟摄像头输出
 
 使用 pyvirtualcam 将接收到的帧输出为系统虚拟摄像头。
 Zoom、腾讯会议、OBS 等软件可直接识别。
 
-MVP-3 关键约束 (2026-06-09 验证):
-- pyvirtualcam 在 Windows 不能自定义设备名
-- 装了 OBS Studio → 设备名固定 "OBS Virtual Camera" (pyvirtualcam obs 后端)
-- 没装 OBS → RuntimeError, vcam 不启动, 程序继续纯预览模式
-- 非 Windows → vcam 不启动, 程序继续纯预览模式
+不再依赖用户安装 OBS Studio。
+内置 OBS VirtualCam DLL，首次运行自动注册。
 """
 
 import logging
+import os
 import sys
+import subprocess
 from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# OBS VirtualCam CLSID (用于检查是否已注册)
+VIRTUALCAM_CLSID = "{A3FCE0F5-3493-419F-958A-ABA1250EC20B}"
+
+
+def _is_virtualcam_registered() -> bool:
+    """检查 OBS VirtualCam 是否已注册（无需安装 OBS）"""
+    if sys.platform != "win32":
+        return False
+    try:
+        result = subprocess.run(
+            ["reg", "query", f"HKLM\\SOFTWARE\\Classes\\CLSID\\{VIRTUALCAM_CLSID}"],
+            capture_output=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _register_virtualcam() -> bool:
+    """从内置 DLL 注册 OBS VirtualCam（需要管理员权限）"""
+    if sys.platform != "win32":
+        return False
+
+    # 查找内置 DLL
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    dll_dir = os.path.join(script_dir, "virtualcam")
+    dll_64 = os.path.join(dll_dir, "obs-virtualcam-module64.dll")
+    dll_32 = os.path.join(dll_dir, "obs-virtualcam-module32.dll")
+
+    if not os.path.exists(dll_64):
+        logger.warning(f"[虚拟摄像头] 内置 DLL 不存在: {dll_64}")
+        return False
+
+    # 注册 64-bit
+    try:
+        result = subprocess.run(
+            ["regsvr32.exe", "/i", "/s", dll_64],
+            capture_output=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        )
+        if result.returncode == 0:
+            logger.info("[虚拟摄像头] 64-bit DLL 注册成功")
+        else:
+            logger.warning(f"[虚拟摄像头] 64-bit DLL 注册失败 (可能需要管理员权限)")
+            return False
+    except Exception as e:
+        logger.warning(f"[虚拟摄像头] 注册异常: {e}")
+        return False
+
+    # 注册 32-bit (可选，某些 32-bit 应用需要)
+    if os.path.exists(dll_32):
+        try:
+            subprocess.run(
+                ["regsvr32.exe", "/i", "/s", dll_32],
+                capture_output=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+        except Exception:
+            pass  # 32-bit 注册失败不影响主要功能
+
+    return _is_virtualcam_registered()
+
+
+def ensure_virtualcam() -> bool:
+    """确保 OBS VirtualCam 可用（已注册则跳过，否则自动注册）"""
+    if _is_virtualcam_registered():
+        logger.info("[虚拟摄像头] OBS VirtualCam 已注册")
+        return True
+
+    logger.info("[虚拟摄像头] 尝试注册内置 OBS VirtualCam DLL...")
+    return _register_virtualcam()
 
 
 class VirtualCamera:
@@ -28,7 +99,7 @@ class VirtualCamera:
     """
 
     def __init__(self, width: int = 1280, height: int = 720, fps: int = 30):
-        """MVP-3 默认 1280x720@30, 与腾讯会议/Zoom 最广泛兼容"""
+        """默认 1280x720@30, 与腾讯会议/Zoom 最广泛兼容"""
         self.width = width
         self.height = height
         self.fps = fps
@@ -42,57 +113,52 @@ class VirtualCamera:
 
         Returns:
             True: 虚拟摄像头启动成功
-            False: 启动失败 (缺依赖/缺 OBS/非 Windows/其他), 调用方应继续纯预览
+            False: 启动失败, 调用方应继续纯预览
         """
-        # AC-008: 仅 Windows 平台
         if sys.platform != "win32":
+            logger.warning(f"[虚拟摄像头] 仅支持 Windows, 当前: {sys.platform}")
+            return False
+
+        # 确保 DLL 已注册
+        if not ensure_virtualcam():
             logger.warning(
-                f"[MVP-3] 虚拟摄像头仅支持 Windows (DirectShow 后端)。"
-                f"当前平台: {sys.platform}。已跳过虚拟摄像头。"
+                "[虚拟摄像头] OBS VirtualCam 未注册。"
+                "请以管理员身份运行: desktop/virtualcam/install-virtualcam.bat"
             )
             return False
 
         try:
             import pyvirtualcam
         except ImportError:
-            # AC-006: 缺 pyvirtualcam
-            logger.error(
-                "[MVP-3] 缺少依赖: pyvirtualcam。请运行: pip install pyvirtualcam"
-            )
+            logger.error("[虚拟摄像头] 缺少 pyvirtualcam。运行: pip install pyvirtualcam")
             return False
 
         try:
-            # AC-012: 不传 device 参数, 让 obs 后端用默认名 "OBS Virtual Camera"
             self._cam = pyvirtualcam.Camera(
                 width=self.width,
                 height=self.height,
                 fps=self.fps,
                 fmt=pyvirtualcam.PixelFormat.RGB,
-                print_fps=False,  # 关闭 pyvirtualcam 自带的 FPS 日志, 我们自己统计
+                print_fps=False,
             )
             self._is_open = True
-            # AC-001: 启动成功日志
             logger.info(
-                f"[MVP-3] 虚拟摄像头已启动: 设备名={self._cam.device!r}, "
+                f"[虚拟摄像头] 已启动: {self._cam.device!r} "
                 f"{self.width}x{self.height}@{self.fps}fps"
             )
             return True
         except RuntimeError as e:
-            # AC-007: 缺 OBS 后端 (典型错误信息含 "OBS Virtual Camera")
             msg = str(e)
             if "OBS Virtual Camera" in msg or "obs" in msg.lower():
                 logger.warning(
-                    "[MVP-3] 未检测到 OBS Virtual Camera。pyvirtualcam 后端不可用。"
-                    "下载: https://obsproject.com/"
+                    "[虚拟摄像头] OBS Virtual Camera 不可用。"
+                    "请以管理员身份运行: desktop/virtualcam/install-virtualcam.bat"
                 )
             else:
-                logger.warning(f"[MVP-3] 虚拟摄像头启动失败 (RuntimeError): {e}")
+                logger.warning(f"[虚拟摄像头] 启动失败: {e}")
             return False
         except Exception as e:
-            # 其他异常: 仍然不抛, 让调用方降级
-            logger.warning(
-                f"[MVP-3] 虚拟摄像头启动失败 ({type(e).__name__}): {e}"
-            )
+            logger.warning(f"[虚拟摄像头] 启动失败 ({type(e).__name__}): {e}")
             return False
 
     def send(self, frame: np.ndarray) -> bool:
@@ -110,14 +176,10 @@ class VirtualCamera:
         try:
             import cv2
 
-            # 调整尺寸
             if frame.shape[1] != self.width or frame.shape[0] != self.height:
                 frame = cv2.resize(frame, (self.width, self.height))
 
-            # AC-014: BGR -> RGB (pyvirtualcam 默认 RGB)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # 发送
             self._cam.send(rgb)
             return True
         except Exception as e:
@@ -125,10 +187,7 @@ class VirtualCamera:
             return False
 
     def close(self):
-        """关闭虚拟摄像头
-
-        可重复调用, 重复调用是幂等的。
-        """
+        """关闭虚拟摄像头（可重复调用）"""
         if self._cam is not None:
             try:
                 self._cam.close()
@@ -136,8 +195,7 @@ class VirtualCamera:
                 pass
             self._cam = None
             self._is_open = False
-            # AC-005: 退出日志
-            logger.info("[MVP-3] 虚拟摄像头已关闭")
+            logger.info("[虚拟摄像头] 已关闭")
 
     @property
     def is_open(self) -> bool:
@@ -145,7 +203,6 @@ class VirtualCamera:
 
     @property
     def device_name(self) -> Optional[str]:
-        """返回 pyvirtualcam 提供的实际设备名, 通常是 'OBS Virtual Camera'"""
         if self._cam is not None:
             return self._cam.device
         return None
@@ -163,10 +220,16 @@ def check_pyvirtualcam():
         import pyvirtualcam
         print(f"pyvirtualcam {pyvirtualcam.__version__} 已安装")
 
-        # 尝试打开一次
+        # 检查 DLL 注册状态
+        if _is_virtualcam_registered():
+            print("✅ OBS VirtualCam 已注册")
+        else:
+            print("⚠️  OBS VirtualCam 未注册")
+            print("   请以管理员身份运行: desktop/virtualcam/install-virtualcam.bat")
+
         cam = pyvirtualcam.Camera(width=640, height=480, fps=15,
                                    fmt=pyvirtualcam.PixelFormat.RGB)
-        print(f"虚拟摄像头可用: {cam.device}")
+        print(f"✅ 虚拟摄像头可用: {cam.device}")
         cam.close()
         return True
     except ImportError:
@@ -175,8 +238,6 @@ def check_pyvirtualcam():
         return False
     except Exception as e:
         print(f"❌ 虚拟摄像头不可用: {e}")
-        print("   Windows: 通常自带支持")
-        print("   Linux: 需要 v4l2loopback (sudo modprobe v4l2loopback)")
         return False
 
 
