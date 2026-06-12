@@ -46,11 +46,12 @@ python phonecam.py --gui
 
 ### 第四步：在会议软件中使用
 
-1. 安装 [OBS Studio](https://obsproject.com/)（免费，装一次就行）
-2. phonecam.exe 启动后会自动创建虚拟摄像头
-3. 打开腾讯会议/Zoom/Teams
-4. 在摄像头设置中选择 **OBS Virtual Camera**
-5. 会议中就能看到手机摄像头画面 ✅
+1. phonecam.exe 启动后会自动注册虚拟摄像头（首次运行可能弹出 UAC 提权窗口，点"是"即可）
+2. 打开腾讯会议/Zoom/Teams
+3. 在摄像头设置中选择 **OBS Virtual Camera**
+4. 会议中就能看到手机摄像头画面 ✅
+
+> 📝 **无需安装 OBS Studio**：PhoneCam 已自带 OBS Virtual Camera DLL，首次运行自动注册到系统。
 
 ---
 
@@ -78,9 +79,9 @@ python phonecam.py --gui
 
 ### Q: OBS Virtual Camera 找不到？
 
-- 确保已安装 OBS Studio
-- 安装 OBS 后需要重启电脑
-- 在 OBS 中：工具 → 虚拟摄像头 → 启动
+- 确保 phonecam.exe 至少运行过一次（首次运行会自动注册虚拟摄像头）
+- 如果首次运行没弹 UAC 窗口，尝试以管理员身份运行一次 phonecam.exe
+- 重启会议软件后重新选择摄像头
 
 ### Q: 帧率很低？
 

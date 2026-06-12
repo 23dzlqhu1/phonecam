@@ -37,48 +37,92 @@ def _is_virtualcam_registered() -> bool:
 
 
 def _register_virtualcam() -> bool:
-    """从内置 DLL 注册 OBS VirtualCam（需要管理员权限）"""
+    """从内置 DLL 注册 OBS VirtualCam
+
+    先尝试静默注册（如果已有管理员权限则直接成功）。
+    如果失败，弹 UAC 提权窗口让用户确认一次。
+    """
     if sys.platform != "win32":
         return False
 
-    # 查找内置 DLL
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    dll_dir = os.path.join(script_dir, "virtualcam")
+    # 查找内置 DLL（支持 PyInstaller 打包后路径）
+    dll_64, dll_32 = _find_bundled_dlls()
+    if not dll_64:
+        logger.warning("[虚拟摄像头] 内置 DLL 不存在")
+        return False
+
+    # 尝试静默注册（当前权限）
+    if _try_register(dll_64, silent=True):
+        logger.info("[虚拟摄像头] 64-bit DLL 注册成功（静默）")
+        _try_register(dll_32, silent=True)  # 32-bit 可选
+        return _is_virtualcam_registered()
+
+    # 静默失败 → 弹 UAC 提权窗口（仅首次，用户确认一次即可）
+    logger.info("[虚拟摄像头] 需要管理员权限，弹出 UAC 确认...")
+    if _try_register_elevated(dll_64):
+        logger.info("[虚拟摄像头] 64-bit DLL 注册成功（UAC 提权）")
+        _try_register_elevated(dll_32)  # 32-bit 可选
+        return _is_virtualcam_registered()
+
+    logger.warning("[虚拟摄像头] 注册失败（用户拒绝或系统限制）")
+    return False
+
+
+def _find_bundled_dlls() -> tuple:
+    """查找内置 DLL，支持开发环境和 PyInstaller 打包"""
+    # PyInstaller 打包后的临时目录
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+
+    dll_dir = os.path.join(base, "virtualcam")
     dll_64 = os.path.join(dll_dir, "obs-virtualcam-module64.dll")
     dll_32 = os.path.join(dll_dir, "obs-virtualcam-module32.dll")
 
-    if not os.path.exists(dll_64):
-        logger.warning(f"[虚拟摄像头] 内置 DLL 不存在: {dll_64}")
-        return False
+    if os.path.exists(dll_64):
+        return dll_64, dll_32 if os.path.exists(dll_32) else None
 
-    # 注册 64-bit
+    # fallback: DLL 在 exe 同级目录
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        dll_dir2 = os.path.join(exe_dir, "virtualcam")
+        dll_64b = os.path.join(dll_dir2, "obs-virtualcam-module64.dll")
+        if os.path.exists(dll_64b):
+            return dll_64b, os.path.join(dll_dir2, "obs-virtualcam-module32.dll")
+
+    return None, None
+
+
+def _try_register(dll_path: str, silent: bool = True) -> bool:
+    """尝试注册 DLL"""
     try:
+        args = ["regsvr32.exe"]
+        if silent:
+            args.extend(["/i", "/s"])
+        args.append(dll_path)
         result = subprocess.run(
-            ["regsvr32.exe", "/i", "/s", dll_64],
-            capture_output=True, timeout=10,
+            args, capture_output=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
         )
-        if result.returncode == 0:
-            logger.info("[虚拟摄像头] 64-bit DLL 注册成功")
-        else:
-            logger.warning(f"[虚拟摄像头] 64-bit DLL 注册失败 (可能需要管理员权限)")
-            return False
-    except Exception as e:
-        logger.warning(f"[虚拟摄像头] 注册异常: {e}")
+        return result.returncode == 0
+    except Exception:
         return False
 
-    # 注册 32-bit (可选，某些 32-bit 应用需要)
-    if os.path.exists(dll_32):
-        try:
-            subprocess.run(
-                ["regsvr32.exe", "/i", "/s", dll_32],
-                capture_output=True, timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
-        except Exception:
-            pass  # 32-bit 注册失败不影响主要功能
 
-    return _is_virtualcam_registered()
+def _try_register_elevated(dll_path: str) -> bool:
+    """弹 UAC 提权窗口注册 DLL（仅首次需要用户确认）"""
+    try:
+        # PowerShell Start-Process -Verb RunAs 弹出 UAC
+        ps_cmd = f'Start-Process regsvr32.exe -ArgumentList "/i /s \\"{dll_path}\\"" -Verb RunAs -Wait'
+        result = subprocess.run(
+            ["powershell.exe", "-Command", ps_cmd],
+            capture_output=True, timeout=30
+        )
+        return result.returncode == 0
+    except Exception as e:
+        logger.debug(f"UAC 注册异常: {e}")
+        return False
 
 
 def ensure_virtualcam() -> bool:

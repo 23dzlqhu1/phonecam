@@ -5,7 +5,10 @@ a = Analysis(
     ['phonecam.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('virtualcam/obs-virtualcam-module64.dll', 'virtualcam'),
+        ('virtualcam/obs-virtualcam-module32.dll', 'virtualcam'),
+    ],
     hiddenimports=['virtual_camera', 'gui', 'h264_decoder'],
     hookspath=[],
     hooksconfig={},
@@ -35,4 +38,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='NONE',
 )

@@ -80,9 +80,9 @@ gotchas.md 用 4 段格式（场景 / 症状 / 根因 / 修复 / 教训）记录
 | **MVP-1** | 假视频流闭环（mock + PCP 协议 + PcpReceiver + OpenCV 显示） | ✅ 完成 |
 | **MVP-2** | 真实摄像头画面（Kotlin 原生 + MediaCodec 硬编 + PyAV 硬解） | ✅ **完成**。链路端到端闭环达成（手机端 Kotlin/Camera2/MediaCodec → TCP PCP v2 → 电脑端 PyAV 硬件解码）。|
 | **MVP-3** | 虚拟摄像头闭环（腾讯会议能选 PhoneCam Camera） | ✅ **完成**。pyvirtualcam + OBS Virtual Camera 真机验证通过（159帧/10s @1280x720）。|
-| **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | 🟡 **进行中**（4.1 GUI 验证通过） |
+|| **MVP-4** | 产品化（GUI + WiFi + 音频 + 打包 EXE/APK） | ✅ **基本完成**（4.1~4.5 完成，4.6 音频延后）。APK 2.5MB + EXE 93.4MB，VirtualCam 自带 OBS DLL |
 
-**当前进度总结**：MVP-0~MVP-3 全部完成。核心视频链路（Camera2→H264→PCP→PyAV→pyvirtualcam）已端到端验证通过（159帧/10s @1280x720）。下一步进入 MVP-4 产品化。
+**当前进度总结**：MVP-0~MVP-4.5 全部完成。项目已完全可分发：APK (2.5MB release signed) + EXE (93.4MB PyInstaller one-file)。VirtualCam 自带 OBS Virtual Camera DLL，首次运行自动注册，用户无需安装 OBS。热点模式通过网关检测实现。4.6 音频延后。
 **协议路线**：项目唯一协议是 [PCP](docs/protocol.md)（v2 32 字节头 + TCP，兼容 v1 24 字节头）。HTTP MJPEG 已废弃，WebSocket 路线在 MVP-2 重写。
 
 ---

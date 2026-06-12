@@ -1,6 +1,6 @@
 # PhoneCam 当前架构图
 
-> **最后更新**: 2026-06-11（MVP-3 真机验证通过；G-025 设备兼容性问题已记录；MVP-4 进行中）
+> **最后更新**: 2026-06-12（MVP-4.1~4.5 全部完成；VirtualCam 自带 OBS DLL 免安装；打包分发就绪）
 > **基于**: 实际代码审计，非文档声明。见 `desktop/` 和 `phone_native/` 源码。
 
 ---
@@ -64,6 +64,7 @@
 │       │  BGR→RGB, resize, pyvirtualcam.send()                      │
 │       ▼                                                             │
 │  OBS Virtual Camera (DirectShow)                                    │
+│  （自含 OBS DLL，首次运行自动注册，用户无需安装 OBS）               │
 │       │                                                             │
 │       ▼                                                             │
 │  会议软件 (腾讯会议/Zoom/Teams 等)                                  │
@@ -256,7 +257,7 @@ StreamingService.stopStreamingInternal()
 | D-01 | 全局状态 | StreamingService companion object 有 17 个 static var（已通过 StreamingStateSnapshot 减少直接读取耦合） | 跨线程共享可变状态，紧耦合 | StreamingService.kt |
 | D-02 | 紧耦合 | MainActivity 直接读取 StreamingService.sXXX | 重构困难 | MainActivity.kt |
 | D-03 | 协议双端 | PCP 协议在 Python 和 Kotlin 各自定义 | 变更需同步修改两端 | receiver.py, PcpPacketWriter.kt |
-| D-04 | 虚拟摄像头 | pyvirtualcam 依赖 OBS Virtual Camera 后端 | 用户必须安装 OBS | virtual_camera.py |
+|| D-04 | 虚拟摄像头 | pyvirtualcam 使用 OBS Virtual Camera 后端 | ✅ 已解决：自带 OBS DLL，首次运行自动注册 | virtual_camera.py |
 | D-05 | 测试不足 | 无 pytest 可运行的 CI 测试（依赖 numpy/av） | 协议漂移无法自动发现 | desktop/tests/ |
 | D-06 | Android 复杂性 | 前台 Service + companion object + 多 Activity | 生命周期管理复杂 | StreamingService.kt |
 | D-07 | 连接占位 | ConnectActivity 手动连接是模拟（1.5s delay + toast） | WiFi 连接不可用 | ConnectActivity.kt |

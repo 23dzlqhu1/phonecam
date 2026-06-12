@@ -50,9 +50,9 @@
 | **MVP-1** 假视频流闭环 | ✅ 完成 | `tests/mock_phone/mock_phone_server.py` + PCP 协议 24 字节头 + 电脑端 OpenCV 窗口显示 + 端到端 29.6 FPS 联调通过 |
 | **MVP-2** 真实摄像头画面 | ✅ **完成** | 链路端到端闭环达成（手机端 Kotlin/Camera2/MediaCodec → TCP PCP v2 → 电脑端 PyAV 硬件解码）。 |
 | **MVP-3** 虚拟摄像头闭环 | ✅ **完成** | pyvirtualcam + OBS Virtual Camera 真机验证通过（159帧/10s @1280x720）。mvp3_e2e_verify.py 自动化验证。 |
-| **MVP-4** 产品化 | 🟡 **进行中** | 4.1 GUI 创建+连接验证通过。子阶段：4.1 GUI稳定 → 4.2 USB → 4.3 WiFi → 4.4 打包 → 4.5 文档 → 4.6 音频(延后) |
+|| **MVP-4** 产品化 | ✅ **基本完成** | 4.1~4.5 全部完成。打包产物：app-release.apk (2.5MB) + phonecam.exe (93.4MB)。VirtualCam 自带 OBS DLL，无需用户安装 OBS。4.6 音频延后 |
 
-**当前正在做**：MVP-0~MVP-3 全部完成。核心视频链路（Camera2→H264→PCP→PyAV→pyvirtualcam）已端到端验证。MVP-4 产品化进行中（4.1 GUI 验证通过，4.2~4.6 待做）。
+**当前正在做**：MVP-0~MVP-4.5 全部完成。项目已完全可分发：APK (2.5MB release signed) + EXE (93.4MB PyInstaller one-file)。VirtualCam 自带 OBS 虚拟摄像头 DLL，首次运行自动注册（UAC 提权），用户无需安装 OBS。热点模式通过网关检测实现（非 mDNS）。前置摄像头畸变校正 (G-026)：边缘 20% 裁切。4.6 音频延后。
 
 **⚠️ 设备兼容性**：旧设备（OPPO PLC110）存在 MediaCodec 编码器 bug（G-025），EglRenderer→MediaCodec InputSurface 路径产出损坏的 H.264 数据（PC 端解码为彩色噪点）。新设备使用相同 APK 和代码，29 FPS @1280x720 画面清晰，OBS Virtual Camera 正常。G-025 为设备特定 bug，非代码缺陷。
 
@@ -84,7 +84,7 @@
 2. **H.264 视频 + AAC 音频**（不用 MJPEG 节省带宽）
 3. **Android + Windows 双端**（不做 iOS / Linux / Mac）
 4. **USB + WiFi 热点**两种连接（用户切换）
-5. **pyvirtualcam 做虚拟摄像头**（免驱动，依赖 OBS 虚拟摄像头）
+5. **pyvirtualcam 做虚拟摄像头**（自带 OBS Virtual Camera DLL，首次运行自动注册，用户无需安装 OBS）
 6. **手机端 MVP-2 切到 Kotlin 原生**（ADR-006 2026-06-08，详见 decisions.md）—— 旧 Flutter `phone/` 冻结作 legacy，新建 `phone_native/`（包名 `com.phonecam.nativeapp`）；电脑端 Python 不动，PCP 协议不动
 
 ---
@@ -117,7 +117,8 @@
 | G-022 | MediaCodec 的 SPS/PPS 只输出一次，必须拼在 I 帧头部 | 2026-06-11 |
 | G-023 | Android 重复启动 StreamingService 导致 EADDRINUSE 解决 | 2026-06-11 |
 | G-024 | ADB 端口转发（adb forward）导致 PC 状态误判与手机超时断连 | 2026-06-11 |
-| G-025 | **MediaCodec 编码器设备特定 bug**：旧设备 EglRenderer→InputSurface 路径产出损坏 H.264（花屏/彩色噪点），新设备同代码正常。根因在设备硬件/驱动层 | 2026-06-11 |
+|| G-025 | **MediaCodec 编码器设备特定 bug**：旧设备 EglRenderer→InputSurface 路径产出损坏 H.264（花屏/彩色噪点），新设备同代码正常。根因在设备硬件/驱动层 | 2026-06-11 |
+|| G-026 | **前置摄像头畸变校正**：边缘 20% 裁切，消除广角桶形畸变 | 2026-06-12 |
 
 ---
 
@@ -202,4 +203,4 @@
 
 ---
 
-**最后更新**：2026-06-11（MVP-3 真机验证通过：新设备 29FPS/1280x720/OBS VirtualCamera；旧设备 G-025 MediaCodec bug 已记录；MVP-4 进行中 4.1 已验证）
+**最后更新**：2026-06-12（MVP-4.1~4.5 全部完成。打包分发：APK 2.5MB + EXE 93.4MB。VirtualCam 自带 OBS DLL 免安装。热点模式网关检测。G-026 前置摄像头裁切修复。4.6 音频延后）

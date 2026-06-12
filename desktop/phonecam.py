@@ -111,7 +111,8 @@ def _run_cli(args):
     # 虚拟摄像头（MVP-3 才用）
     vcam = None
     if args.virtual_cam and not args.no_virtual_cam:
-        from virtual_camera import VirtualCamera
+        from virtual_camera import ensure_virtualcam, VirtualCamera
+        ensure_virtualcam()  # 首次运行自动注册 DLL（可能弹 UAC）
         vcam = VirtualCamera(args.width, args.height, args.fps)
         if not vcam.open():
             vcam = None
