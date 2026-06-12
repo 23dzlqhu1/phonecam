@@ -18,10 +18,19 @@ android {
         versionName = "0.2.8-mvp2-batch3.2.0.3h-portfix3"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../../phonecam-release.jks")
+            storePassword = "phonecam123"
+            keyAlias = "phonecam"
+            keyPassword = "phonecam123"
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false               // MVP 阶段不上 R8 压缩
-            signingConfig = signingConfigs.getByName("debug") // 暂用 debug 签名，保证导出的 APK 任何手机都能直接装
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isDebuggable = true
