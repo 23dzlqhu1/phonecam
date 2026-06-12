@@ -51,11 +51,11 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--no-virtual-cam", action="store_true",
-        help="不使用虚拟摄像头（MVP-1/2 默认）"
+        help="不使用虚拟摄像头"
     )
     parser.add_argument(
-        "--virtual-cam", action="store_true",
-        help="启用虚拟摄像头（pyvirtualcam，MVP-3）"
+        "--virtual-cam", action="store_true", default=True,
+        help="启用虚拟摄像头（默认开启）"
     )
     parser.add_argument(
         "--preview", action="store_true",
@@ -89,20 +89,29 @@ def parse_connect(spec: str) -> tuple[str, int]:
 
 
 def _run_cli(args):
-    """CLI 模式（MVP-1 主入口）"""
+    """CLI 模式（主入口）"""
     import cv2
 
+    # 默认行为：自动连接 127.0.0.1:9999（adb reverse 或热点）
     if not args.connect and not args.auto:
-        print("用法：--connect 127.0.0.1:9999  或  --auto")
-        return
+        args.connect = "127.0.0.1:9999"
 
     if args.connect:
         host, port = parse_connect(args.connect)
     else:
-        # MVP-4: 接入 connection_manager 自动发现
-        # MVP-1/2/3: 必须手动指定
-        print("❌ --auto 模式 MVP-4 才会启用，MVP-1 请用 --connect")
-        return
+        # --auto: 热点模式自动发现
+        from discovery import find_phone
+        print("[自动发现] 搜索手机...")
+        device = find_phone(port=args.port, timeout=5.0)
+        if device:
+            host, port = device.ip, device.port
+            print(f"[自动发现] 找到: {device.url}")
+        else:
+            print("[自动发现] 未找到手机。请确保：")
+            print("  1. 手机已开热点，电脑已连接")
+            print("  2. 或手机 USB 连接 + adb reverse")
+            print("  3. 手机端已点「开始推流」")
+            return
 
     print(f"\n[PCP] 连接: {host}:{port}")
     receiver = PcpReceiver(host, port)
