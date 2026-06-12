@@ -67,9 +67,10 @@ class H264Encoder {
     // ====== 3.2 长生命周期状态 ======
     private var codec: MediaCodec? = null
     private var inputSurface: android.view.Surface? = null
-    private var callback: NaluCallback? = null
-    private var running: Boolean = false
+    @Volatile private var callback: NaluCallback? = null
+    @Volatile private var running: Boolean = false
     private var frameIndex: Long = 0
+    private var outputThread: Thread? = null
 
     // SPS/PPS 缓存 (用于追加到每个 I 帧前，防止网络丢包或迟连导致 PC 端永远无法解码)
     private var spsPpsCache: ByteArray? = null
@@ -158,9 +159,13 @@ class H264Encoder {
         } catch (e: Exception) {
             Log.w(TAG, "signalEndOfInputStream 异常: ${e.message}")
         }
-        // 等输出循环自然退出 (signal EOS 后 dequeueOutputBuffer 会拿到 BUFFER_END_OF_STREAM)
-        // 实际: 我们的 startOutputLoop 看 running flag, signal EOS 后再过 1~2 帧就停
-        Thread.sleep(300)  // 给编码器 300ms 吐完 NALU
+        // 等输出循环线程退出
+        try {
+            outputThread?.join(1000)  // 最多等 1 秒
+        } catch (e: InterruptedException) {
+            Log.w(TAG, "输出循环 join 中断: ${e.message}")
+        }
+        outputThread = null
         try {
             codec?.stop()
         } catch (e: Exception) {
@@ -187,7 +192,7 @@ class H264Encoder {
      * 用 while(running) 简单实现, 不引入 Handler/Executor
      */
     private fun startOutputLoop() {
-        Thread {
+        outputThread = Thread {
             val bufferInfo = MediaCodec.BufferInfo()
             while (running) {
                 val outIndex = codec?.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US) ?: -1
@@ -241,7 +246,7 @@ class H264Encoder {
                 }
             }
             Log.d(TAG, "输出循环退出")
-        }.apply { name = "H264Encoder-OutputLoop" }.start()
+        }.apply { name = "H264Encoder-OutputLoop"; start() }
     }
 
     /**

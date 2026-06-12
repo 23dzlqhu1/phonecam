@@ -102,7 +102,7 @@ object Yuv420Extractor {
             // 我们只读 planeSize 字节, 多的 padding 扔掉
             val arr = ByteArray(min(planeSize, buffer.remaining()))
             buffer.get(arr)
-            System.arraycopy(arr, 0, dst, dstOffset, planeSize)
+            System.arraycopy(arr, 0, dst, dstOffset, arr.size)
             return
         }
 

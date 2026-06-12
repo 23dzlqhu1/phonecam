@@ -93,7 +93,7 @@ class ConnectionManager:
     def __init__(self, port: int = 9999):
         self.port = port
         self._info = ConnectionInfo()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._adb_reverse_ok = False

@@ -225,20 +225,21 @@ class PcpReceiver:
                     logger.info(f"[PCP] 启动 TCP 服务端，监听 {self.host}:{self.port}")
                     
                     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    server_sock.bind((self.host, self.port))
-                    server_sock.listen(1)
-                    server_sock.settimeout(0.5)
-                    
-                    while self._running:
-                        try:
-                            sock, addr = server_sock.accept()
-                            logger.info(f"[PCP] 手机已连接: {addr}")
-                            break
-                        except socket.timeout:
-                            continue
-                    
-                    server_sock.close()
+                    try:
+                        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        server_sock.bind((self.host, self.port))
+                        server_sock.listen(1)
+                        server_sock.settimeout(0.5)
+                        
+                        while self._running:
+                            try:
+                                sock, addr = server_sock.accept()
+                                logger.info(f"[PCP] 手机已连接: {addr}")
+                                break
+                            except socket.timeout:
+                                continue
+                    finally:
+                        server_sock.close()
                     
                     if not self._running or not sock:
                         continue
@@ -501,10 +502,6 @@ def video_frame_to_bgr(frame: VideoFrame) -> Optional[np.ndarray]:
             return None
         try:
             bgr = decoder.decode(frame.data)
-            if bgr is not None:
-                # 更新 VideoFrame 的宽高 (从解码结果反推)
-                frame.width = bgr.shape[1]
-                frame.height = bgr.shape[0]
             return bgr
         except Exception as e:
             logger.debug(f"[3.2.0.3d] H264 解码异常: {e}")

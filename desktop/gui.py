@@ -230,11 +230,18 @@ class PhoneCamGUI:
         if self._receiver:
             self._receiver.stop()
 
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        host = parsed.hostname or "127.0.0.1"
+        # Parse "host:port" or "http://host:port" format
+        if "://" in url:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 9999
+        else:
+            parts = url.rsplit(":", 1)
+            host = parts[0] if parts[0] else "127.0.0.1"
+            port = int(parts[1]) if len(parts) > 1 else 9999
 
-        self._receiver = PcpReceiver(host, port=9999)
+        self._receiver = PcpReceiver(host, port=port)
         self._receiver.on_frame(self._on_frame_pcp)
         self._receiver.start()
 
