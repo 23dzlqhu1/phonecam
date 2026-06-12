@@ -1,19 +1,20 @@
-#!/usr/bin/env python3
 """PhoneCam 统一连接管理器
 
-整合 mDNS 和 USB Tethering 两种连接方式，提供统一的连接体验。
-优先级: USB > WiFi (mDNS)
+连接方式（按优先级）:
+  1. USB (adb reverse tcp:9999) — 最稳定
+  2. 热点模式 — PC 连手机热点，自动检测网关 IP
+
+不再使用 mDNS 发现。
 """
 
 import time
 import logging
 import threading
 from typing import Optional, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
-from discovery import MdnsDiscovery, DiscoveredDevice
-from usb_handler import find_usb_tether_interface, scan_usb_subnet
+from discovery import find_phone, DiscoveredDevice, HotspotDevice
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +25,10 @@ def setup_adb_reverse():
     import shutil
     import subprocess
 
-    # 1. 尝试直接从 PATH 寻找 adb
     adb_path = shutil.which("adb")
 
-    # 2. 如果 PATH 没有，尝试从 phone_native/local.properties 中寻找 SDK 路径
     if not adb_path:
         try:
-            # desktop 目录的上一级是项目根目录，所以用 ..
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             prop_path = os.path.join(base_dir, "phone_native", "local.properties")
             if os.path.exists(prop_path):
@@ -46,31 +44,23 @@ def setup_adb_reverse():
             pass
 
     if not adb_path:
-        logger.warning("[ADB] 未在 PATH 或 local.properties 中找到 adb，无法自动建立端口反向代理")
+        logger.warning("[ADB] 未找到 adb，跳过端口反向代理")
         return False
 
     try:
-        logger.info(f"[ADB] 正在启动 adb server...")
-        subprocess.run([adb_path, "start-server"], timeout=10)
-
-        # 清除已有的 reverse 代理，防止冲突
-        logger.info(f"[ADB] 清除已有的端口反向代理: {adb_path} reverse --remove tcp:9999")
+        subprocess.run([adb_path, "start-server"], timeout=10, capture_output=True)
         subprocess.run([adb_path, "reverse", "--remove", "tcp:9999"], capture_output=True)
-
-        logger.info(f"[ADB] 正在自动建立端口反向代理: {adb_path} reverse tcp:9999 tcp:9999")
         result = subprocess.run(
             [adb_path, "reverse", "tcp:9999", "tcp:9999"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
-            logger.info("[ADB] 端口转发建立成功")
+            logger.info("[ADB] 端口转发 tcp:9999 建立成功")
             return True
         else:
-            logger.warning(f"[ADB] 端口转发建立失败: {result.stderr.strip()}")
+            logger.warning(f"[ADB] 端口转发失败: {result.stderr.strip()}")
     except Exception as e:
-        logger.warning(f"[ADB] 自动建立端口转发异常: {e}")
+        logger.warning(f"[ADB] 异常: {e}")
 
     return False
 
@@ -79,7 +69,7 @@ class ConnectionState(Enum):
     """连接状态"""
     DISCONNECTED = 'disconnected'
     SEARCHING = 'searching'
-    WAITING_FOR_PHONE = 'waiting_for_phone'  # G-024: ADB 已就绪但手机端未推流
+    WAITING_FOR_PHONE = 'waiting_for_phone'
     CONNECTED = 'connected'
     RECONNECTING = 'reconnecting'
 
@@ -89,7 +79,7 @@ class ConnectionInfo:
     """连接信息"""
     state: ConnectionState = ConnectionState.DISCONNECTED
     device: Optional[DiscoveredDevice] = None
-    connection_type: str = ''  # 'wifi' or 'usb'
+    connection_type: str = ''  # 'usb' 或 'hotspot'
     url: str = ''
     error: str = ''
 
@@ -97,23 +87,20 @@ class ConnectionInfo:
 class ConnectionManager:
     """统一连接管理器
 
-    同时监听 mDNS (WiFi) 和 USB Tethering，
-    优先使用 USB（更稳定），自动切换。
+    优先级: USB (adb reverse) > 热点 (网关检测)
     """
 
-    def __init__(self, port: int = 8080):
+    def __init__(self, port: int = 9999):
         self.port = port
         self._info = ConnectionInfo()
         self._lock = threading.Lock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._adb_reverse_ok = False
 
         # 回调
         self._on_state_change: Optional[Callable[[ConnectionInfo], None]] = None
         self._on_device_found: Optional[Callable[[DiscoveredDevice], None]] = None
-
-        # 子模块
-        self._mdns = MdnsDiscovery(port=port)
 
     @property
     def info(self) -> ConnectionInfo:
@@ -131,11 +118,9 @@ class ConnectionManager:
             return self._info.state
 
     def on_state_change(self, callback: Callable[[ConnectionInfo], None]):
-        """设置状态变化回调"""
         self._on_state_change = callback
 
     def on_device_found(self, callback: Callable[[DiscoveredDevice], None]):
-        """设置发现设备回调"""
         self._on_device_found = callback
 
     def start(self):
@@ -145,21 +130,15 @@ class ConnectionManager:
         self._running = True
         self._set_state(ConnectionState.SEARCHING)
 
-        # 尝试自动设置 ADB 反向代理，提升一键运行体验
+        # 尝试 adb reverse
         self._adb_reverse_ok = setup_adb_reverse()
 
-        # mDNS 发现
-        self._mdns.on_device_found(self._on_mdns_device)
-        self._mdns.start()
-
-        # 主循环：检测 USB + 选择最优连接
+        # 主循环
         self._thread = threading.Thread(target=self._connection_loop, daemon=True)
         self._thread.start()
 
     def stop(self):
-        """停止"""
         self._running = False
-        self._mdns.stop()
         if self._thread:
             self._thread.join(timeout=5)
         self._set_state(ConnectionState.DISCONNECTED)
@@ -175,17 +154,12 @@ class ConnectionManager:
         self._notify_state_change()
 
     def _connection_loop(self):
-        """主连接循环"""
-        import socket
+        """主连接循环: USB > 热点"""
         while self._running:
-            # G-024 修复/重构: adb reverse 场景
-            #  改为: 直接进入 WAITING_FOR_PHONE，等 PcpReceiver (作为 TCP Server) 收到真实 PCP 帧后
-            #  由 confirm_stream_active() 转为 CONNECTED
+            # ── USB 模式 (adb reverse) ──
             if self._adb_reverse_ok:
-                usb_url = 'http://127.0.0.1:9999/video'
                 with self._lock:
                     current = self._info
-                    # 仅在非 WAITING/CONNECTED 时进入等待状态
                     if current.state not in (
                         ConnectionState.WAITING_FOR_PHONE,
                         ConnectionState.CONNECTED,
@@ -193,74 +167,54 @@ class ConnectionManager:
                         self._info = ConnectionInfo(
                             state=ConnectionState.WAITING_FOR_PHONE,
                             device=DiscoveredDevice(
-                                name='ADB Reversed Device',
+                                name='USB (adb reverse)',
                                 ip='127.0.0.1',
                                 port=9999,
-                                url=usb_url,
+                                url='127.0.0.1:9999',
                             ),
                             connection_type='usb',
-                            url=usb_url,
+                            url='127.0.0.1:9999',
                         )
-                        logger.info('[ADB] 反向代理就绪，等待手机端推流...')
+                        logger.info('[USB] adb reverse 就绪，等待手机推流...')
                         self._notify_state_change()
             else:
-                # 检查 USB Subnet
-                usb_ip = scan_usb_subnet(port=self.port, timeout=1.0)
-                if usb_ip:
-                    usb_url = f'http://{usb_ip}:{self.port}/video'
+                # ── 热点模式 ──
+                device = find_phone(port=self.port, timeout=2.0)
+                if device:
                     with self._lock:
                         current = self._info
-                        # USB 优先，或当前断开时切换到 USB
-                        if (current.connection_type != 'usb' or
-                                current.state != ConnectionState.CONNECTED):
+                        if current.state != ConnectionState.CONNECTED:
+                            discovered = DiscoveredDevice(
+                                name=f'Hotspot@{device.ip}',
+                                ip=device.ip,
+                                port=device.port,
+                                url=device.url,
+                            )
                             self._info = ConnectionInfo(
                                 state=ConnectionState.CONNECTED,
-                                device=DiscoveredDevice(
-                                    name='USB Device',
-                                    ip=usb_ip,
-                                    port=self.port,
-                                    url=usb_url,
-                                ),
-                                connection_type='usb',
-                                url=usb_url,
+                                device=discovered,
+                                connection_type='hotspot',
+                                url=device.url,
                             )
-                            logger.info(f'[USB] 已连接: {usb_url}')
+                            logger.info(f'[热点] 已连接: {device.url}')
                             self._notify_state_change()
+                            if self._on_device_found:
+                                self._on_device_found(discovered)
 
-            # 如果没有 USB，检查 mDNS 发现 of devices
-            if self._info.connection_type != 'usb':
-                devices = self._mdns.devices
-                if devices and self._info.state != ConnectionState.CONNECTED:
-                    device = devices[0]
-                    with self._lock:
-                        self._info = ConnectionInfo(
-                            state=ConnectionState.CONNECTED,
-                            device=device,
-                            connection_type='wifi',
-                            url=device.url,
-                        )
-                    logger.info(f'[WiFi] 已连接: {device.url}')
-                    self._notify_state_change()
-
-            # 休眠
-            for _ in range(30):  # 3 秒检查一次
+            # 3 秒检查一次
+            for _ in range(30):
                 if not self._running:
                     return
                 time.sleep(0.1)
 
-    def _on_mdns_device(self, device: DiscoveredDevice):
-        """mDNS 发现设备回调"""
-        if self._on_device_found:
-            self._on_device_found(device)
-
     def confirm_stream_active(self):
-        """G-024: PcpReceiver 收到首个合法 PCP 帧后调用，确认真正连通"""
+        """PcpReceiver 收到首个 PCP 帧后调用，确认连通"""
         with self._lock:
             if self._info.state == ConnectionState.WAITING_FOR_PHONE:
                 self._info.state = ConnectionState.CONNECTED
-                logger.info('[ADB] PCP 数据已到达，确认连接')
+                logger.info('[连接] PCP 数据已到达，确认连接')
             else:
-                return  # 已经是 CONNECTED 或其他状态，不重复通知
+                return
         self._notify_state_change()
 
     def _set_state(self, state: ConnectionState):
@@ -273,4 +227,4 @@ class ConnectionManager:
             try:
                 self._on_state_change(self.info)
             except Exception as e:
-                logger.debug(f'回调错误: {e}')
+                logger.warning(f"状态回调异常: {e}")

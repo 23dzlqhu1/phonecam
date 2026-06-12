@@ -190,14 +190,24 @@ def test_pcp_receiver_smoke_v2():
         if len(received_frames) >= 3:
             received_event.set()
 
-    receiver = PcpReceiver(host='127.0.0.1', port=19999)
+    port = 19999
+    receiver = PcpReceiver(host='127.0.0.1', port=port)
     receiver.on_frame(on_frame)
     receiver.start()
 
     try:
-        time.sleep(0.3)
+        time.sleep(0.5)
 
-        sock = socket.create_connection(('127.0.0.1', 19999), timeout=5)
+        # 重试连接（server 可能还没 ready）
+        sock = None
+        for attempt in range(5):
+            try:
+                sock = socket.create_connection(('127.0.0.1', port), timeout=2)
+                break
+            except ConnectionRefusedError:
+                time.sleep(0.2)
+        assert sock is not None, f"无法连接到 {port}"
+
         try:
             for i in range(3):
                 payload = bytes([i] * 100)
@@ -206,6 +216,8 @@ def test_pcp_receiver_smoke_v2():
                     payload=payload, keyframe=(i == 0),
                 )
                 sock.sendall(pkt)
+            # 等接收端处理完再关 socket
+            time.sleep(0.5)
         finally:
             sock.close()
 
@@ -214,8 +226,8 @@ def test_pcp_receiver_smoke_v2():
         assert len(received_frames) == 3
         assert received_frames[0].sequence == 0
         assert received_frames[0].is_keyframe
-        assert received_frames[0].pts_ns == 0   # 第0帧 pts_ns=0
-        assert received_frames[1].pts_ns == 33000000  # 第1帧 pts_ns
+        assert received_frames[0].pts_ns == 0
+        assert received_frames[1].pts_ns == 33000000
     finally:
         receiver.stop()
 
