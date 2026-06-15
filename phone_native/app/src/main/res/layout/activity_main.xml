@@ -1,201 +1,138 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  activity_main.xml — MainActivity 4 层垂直布局 (Phase X 落地)
-  来源: specs/features/viewfinder-screen-A-layout.md §2
-
-  4 层结构 (从上到下):
-    Layer A: 相机画面 (weight=1, 占剩余空间)
-    Layer B: 状态 + 设置行 (80dp, 半透明黑)
-    Layer C: 推流按钮 (120dp, 64dp 按钮居中)
-    Layer D: 底部状态文字 (40dp, 等宽字体)
--->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/bg_oled">
+    android:background="@android:color/black">
 
-    <!-- ================== Layer A: 相机画面 ================== -->
-    <FrameLayout
-        android:id="@+id/layerA"
-        android:layout_width="match_parent"
+    <!-- 全尺寸铺满无边框预览 -->
+    <TextureView
+        android:id="@+id/textureView"
+        android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@color/bg_oled">
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- TextureView: Camera2 预览 Surface, 批次 3 接入 -->
-        <TextureView
-            android:id="@+id/textureView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+    <!-- 极简渐变遮罩 (可选，增加文字对比度) -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="80dp"
+        android:background="#66000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- 错误占位: 默认隐藏, 异常时显示 (Phase Y 接通状态机) -->
-        <LinearLayout
-            android:id="@+id/errorPlaceholder"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:visibility="gone">
-
-            <ImageView
-                android:id="@+id/errorIcon"
-                android:layout_width="@dimen/icon_size_error"
-                android:layout_height="@dimen/icon_size_error"
-                android:src="@drawable/ic_error_camera"
-                android:contentDescription="@string/err_open_failed_title" />
-
-            <TextView
-                android:id="@+id/errorTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:textSize="@dimen/text_size_error"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold"
-                android:text="@string/err_no_permission_title" />
-
-            <TextView
-                android:id="@+id/errorHint"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center"
-                android:textSize="@dimen/text_size_status"
-                android:textColor="@color/text_secondary"
-                android:text="@string/err_no_permission_hint" />
-
-            <Button
-                android:id="@+id/btnRetry"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:background="@color/brand_cyan"
-                android:textColor="@color/bg_oled"
-                android:textSize="@dimen/text_size_status"
-                android:paddingHorizontal="24dp"
-                android:text="@string/action_retry" />
-        </LinearLayout>
-    </FrameLayout>
-
-    <!-- ================== Layer B: 状态 + 设置行 ================== -->
+    <!-- 右上角极简功能按钮 -->
     <LinearLayout
-        android:id="@+id/layerB"
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/layer_b_height"
-        android:background="@color/surface_glass"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="32dp"
+        android:layout_marginEnd="16dp">
+        
+        <ImageButton
+            android:id="@+id/btnToggle"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_settings"
+            android:tint="#FFFFFF"
+            android:scaleType="centerInside"
+            android:padding="8dp"/>
+            
+        <ImageButton
+            android:id="@+id/btnSettings"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_settings"
+            android:tint="#FFFFFF"
+            android:scaleType="centerInside"
+            android:padding="8dp"/>
+    </LinearLayout>
+
+    <!-- 顶部状态指示，模仿 Iriun 极简无底色浮动字 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingHorizontal="@dimen/space_horizontal">
+        android:layout_marginTop="46dp"
+        android:layout_marginStart="24dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
-        <!-- 状态点 (8dp 圆) -->
         <View
             android:id="@+id/statusDot"
-            android:layout_width="@dimen/status_dot_size"
-            android:layout_height="@dimen/status_dot_size"
-            android:background="@drawable/status_dot_idle" />
-
-        <!-- 状态文字 -->
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:background="@drawable/status_dot_idle"
+            android:layout_marginEnd="8dp" />
+            
         <TextView
             android:id="@+id/statusText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:textSize="@dimen/text_size_status"
-            android:textColor="@color/text_primary"
-            android:text="@string/layer_b_status_idle" />
-
-        <!-- 调试数字 (等宽字体, 电光青) -->
-        <TextView
-            android:id="@+id/debugText"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="16dp"
-            android:fontFamily="monospace"
-            android:textSize="@dimen/text_size_debug"
-            android:textColor="@color/brand_cyan"
-            android:text="— · — · —" />
-
-        <!-- 切换按钮 (Phase Y 接通相机切换, Phase X 仅占位) -->
-        <ImageButton
-            android:id="@+id/btnToggle"
-            android:layout_width="@dimen/icon_size_action"
-            android:layout_height="@dimen/icon_size_action"
-            android:src="@drawable/ic_swap"
-            android:contentDescription="@string/layer_b_action_toggle"
-            android:background="?attr/selectableItemBackgroundBorderless" />
-
-        <!-- 设置按钮 (Layer B 右上角, 跳 Settings) -->
-        <ImageButton
-            android:id="@+id/btnSettings"
-            android:layout_width="@dimen/icon_size_action"
-            android:layout_height="@dimen/icon_size_action"
-            android:layout_marginStart="12dp"
-            android:src="@drawable/ic_settings"
-            android:contentDescription="@string/layer_b_action_settings"
-            android:background="?attr/selectableItemBackgroundBorderless" />
+            android:text="Waiting for connection..."
+            android:textSize="15sp"
+            android:textColor="#FFFFFF"
+            android:shadowColor="#000000"
+            android:shadowDx="1"
+            android:shadowDy="1"
+            android:shadowRadius="2" />
     </LinearLayout>
 
-    <!-- 1px 分隔线 (Layer B / Layer C 之间) -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/hairline_height"
-        android:background="@color/hairline" />
-
-    <!-- ================== Layer C: 推流按钮 ================== -->
     <LinearLayout
-        android:id="@+id/layerC"
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/layer_c_height"
-        android:background="@color/bg_oled"
-        android:orientation="vertical"
-        android:gravity="center_horizontal"
-        android:paddingTop="@dimen/push_indicator_offset"
-        android:paddingBottom="@dimen/space_vertical">
-
-        <!-- 推流指示点 (推流中显示, 默认隐藏) -->
-        <View
-            android:id="@+id/pushIndicator"
-            android:layout_width="@dimen/push_indicator_outer"
-            android:layout_height="@dimen/push_indicator_outer"
-            android:background="@drawable/push_indicator"
-            android:visibility="gone"
-            android:contentDescription="@string/layer_c_btn_streaming" />
-
-        <!-- 推流按钮 (占满宽度, 左右各留 48dp, 64dp 高) -->
-        <Button
-            android:id="@+id/btnPush"
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/btn_push_height"
-            android:layout_marginHorizontal="48dp"
-            android:layout_marginTop="6dp"
-            android:background="@drawable/btn_push_background"
-            android:textSize="@dimen/text_size_button"
-            android:textColor="@color/text_primary"
-            android:textStyle="bold"
-            android:letterSpacing="0.05"
-            android:textAllCaps="false"
-            android:text="@string/layer_c_btn_start" />
+        android:id="@+id/tempHiddenContainer"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="invisible"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+        <!-- 为了不让 MainActivity 的 binding 空指针，隐藏掉那些不需要的大按钮 -->
+        <TextView android:id="@+id/debugText" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/footerText" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <Button android:id="@+id/btnPush" android:layout_width="wrap_content" android:layout_height="wrap_content" />
     </LinearLayout>
 
-    <!-- 1px 分隔线 (Layer C / Layer D 之间) -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/hairline_height"
-        android:background="@color/hairline" />
-
-    <!-- ================== Layer D: 底部状态 ================== -->
-    <TextView
-        android:id="@+id/footerText"
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/layer_d_height"
-        android:background="@color/bg_oled"
-        android:fontFamily="monospace"
+    <LinearLayout
+        android:id="@+id/errorPlaceholder"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
         android:gravity="center"
-        android:textSize="@dimen/text_size_footer"
-        android:textColor="@color/text_secondary"
-        android:text="PHONECAM v0.2.4 — CAM? — 00:00:00" />
-</LinearLayout>
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+        <ImageView
+            android:id="@+id/errorIcon"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_error_camera" />
+        <TextView
+            android:id="@+id/errorTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:layout_marginTop="8dp"/>
+        <TextView
+            android:id="@+id/errorHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#AAAAAA"/>
+        <Button
+            android:id="@+id/btnRetry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Retry"
+            android:layout_marginTop="16dp"/>
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,0 +1,50 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.34
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.44.35228 版
+版权所有(C) Microsoft Corporation。保留所有权利。
+
+dll_main.cpp
+src\vcam\dll_main.cpp(18): error C2059: 语法错误:“public”
+src\vcam\dll_main.cpp(19): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+src\vcam\dll_main.cpp(20): error C2550: “CVCamClassFactory”: 构造函数初始值设定项列表只能在构造函数定义中使用
+src\vcam\dll_main.cpp(22): error C3861: “GetOwner”: 找不到标识符
+src\vcam\dll_main.cpp(24): error C3158: “NonDelegatingQueryInterface”:“override”只能应用于虚成员函数
+src\vcam\dll_main.cpp(24): error C2575: “NonDelegatingQueryInterface”: 只有成员函数和基可以是虚拟的
+src\vcam\dll_main.cpp(26): error C2355: “this”: 只能在非静态成员函数或非静态数据成员初始值设定项的内部引用
+src\vcam\dll_main.cpp(28): error C2352: “CUnknown::NonDelegatingQueryInterface”: 调用非静态成员函数需要一个对象
+D:\PhoneCam\cpp\src\vcam\baseclasses\combase.h(235): note: 参见“CUnknown::NonDelegatingQueryInterface”的声明
+src\vcam\dll_main.cpp(31): error C3158: “CreateInstance”:“override”只能应用于虚成员函数
+src\vcam\dll_main.cpp(31): error C2575: “CreateInstance”: 只有成员函数和基可以是虚拟的
+src\vcam\dll_main.cpp(45): error C3158: “LockServer”:“override”只能应用于虚成员函数
+src\vcam\dll_main.cpp(45): error C2575: “LockServer”: 只有成员函数和基可以是虚拟的
+src\vcam\dll_main.cpp(48): error C2059: 语法错误:“}”
+src\vcam\dll_main.cpp(48): error C2143: 语法错误: 缺少“;”(在“}”的前面)
+src\vcam\dll_main.cpp(52): error C2059: 语法错误:“if”
+src\vcam\dll_main.cpp(52): error C2143: 语法错误: 缺少“;”(在“{”的前面)
+src\vcam\dll_main.cpp(52): error C2447: “{”: 缺少函数标题(是否是老式的形式表?)
+src\vcam\dll_main.cpp(56): error C2059: 语法错误:“return”
+src\vcam\dll_main.cpp(57): error C2059: 语法错误:“}”
+src\vcam\dll_main.cpp(57): error C2143: 语法错误: 缺少“;”(在“}”的前面)
+src\vcam\dll_main.cpp(62): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+src\vcam\dll_main.cpp(63): error C2059: 语法错误:“if”
+src\vcam\dll_main.cpp(66): error C2061: 语法错误: 标识符“CVCamClassFactory”
+src\vcam\dll_main.cpp(67): error C2059: 语法错误:“if”
+src\vcam\dll_main.cpp(69): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+src\vcam\dll_main.cpp(69): error C2371: “hr”: 重定义；不同的基类型
+src\vcam\dll_main.cpp(65): note: 参见“hr”的声明
+src\vcam\dll_main.cpp(69): error C3536: “pFactory”: 初始化之前无法使用
+src\vcam\dll_main.cpp(69): error C2065: “riid”: 未声明的标识符
+src\vcam\dll_main.cpp(70): error C3927: "->": 非函数声明符后不允许尾随返回类型
+src\vcam\dll_main.cpp(70): error C3613: “->”后缺少返回类型(假定为“int”)
+src\vcam\dll_main.cpp(70): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+src\vcam\dll_main.cpp(70): error C2086: “<error type> pFactory”: 重定义
+src\vcam\dll_main.cpp(66): note: 参见“pFactory”的声明
+src\vcam\dll_main.cpp(70): error C2146: 语法错误: 缺少“;”(在标识符“NonDelegatingRelease”的前面)
+src\vcam\dll_main.cpp(71): error C2059: 语法错误:“return”
+src\vcam\dll_main.cpp(72): error C2059: 语法错误:“}”
+src\vcam\dll_main.cpp(72): error C2143: 语法错误: 缺少“;”(在“}”的前面)
+src\vcam\dll_main.cpp(74): error C2143: 语法错误: 缺少“;”(在“{”的前面)
+src\vcam\dll_main.cpp(74): error C2447: “{”: 缺少函数标题(是否是老式的形式表?)

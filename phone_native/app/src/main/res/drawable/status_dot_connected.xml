@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  status_dot_connected.xml — 状态点 (已连接) 矢量图
-  绿色 8dp 圆点, 配合外发光 View 实现 LED 效果
--->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="8dp"
-    android:height="8dp"
-    android:viewportWidth="8"
-    android:viewportHeight="8">
+    android:width="6dp"
+    android:height="6dp"
+    android:viewportWidth="6"
+    android:viewportHeight="6">
     <path
-        android:fillColor="#00E676"
-        android:pathData="M4,0 C6.21,0 8,1.79 8,4 C8,6.21 6.21,8 4,8 C1.79,8 0,6.21 0,4 C0,1.79 1.79,0 4,0 Z" />
+        android:fillColor="#27AE60"
+        android:pathData="M3,0 C4.66,0 6,1.34 6,3 C6,4.66 4.66,6 3,6 C1.34,6 0,4.66 0,3 C0,1.34 1.34,0 3,0 Z" />
 </vector>

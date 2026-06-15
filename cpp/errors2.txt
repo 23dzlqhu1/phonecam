@@ -1,0 +1,30 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.34
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+FAILED: src/vcam/phonecam-virtualcam.dll src/vcam/phonecam-virtualcam.lib 
+virtual_cam_filter.cpp.obj : error LNK2019: 无法解析的外部符号 "public: void __cdecl CCritSec::Lock(void)" (?Lock@CCritSec@@QEAAXXZ)，函数 "public: __cdecl CAutoLock::CAutoLock(class CCritSec *)" (??0CAutoLock@@QEAA@PEAVCCritSec@@@Z) 中引用了该符号
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2001: 无法解析的外部符号 "public: void __cdecl CCritSec::Lock(void)" (?Lock@CCritSec@@QEAAXXZ)
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2001: 无法解析的外部符号 "public: void __cdecl CCritSec::Lock(void)" (?Lock@CCritSec@@QEAAXXZ)
+virtual_cam_filter.cpp.obj : error LNK2019: 无法解析的外部符号 "public: void __cdecl CCritSec::Unlock(void)" (?Unlock@CCritSec@@QEAAXXZ)，函数 "public: __cdecl CAutoLock::~CAutoLock(void)" (??1CAutoLock@@QEAA@XZ) 中引用了该符号
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2001: 无法解析的外部符号 "public: void __cdecl CCritSec::Unlock(void)" (?Unlock@CCritSec@@QEAAXXZ)
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2001: 无法解析的外部符号 "public: void __cdecl CCritSec::Unlock(void)" (?Unlock@CCritSec@@QEAAXXZ)
+dshow_baseclasses.lib(wxdebug.cpp.obj) : error LNK2019: 无法解析的外部符号 __imp_timeGetTime，函数 "int __cdecl DbgCheckModuleLevel(unsigned long,unsigned long)" (?DbgCheckModuleLevel@@YAHKK@Z) 中引用了该符号
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: __cdecl CCritSec::CCritSec(void)" (??0CCritSec@@QEAA@XZ)，函数 "public: __cdecl CDynamicOutputPin::CDynamicOutputPin(char const *,class CBaseFilter *,class CCritSec *,long *,wchar_t const *)" (??0CDynamicOutputPin@@QEAA@PEBDPEAVCBaseFilter@@PEAVCCritSec@@PEAJPEB_W@Z) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2001: 无法解析的外部符号 "public: __cdecl CCritSec::CCritSec(void)" (??0CCritSec@@QEAA@XZ)
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: __cdecl CCritSec::~CCritSec(void)" (??1CCritSec@@QEAA@XZ)，函数 "public: virtual __cdecl CDynamicOutputPin::~CDynamicOutputPin(void)" (??1CDynamicOutputPin@@UEAA@XZ) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2001: 无法解析的外部符号 "public: __cdecl CCritSec::~CCritSec(void)" (??1CCritSec@@QEAA@XZ)
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2019: 无法解析的外部符号 "int __cdecl CritCheckIn(class CCritSec *)" (?CritCheckIn@@YAHPEAVCCritSec@@@Z)，函数 "protected: long __cdecl CBasePin::AttemptConnection(struct IPin *,class CMediaType const *)" (?AttemptConnection@CBasePin@@IEAAJPEAUIPin@@PEBVCMediaType@@@Z) 中引用了该符号
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2019: 无法解析的外部符号 "int __cdecl CritCheckOut(class CCritSec *)" (?CritCheckOut@@YAHPEAVCCritSec@@@Z)，函数 "public: virtual long __cdecl CDynamicOutputPin::StartUsingOutputPin(void)" (?StartUsingOutputPin@CDynamicOutputPin@@UEAAJXZ) 中引用了该符号
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2019: 无法解析的外部符号 AMGetWideString，函数 "public: virtual long __cdecl CBasePin::QueryId(wchar_t * *)" (?QueryId@CBasePin@@UEAAJPEAPEA_W@Z) 中引用了该符号
+dshow_baseclasses.lib(amfilter.cpp.obj) : error LNK2019: 无法解析的外部符号 "long __cdecl AmGetLastErrorToHResult(void)" (?AmGetLastErrorToHResult@@YAJXZ)，函数 "public: virtual long __cdecl CDynamicOutputPin::Block(unsigned long,void *)" (?Block@CDynamicOutputPin@@UEAAJKPEAX@Z) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: __cdecl CAMThread::CAMThread(long *)" (??0CAMThread@@QEAA@PEAJ@Z)，函数 "public: __cdecl CSourceStream::CSourceStream(wchar_t const *,long *,class CSource *,wchar_t const *)" (??0CSourceStream@@QEAA@PEB_WPEAJPEAVCSource@@0@Z) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: virtual __cdecl CAMThread::~CAMThread(void)" (??1CAMThread@@UEAA@XZ)，函数 "public: virtual __cdecl CSourceStream::~CSourceStream(void)" (??1CSourceStream@@UEAA@XZ) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: int __cdecl CAMThread::Create(void)" (?Create@CAMThread@@QEAAHXZ)，函数 "protected: virtual long __cdecl CSourceStream::Active(void)" (?Active@CSourceStream@@MEAAJXZ) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: unsigned long __cdecl CAMThread::CallWorker(unsigned long)" (?CallWorker@CAMThread@@QEAAKK@Z)，函数 "public: long __cdecl CSourceStream::Exit(void)" (?Exit@CSourceStream@@QEAAJXZ) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: unsigned long __cdecl CAMThread::GetRequest(void)" (?GetRequest@CAMThread@@QEAAKXZ)，函数 "protected: enum CSourceStream::Command __cdecl CSourceStream::GetRequest(void)" (?GetRequest@CSourceStream@@IEAA?AW4Command@1@XZ) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: int __cdecl CAMThread::CheckRequest(unsigned long *)" (?CheckRequest@CAMThread@@QEAAHPEAK@Z)，函数 "protected: int __cdecl CSourceStream::CheckRequest(enum CSourceStream::Command *)" (?CheckRequest@CSourceStream@@IEAAHPEAW4Command@1@@Z) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "public: void __cdecl CAMThread::Reply(unsigned long)" (?Reply@CAMThread@@QEAAXK@Z)，函数 "protected: virtual unsigned long __cdecl CSourceStream::ThreadProc(void)" (?ThreadProc@CSourceStream@@MEAAKXZ) 中引用了该符号
+dshow_baseclasses.lib(source.cpp.obj) : error LNK2019: 无法解析的外部符号 "void __cdecl IntToWstr(int,wchar_t *)" (?IntToWstr@@YAXHPEA_W@Z)，函数 "protected: virtual long __cdecl CSourceStream::QueryId(wchar_t * *)" (?QueryId@CSourceStream@@MEAAJPEAPEA_W@Z) 中引用了该符号
+src\vcam\phonecam-virtualcam.dll : fatal error LNK1120: 17 个无法解析的外部命令

@@ -39,9 +39,6 @@ class DebugActivity : AppCompatActivity() {
     }
 
     // 视图
-    private lateinit var tabLogs: TextView
-    private lateinit var tabPcp: TextView
-    private lateinit var tabQuality: TextView
     private lateinit var logScroll: ScrollView
     private lateinit var logText: TextView
     private lateinit var btnClear: Button
@@ -75,9 +72,6 @@ class DebugActivity : AppCompatActivity() {
     }
 
     private fun bindViews() {
-        tabLogs = findViewById(R.id.tabLogs)
-        tabPcp = findViewById(R.id.tabPcp)
-        tabQuality = findViewById(R.id.tabQuality)
         logScroll = findViewById(R.id.logScroll)
         logText = findViewById(R.id.logText)
         btnClear = findViewById(R.id.btnClear)
@@ -86,17 +80,6 @@ class DebugActivity : AppCompatActivity() {
     }
 
     private fun bindClickHandlers() {
-        tabPcp.setOnClickListener {
-            Toast.makeText(this, "PCP 详情 — 敬请期待 (Phase Z)", Toast.LENGTH_SHORT).show()
-        }
-        tabQuality.setOnClickListener {
-            Toast.makeText(this, "质量统计 — 敬请期待 (Phase Z)", Toast.LENGTH_SHORT).show()
-        }
-        tabLogs.setOnClickListener {
-            // 当前就是日志 tab, 无操作
-            Toast.makeText(this, "已是日志 tab", Toast.LENGTH_SHORT).show()
-        }
-
         btnClear.setOnClickListener {
             InAppLogStore.clear()
             Toast.makeText(this, getString(R.string.debug_btn_clear) + " ✓", Toast.LENGTH_SHORT).show()

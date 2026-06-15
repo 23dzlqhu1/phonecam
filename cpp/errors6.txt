@@ -1,0 +1,7 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.34
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+FAILED: src/vcam/phonecam-virtualcam.dll src/vcam/phonecam-virtualcam.lib 
+LINK : fatal error LNK1168: 无法打开 src\vcam\phonecam-virtualcam.dll 进行写入

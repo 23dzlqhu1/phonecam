@@ -1,0 +1,53 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=Camera
+ClassGuid={ca3e7ab9-b4c3-4ae6-8251-579ef933890f}
+Provider=%ProviderString%
+DriverVer=06/14/2026,1.0.0.0
+CatalogFile=PhoneCam.cat
+
+[DestinationDirs]
+DefaultDestDir=13
+
+[Manufacturer]
+%MfgName%=DeviceInstall,NTamd64
+
+[DeviceInstall.NTamd64]
+%DeviceDesc%=DeviceInstall, root\PhoneCamV0
+
+[DeviceInstall.NT]
+CopyFiles=
+
+[DeviceInstall.NT.HW]
+AddReg=DeviceReg
+
+[DeviceReg]
+HKR,,CLSID,,%ProxyVCap.CLSID%
+HKR,,FriendlyName,,%DeviceDesc%
+HKR,,CustomCaptureSourceClsid,,%CustomCaptureSource.CLSID%
+
+[DeviceInstall.NT.Interfaces]
+AddInterface=%KSCATEGORY_VIDEO_CAMERA%,%ReferenceString%,CameraInterface
+AddInterface=%KSCATEGORY_VIDEO%,%ReferenceString%,CameraInterface
+AddInterface=%KSCATEGORY_CAPTURE%,%ReferenceString%,CameraInterface
+
+[CameraInterface]
+AddReg=CameraInterfaceReg
+
+[CameraInterfaceReg]
+HKR,,CLSID,,%ProxyVCap.CLSID%
+HKR,,FriendlyName,,%DeviceDesc%
+
+[DeviceInstall.NT.Services]
+; No service needed — this is a COM-based virtual camera
+
+[Strings]
+ProviderString = "PhoneCam"
+MfgName = "PhoneCam"
+DeviceDesc = "PhoneCam Camera"
+ReferenceString = "8DA4E6F4FD61466DBCA9C8DC67DC7E78"
+ProxyVCap.CLSID = "{17cca71b-ecd7-11d0-b908-00a0c9223196}"
+CustomCaptureSource.CLSID = "{B5CA7E2A-7E4B-4C3E-9E1A-3D5F8A2C6B4E}"
+KSCATEGORY_VIDEO_CAMERA = "{e5323777-f976-4f5b-9b55-b94699c46e44}"
+KSCATEGORY_VIDEO = "{6994ad05-93ef-11d0-a3cc-00a0c9223196}"
+KSCATEGORY_CAPTURE = "{65e8773d-8f56-11d0-a3b9-00a0c9223196}"

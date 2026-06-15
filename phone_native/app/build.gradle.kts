@@ -48,6 +48,8 @@ android {
 }
 
 dependencies {
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+
     // MVP-2 批次 3：Camera2 来自 Android Framework 自带（android.hardware.camera2.*），
     // 不引入 androidx.camera；权限申请用原生 checkSelfPermission / requestPermissions
     // 不引入 androidx.core（用 AppCompatActivity 自带的 Activity 基类即可）

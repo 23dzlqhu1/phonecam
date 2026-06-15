@@ -1,0 +1,39 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.34
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+FAILED: CMakeFiles/phonecam.dir/src/vcam/shared_memory.cpp.obj 
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(74): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(84): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(85): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(86): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(88): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(91): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(152): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(153): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(157): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(158): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(162): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(163): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(164): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+FAILED: src/vcam/CMakeFiles/phonecam-virtualcam.dir/shared_memory.cpp.obj 
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(74): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(84): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(85): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(86): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(88): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(91): error C2665: “_InterlockedExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(152): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(153): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(157): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(158): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(162): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(163): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+D:\PhoneCam\cpp\src\vcam\shared_memory.cpp(164): error C2665: “_InterlockedCompareExchange”: 没有重载函数可以转换所有参数类型
+FAILED: src/vcam/CMakeFiles/phonecam-virtualcam.dir/dll_register.cpp.obj 
+D:\PhoneCam\cpp\src\vcam\dll_register.cpp(23): error C2065: “CLSID_FilterMapper2”: 未声明的标识符
+D:\PhoneCam\cpp\src\vcam\dll_register.cpp(52): error C2065: “CLSID_FilterMapper2”: 未声明的标识符
+FAILED: src/vcam/CMakeFiles/phonecam-virtualcam.dir/class_factory.cpp.obj 
+D:\PhoneCam\cpp\src\vcam\class_factory.cpp(51): error C2065: “g_cLocks”: 未声明的标识符
+D:\PhoneCam\cpp\src\vcam\class_factory.cpp(53): error C2065: “g_cLocks”: 未声明的标识符

@@ -63,9 +63,6 @@ class AboutActivity : AppCompatActivity() {
      * 3 个跳转行: 全部打开浏览器 (Android 默认 Action_VIEW 行为)
      */
     private fun bindClickHandlers() {
-        findViewById<View>(R.id.rowLicense).setOnClickListener {
-            Toast.makeText(this, "开源许可证 — Phase Y+ 后续实现", Toast.LENGTH_SHORT).show()
-        }
         findViewById<View>(R.id.rowIssues).setOnClickListener {
             openUrl(GITHUB_ISSUES_URL, "问题反馈")
         }

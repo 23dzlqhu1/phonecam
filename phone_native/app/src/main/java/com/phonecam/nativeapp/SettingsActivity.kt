@@ -36,8 +36,7 @@ class SettingsActivity : AppCompatActivity() {
         val rowId: Int,
         val titleResId: Int,
         val kind: Kind,
-        val optionsResId: Int? = null,
-        val isPlaceholder: Boolean = false
+        val optionsResId: Int? = null
     )
 
     private enum class Kind { DROPDOWN, SWITCH, NAVIGATE }
@@ -61,9 +60,6 @@ class SettingsActivity : AppCompatActivity() {
             RowDef(R.id.rowLens,         R.string.settings_title_lens,        Kind.DROPDOWN, R.array.settings_opt_lens),
             RowDef(R.id.rowResolution,   R.string.settings_title_resolution,  Kind.DROPDOWN, R.array.settings_opt_resolution),
             RowDef(R.id.rowFps,          R.string.settings_title_fps,         Kind.DROPDOWN, R.array.settings_opt_fps),
-            RowDef(R.id.rowBitrate,      R.string.settings_title_bitrate,     Kind.DROPDOWN, R.array.settings_opt_bitrate, isPlaceholder = true),
-            RowDef(R.id.rowCodec,        R.string.settings_title_codec,       Kind.DROPDOWN, R.array.settings_opt_codec,   isPlaceholder = true),
-            RowDef(R.id.rowTransport,    R.string.settings_title_transport,   Kind.DROPDOWN, R.array.settings_opt_transport, isPlaceholder = true),
             RowDef(R.id.rowPcDiscovery,  R.string.settings_title_pcdiscovery, Kind.SWITCH),
             RowDef(R.id.rowShowDebug,    R.string.settings_title_debug,       Kind.SWITCH),
             RowDef(R.id.rowConnect,      R.string.settings_title_connect,     Kind.NAVIGATE),
@@ -84,7 +80,6 @@ class SettingsActivity : AppCompatActivity() {
             val row = findViewById<View>(def.rowId) ?: continue
             val title = row.findViewById<TextView>(R.id.rowTitle)
             val value = row.findViewById<TextView>(R.id.rowValue)
-            val placeholder = row.findViewById<TextView>(R.id.rowPlaceholder)
             val arrow = row.findViewById<View>(R.id.rowArrow)
             val sw = row.findViewById<Switch>(R.id.rowSwitch)
 
@@ -94,21 +89,16 @@ class SettingsActivity : AppCompatActivity() {
                 Kind.DROPDOWN -> {
                     arrow.visibility = View.VISIBLE
                     value.visibility = View.VISIBLE
-                    placeholder.visibility = if (def.isPlaceholder) View.VISIBLE else View.GONE
-                    if (def.isPlaceholder) {
-                        placeholder.text = getString(R.string.settings_placeholder_stream)
-                    }
                     val options = resources.getStringArray(def.optionsResId!!).toList()
                     value.text = currentValueFor(def.titleResId, options)
 
                     row.setOnClickListener {
-                        showPicker(def.titleResId, def.optionsResId!!, def.isPlaceholder)
+                        showPicker(def.titleResId, def.optionsResId!!)
                     }
                 }
                 Kind.SWITCH -> {
                     arrow.visibility = View.GONE
                     value.visibility = View.GONE
-                    placeholder.visibility = View.GONE
                     sw.visibility = View.VISIBLE
                     sw.isChecked = currentSwitchFor(def.titleResId)
                     sw.setOnCheckedChangeListener { _, checked ->
@@ -118,7 +108,6 @@ class SettingsActivity : AppCompatActivity() {
                 Kind.NAVIGATE -> {
                     arrow.visibility = View.VISIBLE
                     value.visibility = View.GONE
-                    placeholder.visibility = View.GONE
                     row.setOnClickListener {
                         when (def.titleResId) {
                             R.string.settings_title_connect   -> startActivity(Intent(this, ConnectActivity::class.java))
@@ -164,21 +153,11 @@ class SettingsActivity : AppCompatActivity() {
     /**
      * 弹单选对话框 (原生 AlertDialog, 不引 BottomSheet)
      */
-    private fun showPicker(titleResId: Int, optionsResId: Int, isPlaceholder: Boolean) {
+    private fun showPicker(titleResId: Int, optionsResId: Int) {
         val options = resources.getStringArray(optionsResId).toList()
         val title = getString(R.string.settings_dialog_title) + " — " + getString(titleResId)
         val currentValue = currentValueFor(titleResId, options)
         val currentIndex = options.indexOf(currentValue).coerceAtLeast(0)
-
-        if (isPlaceholder) {
-            // 待实现项: 不让改, 仅提示
-            AlertDialog.Builder(this)
-                .setTitle(getString(titleResId))
-                .setMessage(R.string.settings_placeholder_stream)
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-            return
-        }
 
         AlertDialog.Builder(this)
             .setTitle(title)

@@ -61,7 +61,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: ImageButton
     private lateinit var btnToggle: ImageButton
     private lateinit var btnPush: Button
-    private lateinit var pushIndicator: View
     private lateinit var footerText: TextView
     private lateinit var errorPlaceholder: LinearLayout
     private lateinit var errorTitle: TextView
@@ -70,6 +69,8 @@ class MainActivity : AppCompatActivity() {
 
     // --- 业务引用 ---
     private var cameraController: CameraController? = null
+    // HIGH-4 fix: save BroadcastReceiver reference for unregister in onDestroy
+    private var streamReceiver: BroadcastReceiver? = null
 
     // --- 设置 (Phase Y-1 加) ---
     private lateinit var settings: SettingsStore
@@ -131,7 +132,6 @@ class MainActivity : AppCompatActivity() {
         btnSettings = findViewById(R.id.btnSettings)
         btnToggle = findViewById(R.id.btnToggle)
         btnPush = findViewById(R.id.btnPush)
-        pushIndicator = findViewById(R.id.pushIndicator)
         footerText = findViewById(R.id.footerText)
         errorPlaceholder = findViewById(R.id.errorPlaceholder)
         errorTitle = findViewById(R.id.errorTitle)
@@ -182,7 +182,8 @@ class MainActivity : AppCompatActivity() {
             addAction("com.phonecam.START_STREAMING")
             addAction("com.phonecam.STOP_STREAMING")
         }
-        val streamReceiver = object : BroadcastReceiver() {
+        // HIGH-4 fix: save as field so we can unregister in onDestroy
+        streamReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 when (intent.action) {
                     "com.phonecam.START_STREAMING" -> {
@@ -278,15 +279,12 @@ class MainActivity : AppCompatActivity() {
         if (snap.isStarting) {
             btnPush.text = "连接中 (等 PC).."
             btnPush.isEnabled = false
-            pushIndicator.visibility = View.GONE
         } else if (snap.isActive) {
             btnPush.text = getString(R.string.layer_c_btn_stop)
             btnPush.isEnabled = true
-            pushIndicator.visibility = View.VISIBLE
         } else {
             btnPush.text = getString(R.string.layer_c_btn_start)
             btnPush.isEnabled = true
-            pushIndicator.visibility = View.GONE
         }
     }
 
@@ -319,6 +317,11 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopFooterTick()
+        // HIGH-4 fix: unregister broadcast receiver to avoid leak on Android 14+
+        streamReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+            streamReceiver = null
+        }
     }
 
     /**

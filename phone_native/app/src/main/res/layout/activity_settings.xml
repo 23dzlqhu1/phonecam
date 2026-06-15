@@ -1,13 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  activity_settings.xml — Settings 主页 (Phase Y-1)
-  来源: specs/features/app-architecture-B-multiscreen.md §4.2
-
-  4 分区 + 9 行 + 1 关于跳转 + 底部版本号
-  全部用 LinearLayout 垂直堆叠, 不依赖 RecyclerView (零学习成本)
--->
+<!-- SCI 仪器风格设置页 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/settingsScroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_oled"
@@ -20,110 +13,54 @@
         android:paddingTop="8dp"
         android:paddingBottom="24dp">
 
-        <!-- ============== 分区 1: 📷 相机 ============== -->
+        <!-- 相机 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingHorizontal="@dimen/settings_row_padding"
-            android:paddingVertical="@dimen/settings_section_padding"
-            android:textSize="@dimen/settings_text_title"
-            android:textColor="@color/text_secondary"
-            android:textStyle="bold"
-            android:textAllCaps="false"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp"
+            android:textSize="11sp"
+            android:textColor="@color/text_disabled"
+            android:textAllCaps="true"
+            android:letterSpacing="0.05"
             android:text="@string/settings_section_camera" />
 
-        <include
-            android:id="@+id/rowLens"
-            layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowLens" layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowResolution" layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowFps" layout="@layout/item_settings_row" />
 
-        <include
-            android:id="@+id/rowResolution"
-            layout="@layout/item_settings_row" />
-
-        <include
-            android:id="@+id/rowFps"
-            layout="@layout/item_settings_row" />
-
-        <!-- ============== 分区 2: 📡 推流 ============== -->
+        <!-- 连接 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingHorizontal="@dimen/settings_row_padding"
-            android:paddingVertical="@dimen/settings_section_padding"
-            android:textSize="@dimen/settings_text_title"
-            android:textColor="@color/text_secondary"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:text="@string/settings_section_stream" />
-
-        <include
-            android:id="@+id/rowBitrate"
-            layout="@layout/item_settings_row" />
-
-        <include
-            android:id="@+id/rowCodec"
-            layout="@layout/item_settings_row" />
-
-        <!-- ============== 分区 3: 🔗 连接 ============== -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingHorizontal="@dimen/settings_row_padding"
-            android:paddingVertical="@dimen/settings_section_padding"
-            android:textSize="@dimen/settings_text_title"
-            android:textColor="@color/text_secondary"
-            android:textStyle="bold"
-            android:textAllCaps="false"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp"
+            android:textSize="11sp"
+            android:textColor="@color/text_disabled"
+            android:textAllCaps="true"
+            android:letterSpacing="0.05"
             android:text="@string/settings_section_connect" />
 
-        <include
-            android:id="@+id/rowTransport"
-            layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowPcDiscovery" layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowConnect" layout="@layout/item_settings_row" />
 
-        <include
-            android:id="@+id/rowPcDiscovery"
-            layout="@layout/item_settings_row" />
-
-        <!-- ============== 分区 4: 🛠 调试 ============== -->
+        <!-- 调试 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingHorizontal="@dimen/settings_row_padding"
-            android:paddingVertical="@dimen/settings_section_padding"
-            android:textSize="@dimen/settings_text_title"
-            android:textColor="@color/text_secondary"
-            android:textStyle="bold"
-            android:textAllCaps="false"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp"
+            android:textSize="11sp"
+            android:textColor="@color/text_disabled"
+            android:textAllCaps="true"
+            android:letterSpacing="0.05"
             android:text="@string/settings_section_debug" />
 
-        <include
-            android:id="@+id/rowShowDebug"
-            layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowShowDebug" layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowDebug" layout="@layout/item_settings_row" />
+        <include android:id="@+id/rowAbout" layout="@layout/item_settings_row" />
 
-        <!-- ============== 跳转: 连接 PC (Phase Y-2 加) ============== -->
-        <include
-            android:id="@+id/rowConnect"
-            layout="@layout/item_settings_row" />
-
-        <!-- ============== 跳转: 调试页 (Phase Y-4 加) ============== -->
-        <include
-            android:id="@+id/rowDebug"
-            layout="@layout/item_settings_row" />
-
-        <!-- ============== 关于 (跳转行) ============== -->
-        <include
-            android:id="@+id/rowAbout"
-            layout="@layout/item_settings_row" />
-
-        <!-- 1px 分隔线 (顶部) -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/hairline_height"
-            android:layout_marginHorizontal="@dimen/settings_row_padding"
-            android:background="@color/hairline"
-            android:visibility="invisible" />
-
-        <!-- ============== 底部版本号 ============== -->
+        <!-- 版本号 -->
         <TextView
             android:id="@+id/footerVersion"
             android:layout_width="match_parent"
@@ -131,7 +68,7 @@
             android:layout_marginTop="24dp"
             android:gravity="center"
             android:fontFamily="monospace"
-            android:textSize="@dimen/settings_text_footer"
+            android:textSize="11sp"
             android:textColor="@color/text_disabled" />
     </LinearLayout>
 </ScrollView>
