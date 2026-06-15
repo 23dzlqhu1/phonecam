@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SCI 仪器风格 — 连接状态页 -->
+<!--
+  activity_connect.xml — Connect 主页 (Phase Y-2)
+  来源: specs/features/app-architecture-B-multiscreen.md §4.3
+
+  4 区块 (垂直 ScrollView):
+    1) 当前状态: 大状态指示
+    2) 方式 A: 扫码 - QR 240x240 + IP
+    3) 方式 B: 手动输入 - IP + 端口 + 连接
+    4) 已连接设备: 空态
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/connectScroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_oled"
@@ -10,22 +20,32 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="16dp">
 
-        <!-- 状态卡片 -->
+        <!-- ============== 1. 当前状态 ============== -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:textAllCaps="false"
+            android:text="@string/connect_status_indicator" />
+
         <LinearLayout
             android:id="@+id/statusBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="@color/surface_1"
+            android:background="@drawable/bg_card"
             android:padding="20dp"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="20dp">
 
             <View
                 android:id="@+id/statusBigDot"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
                 android:background="@drawable/dot_inactive" />
 
             <TextView
@@ -33,19 +53,183 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:textSize="20sp"
+                android:textSize="22sp"
                 android:textColor="@color/text_primary"
                 android:textStyle="bold"
-                android:text="未推流" />
+                android:textAllCaps="false"
+                android:text="@string/connect_status_disconnected" />
 
             <TextView
                 android:id="@+id/statusBigHint"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="4dp"
                 android:textSize="13sp"
                 android:textColor="@color/text_secondary"
-                android:text="" />
+                android:textAllCaps="false"
+                android:text="@string/connect_status_disconnected_hint" />
         </LinearLayout>
+
+        <!-- ============== 2. 方式 A: 扫码 ============== -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:textAllCaps="false"
+            android:text="@string/connect_method_qr_title" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="20dp"
+            android:gravity="center_horizontal"
+            android:layout_marginBottom="20dp">
+
+            <!-- QR 240x240 占位框 (Phase Z 替换为真实 QR) -->
+            <FrameLayout
+                android:layout_width="240dp"
+                android:layout_height="240dp"
+                android:background="@drawable/bg_qr_placeholder">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:textSize="32sp"
+                    android:textColor="@color/text_disabled"
+                    android:textStyle="bold"
+                    android:textAllCaps="false"
+                    android:text="@string/connect_qr_placeholder" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/qrIp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"
+                android:text="@string/connect_qr_ip_unknown" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:textSize="11sp"
+                android:textColor="@color/text_disabled"
+                android:textAllCaps="false"
+                android:text="@string/connect_qr_not_implemented" />
+        </LinearLayout>
+
+        <!-- ============== 3. 方式 B: 手动输入 ============== -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:textAllCaps="false"
+            android:text="@string/connect_method_manual_title" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="20dp"
+            android:layout_marginBottom="20dp">
+
+            <!-- IP 输入 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"
+                android:text="@string/connect_field_ip" />
+
+            <EditText
+                android:id="@+id/inputIp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:padding="12dp"
+                android:background="@drawable/bg_input"
+                android:hint="192.168.1.10"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_disabled"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:inputType="text"
+                android:singleLine="true"
+                android:importantForAutofill="no" />
+
+            <!-- 端口输入 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"
+                android:text="@string/connect_field_port" />
+
+            <EditText
+                android:id="@+id/inputPort"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:padding="12dp"
+                android:background="@drawable/bg_input"
+                android:hint="7878"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_disabled"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:inputType="number"
+                android:singleLine="true"
+                android:importantForAutofill="no" />
+
+            <!-- 连接按钮 -->
+            <Button
+                android:id="@+id/btnConnect"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/btn_pill_primary"
+                android:textColor="@color/text_on_brand"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:text="@string/connect_btn" />
+        </LinearLayout>
+
+        <!-- ============== 4. 已连接设备 (空态) ============== -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:textAllCaps="false"
+            android:text="@string/connect_devices_title" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_card"
+            android:padding="20dp"
+            android:gravity="center"
+            android:textSize="13sp"
+            android:textColor="@color/text_disabled"
+            android:textAllCaps="false"
+            android:text="@string/connect_devices_empty" />
     </LinearLayout>
 </ScrollView>

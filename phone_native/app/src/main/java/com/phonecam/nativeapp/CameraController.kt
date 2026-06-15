@@ -65,8 +65,8 @@ class CameraController(
     @Volatile private var targetResolutionPref: String = "720p"
 
     // 相机资源（运行时由 open() 赋值，close() 释放）
-    @Volatile private var cameraDevice: CameraDevice? = null
-    @Volatile private var captureSession: CameraCaptureSession? = null
+    private var cameraDevice: CameraDevice? = null
+    private var captureSession: CameraCaptureSession? = null
 
     // 相机后台线程（必须独立于 UI 线程）
     private var cameraThread: HandlerThread? = null
@@ -178,17 +178,9 @@ class CameraController(
      * 启动相机：开后台线程 + 等 surface 就绪后调 openInternal()
      */
     fun open() {
-        // 如果 CameraThread 存在但已死（close() 正在 join），等待它结束
-        val existingThread = cameraThread
-        if (existingThread != null) {
-            if (existingThread.isAlive) {
-                Log.d(TAG, "open() called but cameraThread already running, skip")
-                return
-            }
-            // Thread 存在但已死，清理残留
-            Log.w(TAG, "open() found dead cameraThread, cleaning up")
-            cameraThread = null
-            cameraHandler = null
+        if (cameraThread != null) {
+            Log.d(TAG, "open() called but cameraThread already running, skip")
+            return
         }
         Log.d(TAG, "open: start camera thread")
         released = false
@@ -219,11 +211,6 @@ class CameraController(
 
     /**
      * 关闭相机：必须在 UI 线程（onPause）调用
-     *
-     * 修复 Camera2 生命周期竞态：
-     *   close() 可能在 openCamera() 异步回调到达之前杀掉 CameraThread,
-     *   导致 "Handler sending message to a Handler on a dead thread" 错误。
-     *   解法：先关 camera（等待异步回调完成），再杀线程。
      */
     fun close() {
         Log.d(TAG, "close")
@@ -232,7 +219,6 @@ class CameraController(
         // 停用设备方向监听
         orientationListener.disable()
 
-        // 1. 先关 CaptureSession（同步，会等待正在进行的 capture 完成）
         try {
             captureSession?.close()
         } catch (e: Exception) {
@@ -240,8 +226,6 @@ class CameraController(
         }
         captureSession = null
 
-        // 2. 关 CameraDevice（异步：会触发 onDisconnected 回调）
-        //    关闭后 camera 框架不再往 handler post 新回调
         try {
             cameraDevice?.close()
         } catch (e: Exception) {
@@ -249,16 +233,14 @@ class CameraController(
         }
         cameraDevice = null
 
-        // 3. 释放 ImageReader
-        // 注意: 不清 imageListener — 保留闭包引用, 这样 close→open 后
-        // startListenerRetryLoop 能自动重建 ImageReader (G-027: 送帧 0fps 修复)
-        pendingListenerRetry = true  // 标记: 下次 open() 需要重建 ImageReader
+        // 批次 3.2.0.2: 释放 ImageReader
         try {
             imageReader?.close()
         } catch (e: Exception) {
             Log.w(TAG, "close imageReader error: ${e.message}")
         }
         imageReader = null
+        imageListener = null
         imageReaderThread?.quitSafely()
         try {
             imageReaderThread?.join(500)
@@ -268,11 +250,9 @@ class CameraController(
         imageReaderThread = null
         imageReaderHandler = null
 
-        // 4. 最后杀 CameraThread（camera 已关闭，不会再有新回调）
-        //    用 quitSafely + join 等待已排队的消息处理完
         cameraThread?.quitSafely()
         try {
-            cameraThread?.join(1000)  // 等待 1s（原来是 500ms，给更多时间处理残留回调）
+            cameraThread?.join(500)
         } catch (e: InterruptedException) {
             Log.w(TAG, "join thread interrupted")
         }
@@ -489,21 +469,8 @@ class CameraController(
 
     /**
      * 真正的打开流程（必须在 cameraHandler 线程跑）
-     * 用 try-catch 包裹，防止未捕获异常导致 CameraThread 崩溃
      */
     private fun openInternal() {
-        if (released) {
-            Log.d(TAG, "openInternal: already released, abort")
-            return
-        }
-        try {
-            openInternalUnsafe()
-        } catch (e: Exception) {
-            Log.e(TAG, "openInternal: uncaught exception, camera thread survived", e)
-        }
-    }
-
-    private fun openInternalUnsafe() {
         if (released) {
             Log.d(TAG, "openInternal: already released, abort")
             return
@@ -537,27 +504,18 @@ class CameraController(
         Log.d(TAG, "sensorActiveRect=$sensorActiveRect")
         texture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
-        // 3. 限制 TextureView 高度为 16:9 比例，居中显示
+        // 3. 算 letterbox transform（防止 16:9 预览被拉伸到 9:19.5 屏幕）
         val viewW = textureView.width
-        if (viewW > 0) {
-            val targetH = viewW * previewSize.height / previewSize.width
-            val parent = textureView.parent as? android.view.View
-            if (parent != null) {
-                textureView.post {
-                    val lp = textureView.layoutParams
-                    lp.height = targetH
-                    textureView.layoutParams = lp
-                    textureView.requestLayout()
-                }
-            }
-            applyTransform(previewSize.width, previewSize.height, viewW, targetH)
+        val viewH = textureView.height
+        if (viewW > 0 && viewH > 0) {
+            applyTransform(previewSize.width, previewSize.height, viewW, viewH)
         }
 
         val previewSurface = Surface(texture)
 
         try {
             // 4. 打开 camera
-            InAppLogStore.i(TAG, "camera opening: id=$targetId")
+            InAppLogStore.i(TAG, "camera opened: id=$targetId")
             cm.openCamera(targetId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     // 如果在 openCamera 异步过程中用户已 close 释放，这里就不再把 camera 存起来
@@ -567,23 +525,18 @@ class CameraController(
                         return
                     }
                     cameraDevice = camera
-                    try {
-                        startPreviewInternal(camera, previewSurface, handler)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "startPreviewInternal failed in onOpened", e)
-                        try { camera.close() } catch (_: Exception) {}
-                    }
+                    startPreviewInternal(camera, previewSurface, handler)
                 }
 
                 override fun onDisconnected(camera: CameraDevice) {
                     Log.w(TAG, "camera disconnected")
-                    try { camera.close() } catch (_: Exception) {}
+                    camera.close()
                     if (cameraDevice === camera) cameraDevice = null
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
                     Log.e(TAG, "camera onError: $error")
-                    try { camera.close() } catch (_: Exception) {}
+                    camera.close()
                     if (cameraDevice === camera) cameraDevice = null
                 }
             }, handler)
@@ -667,38 +620,31 @@ class CameraController(
     }
 
     /**
-     * 把 TextureView 渲染成"居中填满 (CENTER_CROP)"
+     * 把 TextureView 渲染成"顶对齐 FIT (letterbox)"
      *
      * 行为：
-     *  - scale = max(viewW/previewW, viewH/previewH)  → 画面填满整个区域，可能裁切边缘
-     *  - dx = (viewW - previewW * scale) / 2  → 水平居中
-     *  - dy = (viewH - previewH * scale) / 2  → 垂直居中
+     *  - scale = min(viewW/previewW, viewH/previewH)  → 画面保持原始宽高比, 不会变形
+     *  - dx = (viewW - previewW * scale) / 2  → 水平居中 (通常为 0, 因为 16:9 预览正好填满 9:19.5 屏宽)
+     *  - dy = 0                                → 画面顶对齐 (相机画面在屏幕上方, 下方留空)
+     *
+     * 为什么要顶对齐而不是居中？
+     *  - phone_native 是 "phone cam" (手机当摄像头用), 用户看手机屏幕找画面 / 框定场景
+     *  - 画面贴在屏幕顶部符合 "viewfinder" 习惯 (相机应用都用顶对齐)
+     *  - 屏幕下方留空可以后续放控制按钮 / 信息条
+     *
+     * 注意：setTransform 必须在 UI 线程调用，所以这里用 textureView.post 跨线程调度。
+     * 无论是被 onSurfaceTextureAvailable（UI 线程）还是 openInternal（相机线程）调用，都安全。
      */
     private fun applyTransform(previewW: Int, previewH: Int, viewW: Int, viewH: Int) {
         if (previewW <= 0 || previewH <= 0 || viewW <= 0 || viewH <= 0) return
-        // Use maxOf for CENTER_CROP so it fills the whole screen, eliminating black borders.
-        // Wait, previewW and previewH are usually landscape (e.g. 1920x1080) while viewW/H are portrait (1080x2400).
-        // The display orientation is rotated 90 degrees by the camera pipeline usually, or the matrix handles it.
-        // Let's just change minOf to maxOf if we want CENTER_CROP, but let's preserve the original dimension matching first.
-        val scaleX = viewW.toFloat() / previewW.toFloat()
-        val scaleY = viewH.toFloat() / previewH.toFloat()
-        val isPortrait = viewH > viewW
-        val isPreviewPortrait = previewH > previewW
-        val actualScale: Float
-        if (isPortrait != isPreviewPortrait) {
-            // Rotated
-            actualScale = maxOf(viewW.toFloat() / previewH.toFloat(), viewH.toFloat() / previewW.toFloat())
-        } else {
-            actualScale = maxOf(scaleX, scaleY)
-        }
-        val scale = actualScale
+        val scale = minOf(viewW.toFloat() / previewW.toFloat(), viewH.toFloat() / previewH.toFloat())
         val dx = (viewW - previewW * scale) / 2f
-        val dy = (viewH - previewH * scale) / 2f
+        val dy = 0f  // 顶对齐: 画面贴在屏幕顶部
         val matrix = Matrix().apply {
             setScale(scale, scale)
             postTranslate(dx, dy)
         }
-        Log.d(TAG, "applyTransform (FIT, center): preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
+        Log.d(TAG, "applyTransform (FIT, top): preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
         textureView.post { textureView.setTransform(matrix) }
     }
 

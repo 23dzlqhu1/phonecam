@@ -1,9 +1,0 @@
-**********************************************************************
-** Visual Studio 2022 Developer Command Prompt v17.14.34
-** Copyright (c) 2025 Microsoft Corporation
-**********************************************************************
-[vcvarsall.bat] Environment initialized for: 'x64'
-用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.44.35228 版
-版权所有(C) Microsoft Corporation。保留所有权利。
-
-dll_main.cpp

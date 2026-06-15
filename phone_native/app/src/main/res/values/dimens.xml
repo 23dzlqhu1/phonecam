@@ -15,9 +15,9 @@
     <dimen name="layer_d_height">40dp</dimen>
 
     <!-- ============== 推流按钮 (Layer C) ============== -->
-    <dimen name="btn_push_height">44dp</dimen>
-    <dimen name="btn_push_width_percent">60%</dimen>
-    <dimen name="btn_push_corner">22dp</dimen>          <!-- pill 圆角 (高度的一半) -->
+    <dimen name="btn_push_height">64dp</dimen>
+    <dimen name="btn_push_width_percent">60%</dimen>   <!-- 实际用 layout_width=0dp + weight=60 实现 -->
+    <dimen name="btn_push_corner">16dp</dimen>          <!-- pill 圆角 -->
 
     <!-- ============== 状态点 (Layer B) ============== -->
     <dimen name="status_dot_size">8dp</dimen>

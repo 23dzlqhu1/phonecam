@@ -42,8 +42,8 @@ class TcpStreamServer(
 
     @Volatile private var running = false
     @Volatile private var clientSocket: Socket? = null
-    @Volatile private var serverSocket: ServerSocket? = null
-    @Volatile private var acceptThread: Thread? = null
+    private var serverSocket: ServerSocket? = null
+    private var acceptThread: Thread? = null
 
     /**
      * 启动 accept 循环 (非阻塞, 立刻返回)
@@ -61,30 +61,17 @@ class TcpStreamServer(
         running = true
         acceptThread = Thread({
             try {
-                // 1) 循环尝试 Client 模式连接 PC（解决启动顺序问题）
-                //    不管 PC 先启动还是手机先启动，都能连上
+                // 1) 尝试作为 Client 连接 127.0.0.1:9999 (适用于 adb reverse 模式)
                 var connectedAsClient = false
-                val clientRetryDeadline = System.currentTimeMillis() + 30_000  // 最多重试 30 秒
-                var clientRetryCount = 0
-
-                while (running && !connectedAsClient && System.currentTimeMillis() < clientRetryDeadline) {
-                    clientRetryCount++
-                    try {
-                        if (clientRetryCount == 1) {
-                            onEvent("[TCP] 正在尝试连接 PC (127.0.0.1:$port)...")
-                        }
-                        val socket = Socket()
-                        socket.tcpNoDelay = true   // 性能优化：关闭 Nagle 算法，立刻发包降低延迟
-                        socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 2000)
-                        clientSocket = socket
-                        connectedAsClient = true
-                        onEvent("[TCP] 已连接 PC: ${socket.remoteSocketAddress}")
-                    } catch (e: Exception) {
-                        if (clientRetryCount <= 2) {
-                            onEvent("[TCP] PC 未就绪，3 秒后重试...")
-                        }
-                        Thread.sleep(3000)
-                    }
+                try {
+                    onEvent("[TCP] 正在尝试 Client 模式连接 127.0.0.1:$port ...")
+                    val socket = Socket()
+                    socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 1000)
+                    clientSocket = socket
+                    connectedAsClient = true
+                    onEvent("[TCP] Client 模式连接成功: ${socket.remoteSocketAddress}")
+                } catch (e: Exception) {
+                    onEvent("[TCP] Client 模式连接失败: ${e.message}，降级为 Server 模式")
                 }
 
                 if (connectedAsClient) {
@@ -103,7 +90,6 @@ class TcpStreamServer(
                             if (!running) break
                             try {
                                 val socket = Socket()
-                                socket.tcpNoDelay = true
                                 socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 2000)
                                 clientSocket = socket
                                 onEvent("[TCP] Client 模式重连成功: ${socket.remoteSocketAddress}")
@@ -124,10 +110,7 @@ class TcpStreamServer(
                     return@Thread
                 }
 
-                // 2) 30 秒内未连上 PC → 降级为 Server 模式（WiFi 热点场景）
-                if (!connectedAsClient) {
-                    onEvent("[TCP] 30 秒内未连上 PC，切换为等待模式")
-                }
+                // 2) 降级为 Server 模式 (适用于 WiFi 模式)
                 // 批次 3.2.0.3f: 用 bind() + setReuseAddress(true), 避免上次连接 TIME_WAIT (60s) 内 bind 同端口失败
                 //  ServerSocket(port) 旧构造不暴露底层 SO_REUSEADDR
                 serverSocket = java.net.ServerSocket()
@@ -137,7 +120,7 @@ class TcpStreamServer(
                 // 批次 3.2.0.3h-A1: 接受循环持续, 一个 client 断开后立即接下一个
                 while (running) {
                     val client: Socket = try {
-                        serverSocket!!.accept().apply { tcpNoDelay = true }  // 阻塞, 等客人进门
+                        serverSocket!!.accept()  // 阻塞, 等客人进门
                     } catch (e: Exception) {
                         if (running) {
                             onEvent("[3.2.0.3h] accept 异常: ${e.javaClass.simpleName}: ${e.message}")
@@ -249,8 +232,6 @@ class TcpStreamServer(
         running = false
         try { serverSocket?.close() } catch (_: Exception) {}
         try { clientSocket?.close() } catch (_: Exception) {}
-        // HIGH-5 fix: join acceptThread to ensure clean shutdown
-        try { acceptThread?.join(3000) } catch (_: Exception) {}
         serverSocket = null
         clientSocket = null
         acceptThread = null

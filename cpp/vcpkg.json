@@ -1,8 +1,0 @@
-{
-  "name": "phonecam",
-  "version": "2.0.0",
-  "dependencies": [
-    "qtbase",
-    "ffmpeg"
-  ]
-}

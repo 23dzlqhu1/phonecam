@@ -1,36 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SCI 仪器风格设置行 -->
+<!--
+  item_settings_row.xml — Settings 单行模板 (Phase Y-1)
+  结构: 标题 (左) | 占位/当前值 (中右) | 箭头/开关 (右)
+  被 activity_settings.xml 用 <include> 引用
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="48dp"
+    android:layout_height="@dimen/settings_row_height"
     android:background="?attr/selectableItemBackground"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingHorizontal="16dp"
+    android:paddingHorizontal="@dimen/settings_row_padding"
     android:clickable="true"
     android:focusable="true">
 
+    <!-- 标题 -->
     <TextView
         android:id="@+id/rowTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:textSize="14sp"
-        android:textColor="@color/text_primary" />
+        android:textSize="@dimen/settings_text_title"
+        android:textColor="@color/text_primary"
+        android:textStyle="bold"
+        android:textAllCaps="false" />
 
+    <!-- 当前值 (字符串) -->
     <TextView
         android:id="@+id/rowValue"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginEnd="12dp"
-        android:textSize="13sp"
-        android:textColor="@color/text_secondary" />
+        android:textSize="@dimen/settings_text_value"
+        android:textColor="@color/text_secondary"
+        android:textAllCaps="false" />
+
+    <!-- 箭头 / 占位 / 开关 (默认隐藏, Activity 按行类型动态显示其中之一) -->
+    <TextView
+        android:id="@+id/rowPlaceholder"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="@dimen/settings_text_placeholder"
+        android:textColor="@color/text_disabled"
+        android:textAllCaps="false"
+        android:visibility="gone" />
 
     <ImageView
         android:id="@+id/rowArrow"
-        android:layout_width="16dp"
-        android:layout_height="16dp"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
         android:src="@drawable/ic_chevron_right"
+        android:contentDescription="@null"
         android:visibility="gone" />
 
     <Switch
@@ -38,6 +58,6 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:thumbTint="@color/brand_cyan"
-        android:trackTint="@color/hairline"
+        android:trackTint="@color/surface_1"
         android:visibility="gone" />
 </LinearLayout>

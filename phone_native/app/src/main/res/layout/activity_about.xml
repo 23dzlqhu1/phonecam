@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SCI 仪器风格 — 关于页 -->
+<!--
+  activity_about.xml — About 页 (Phase Y-3 完整)
+  来源: specs/features/app-architecture-B-multiscreen.md §4.4
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -14,19 +17,20 @@
         android:paddingVertical="32dp"
         android:gravity="center_horizontal">
 
-        <!-- Logo -->
+        <!-- ============== 顶部 Logo + 名字 + 版本 ============== -->
         <View
-            android:layout_width="72dp"
-            android:layout_height="72dp"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
             android:background="@drawable/ic_error_camera" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textSize="22sp"
+            android:layout_marginTop="16dp"
+            android:textSize="28sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
+            android:textAllCaps="false"
             android:text="PhoneCam" />
 
         <TextView
@@ -36,41 +40,47 @@
             android:layout_marginTop="4dp"
             android:fontFamily="monospace"
             android:textSize="12sp"
-            android:textColor="@color/text_secondary" />
+            android:textColor="@color/text_secondary"
+            android:textAllCaps="false" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:textSize="13sp"
+            android:textSize="14sp"
             android:textColor="@color/text_secondary"
+            android:textAllCaps="false"
             android:text="@string/about_intro" />
 
-        <!-- 分隔线 -->
+        <!-- ============== 分隔线 1 ============== -->
         <View
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginVertical="20dp"
+            android:layout_height="@dimen/hairline_height"
+            android:layout_marginVertical="24dp"
             android:background="@color/hairline" />
 
-        <!-- 信息行 -->
+        <!-- ============== 信息行 (作者/仓库/许可) ============== -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingVertical="6dp">
+            android:paddingVertical="8dp">
+
             <TextView
-                android:layout_width="60dp"
+                android:layout_width="80dp"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="@color/text_disabled"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"
                 android:text="作者" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textColor="@color/text_primary"
+                android:textAllCaps="false"
                 android:text="23dzlqhu1" />
         </LinearLayout>
 
@@ -78,19 +88,23 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingVertical="6dp">
+            android:paddingVertical="8dp">
+
             <TextView
-                android:layout_width="60dp"
+                android:layout_width="80dp"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="@color/text_disabled"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"
                 android:text="仓库" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textColor="@color/brand_cyan"
+                android:textAllCaps="false"
                 android:text="github.com/23dzlqhu1/PhoneCam" />
         </LinearLayout>
 
@@ -98,80 +112,129 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingVertical="6dp">
+            android:paddingVertical="8dp">
+
             <TextView
-                android:layout_width="60dp"
+                android:layout_width="80dp"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="@color/text_disabled"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"
                 android:text="许可" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textColor="@color/text_primary"
+                android:textAllCaps="false"
                 android:text="MIT" />
         </LinearLayout>
 
-        <!-- 分隔线 -->
+        <!-- ============== 分隔线 2 ============== -->
         <View
             android:layout_width="match_parent"
-            android:layout_height="1dp"
+            android:layout_height="@dimen/hairline_height"
             android:layout_marginVertical="16dp"
             android:background="@color/hairline" />
 
-        <!-- 跳转行 -->
+        <!-- ============== 跳转行 ============== -->
         <LinearLayout
-            android:id="@+id/rowIssues"
+            android:id="@+id/rowLicense"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="@dimen/settings_row_height"
             android:background="?attr/selectableItemBackground"
+            android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingHorizontal="4dp"
+            android:paddingHorizontal="@dimen/settings_row_padding"
             android:clickable="true"
             android:focusable="true">
+
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="14sp"
+                android:textSize="@dimen/settings_text_title"
                 android:textColor="@color/text_primary"
-                android:text="问题反馈" />
+                android:textAllCaps="false"
+                android:text="📜  开源许可证" />
+
             <ImageView
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:src="@drawable/ic_chevron_right" />
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_chevron_right"
+                android:contentDescription="@null" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/rowIssues"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/settings_row_height"
+            android:background="?attr/selectableItemBackground"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="@dimen/settings_row_padding"
+            android:clickable="true"
+            android:focusable="true">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="@dimen/settings_text_title"
+                android:textColor="@color/text_primary"
+                android:textAllCaps="false"
+                android:text="💬  问题反馈" />
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_chevron_right"
+                android:contentDescription="@null" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/rowDocs"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="@dimen/settings_row_height"
             android:background="?attr/selectableItemBackground"
+            android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingHorizontal="4dp"
+            android:paddingHorizontal="@dimen/settings_row_padding"
             android:clickable="true"
             android:focusable="true">
+
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="14sp"
+                android:textSize="@dimen/settings_text_title"
                 android:textColor="@color/text_primary"
-                android:text="使用文档" />
+                android:textAllCaps="false"
+                android:text="📖  使用文档" />
+
             <ImageView
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:src="@drawable/ic_chevron_right" />
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_chevron_right"
+                android:contentDescription="@null" />
         </LinearLayout>
 
-        <!-- 版权 -->
+        <!-- ============== 分隔线 3 ============== -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/hairline_height"
+            android:layout_marginVertical="16dp"
+            android:background="@color/hairline" />
+
+        <!-- ============== 版权 ============== -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:textSize="10sp"
+            android:layout_marginTop="8dp"
+            android:textSize="11sp"
             android:textColor="@color/text_disabled"
+            android:textAllCaps="false"
             android:text="@string/about_copyright" />
     </LinearLayout>
 </ScrollView>

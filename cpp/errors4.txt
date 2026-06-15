@@ -1,7 +1,0 @@
-**********************************************************************
-** Visual Studio 2022 Developer Command Prompt v17.14.34
-** Copyright (c) 2025 Microsoft Corporation
-**********************************************************************
-[vcvarsall.bat] Environment initialized for: 'x64'
-FAILED: src/vcam/CMakeFiles/phonecam-virtualcam.dir/dll_register.cpp.obj 
-D:\PhoneCam\cpp\src\vcam\dll_register.cpp(35): error C2086: °∞wchar_t dllPath[260]°±: ÷ÿ∂®“Â

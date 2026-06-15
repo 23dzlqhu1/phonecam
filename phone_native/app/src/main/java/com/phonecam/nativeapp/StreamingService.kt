@@ -53,16 +53,14 @@ class StreamingService : Service() {
         // 前台 Service 专属 worker thread, Hans 不冻 (因为整个 Service 标记为前台)
         const val WORKER_THREAD_NAME = "Streaming-Service-Thread"
 
-            // 跨 Service 边界给 MainActivity listener 读 (推流资源)
-            @Volatile var sActive: Boolean = false
-            @Volatile var sStarting: Boolean = false
-            @Volatile var sH264Encoder: H264Encoder? = null
-            @Volatile var sEglRenderer: EglRenderer? = null
-            @Volatile var sTcpServer: TcpStreamServer? = null
-            @Volatile var sCameraW: Int = 1280
-            @Volatile var sCameraH: Int = 720
-            // CRITICAL-2 fix: 保存 worker thread 引用，stopStreamingInternal 可以 join
-            @Volatile var sWorkerThread: Thread? = null
+        // 跨 Service 边界给 MainActivity listener 读 (推流资源)
+        @Volatile var sActive: Boolean = false
+        @Volatile var sStarting: Boolean = false
+        @Volatile var sH264Encoder: H264Encoder? = null
+        @Volatile var sEglRenderer: EglRenderer? = null
+        @Volatile var sTcpServer: TcpStreamServer? = null
+        @Volatile var sCameraW: Int = 1280
+        @Volatile var sCameraH: Int = 720
         // 批次 3.2.0.3f 跨线程 EGL 修复: EGL context 是 thread-local, listener 在 imageReaderHandler 线程
         //   不能直接调 EglRenderer.drawYuv (EglRenderer 在 Service worker thread 启的)
         //   解决: 提交任务到 eglExecutor (单线程), 由 EGL owner thread 调 drawYuv
@@ -70,7 +68,6 @@ class StreamingService : Service() {
 
         // 批次 3.2.0.3g 帧率统计: 监听 listener 线程 / EGL owner thread / H264Encoder-OutputLoop
         //  注意: 这些 ++ 不是线程安全的, 读到的 fps 是近似值 (单线程自己加自己读)
-        //  LOW fix: 已确认每个计数器只在一个线程递增 (sFrameSubmitCount=listener, sFrameEncodeCount=eglThread, sNaluOutputCount=outputLoop)
         @Volatile var sFrameSubmitCount: Long = 0   // listener 调用 submitFrame 次数
         @Volatile var sFrameEncodeCount: Long = 0   // EGL owner thread drawYuv 完成次数
         @Volatile var sNaluOutputCount: Long = 0    // H264Encoder 吐出 NALU 次数
@@ -99,18 +96,15 @@ class StreamingService : Service() {
             sCurrentRotation = rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
             sFrameSubmitCount++  // 批次 3.2.0.3g 帧率统计
-            try {
-                exec.execute {
-                    try {
-                        renderer.drawYuv(yuv, w, h)
-                        encoder.encodeFrame(yuv)
-                        sFrameEncodeCount++  // 批次 3.2.0.3g 帧率统计 (EGL owner thread)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "[3.2.0.3f] EGL/encoder 异常 (主因很可能是 EGL 跨线程)", e)
-                    }
+            exec.execute {
+                try {
+                    renderer.drawYuv(yuv, w, h)
+                    encoder.encodeFrame(yuv)
+                    sFrameEncodeCount++  // 批次 3.2.0.3g 帧率统计 (EGL owner thread)
+                } catch (e: Exception) {
+                    // 批次 3.2.0.3f 关键诊断: 跨线程 EGL 异常具体是什么
+                    Log.e(TAG, "[3.2.0.3f] EGL/encoder 异常 (主因很可能是 EGL 跨线程)", e)
                 }
-            } catch (e: java.util.concurrent.RejectedExecutionException) {
-                // MEDIUM-8 fix: executor already shut down, silently ignore
             }
         }
 
@@ -207,8 +201,7 @@ class StreamingService : Service() {
             }
             ACTION_STOP -> {
                 InAppLogStore.i(TAG, "[3.2.0.3f] 收到 STOP, 停推流")
-                // HIGH-6 fix: move shutdown off main thread (Thread.sleep was blocking UI)
-                Thread({ stopStreamingInternal() }, "Streaming-Stop-Thread").start()
+                stopStreamingInternal()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -233,7 +226,7 @@ class StreamingService : Service() {
      * 用 Service 的 worker thread 而不是 MainActivity 的子线程, 保证 Hans 不冻
      */
     private fun startStreamingInWorker() {
-        val workerThread = Thread({
+        Thread({
             try {
                 InAppLogStore.i(TAG, "[3.2.0.3f] Service worker thread 启动, 6 步走起")
 
@@ -374,9 +367,7 @@ class StreamingService : Service() {
                 sStarting = false
                 stopStreamingInternal()
             }
-        }, WORKER_THREAD_NAME)
-        sWorkerThread = workerThread  // CRITICAL-2 fix: save reference for join in stopStreamingInternal
-        workerThread.start()
+        }, WORKER_THREAD_NAME).start()
     }
 
     /**
@@ -389,21 +380,14 @@ class StreamingService : Service() {
         // 批次 3.2.0.3g: 停帧率统计 timer
         stopStatsTimer()
         Thread.sleep(200)  // 让 listener 看到 sActive=false 后再释放
-        // CRITICAL-4 fix: correct release order to avoid EGL cross-thread UB
-        // Old order: executor→encoder→renderer (executor killed while encoder still draining)
-        // New order: encoder first (drains final frames) → executor (kills EGL thread) → renderer
+        try { sEglExecutor?.shutdownNow() } catch (e: Exception) { Log.w(TAG, "eglExecutor shutdown 异常: ${e.message}") }
+        sEglExecutor = null
         try { sH264Encoder?.stop() } catch (e: Exception) { Log.w(TAG, "h264Encoder.stop 异常: ${e.message}") }
         sH264Encoder = null
-        try { sEglExecutor?.shutdownNow() } catch (e: Exception) { Log.w(TAG, "eglExecutor shutdown 异常: ${e.message}") }
-        try { sEglExecutor?.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { Log.w(TAG, "eglExecutor await 异常: ${e.message}") }
-        sEglExecutor = null
         try { sEglRenderer?.release() } catch (e: Exception) { Log.w(TAG, "eglRenderer.release 异常: ${e.message}") }
         sEglRenderer = null
         try { sTcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop 异常: ${e.message}") }
         sTcpServer = null
-        // CRITICAL-2 fix: join worker thread to ensure clean shutdown
-        try { sWorkerThread?.join(3000) } catch (e: Exception) { Log.w(TAG, "workerThread.join 异常: ${e.message}") }
-        sWorkerThread = null
         InAppLogStore.i(TAG, "[3.2.0.3f] 推流已完全停止")
     }
 

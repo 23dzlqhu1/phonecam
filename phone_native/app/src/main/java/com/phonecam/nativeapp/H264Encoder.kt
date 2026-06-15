@@ -69,8 +69,8 @@ class H264Encoder {
     private var inputSurface: android.view.Surface? = null
     @Volatile private var callback: NaluCallback? = null
     @Volatile private var running: Boolean = false
-    @Volatile private var frameIndex: Long = 0
-    @Volatile private var outputThread: Thread? = null
+    private var frameIndex: Long = 0
+    private var outputThread: Thread? = null
 
     // SPS/PPS 缓存 (用于追加到每个 I 帧前，防止网络丢包或迟连导致 PC 端永远无法解码)
     private var spsPpsCache: ByteArray? = null
@@ -153,18 +153,15 @@ class H264Encoder {
      */
     fun stop() {
         if (!running) return
-        // CRITICAL-3 fix: signal EOS while output loop is still running,
-        // so it can drain the final 1-3 buffered frames.
-        // Old order: running=false → loop exits → signal EOS → nobody drains → frames lost
+        running = false
         try {
             codec?.signalEndOfInputStream()  // 通知编码器: EOS, 把最后缓存的帧全吐出来
         } catch (e: Exception) {
             Log.w(TAG, "signalEndOfInputStream 异常: ${e.message}")
         }
-        running = false  // Now safe to stop: EOS has been signaled, loop will drain and exit
-        // 等输出循环线程退出 (it will see EOS buffer, drain it, then exit)
+        // 等输出循环线程退出
         try {
-            outputThread?.join(2000)  // 最多等 2 秒
+            outputThread?.join(1000)  // 最多等 1 秒
         } catch (e: InterruptedException) {
             Log.w(TAG, "输出循环 join 中断: ${e.message}")
         }

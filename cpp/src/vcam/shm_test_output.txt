@@ -1,8 +1,0 @@
-OK: Mutex opened
-OK: Shared memory opened
-OK: View mapped
-Magic: 0x5043414D (expect 0x5043414D)
-Active slot: 1
-Slot 0: 720x1280 seq=17050 data_size=2764800
-Slot 1: 720x1280 seq=17051 data_size=2764800
-OK: Data size matches (2764800 bytes)
