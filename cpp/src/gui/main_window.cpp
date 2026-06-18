@@ -13,6 +13,7 @@
 #include <QProcess>
 #include <QMessageBox>
 #include <QFileInfo>
+#include <QInputDialog>
 
 namespace phonecam {
 
@@ -356,6 +357,15 @@ void MainWindow::setupUi() {
     m_refreshBtn->setCursor(Qt::PointingHandCursor);
     connect(m_refreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshDevices);
     devSelRow->addWidget(m_refreshBtn);
+    // P2-1 Loop 1: Manual IP connect button
+    QPushButton* manualBtn = new QPushButton(QString::fromUtf8("手动连接"));
+    manualBtn->setStyleSheet(
+        "QPushButton { font: 10px 'Segoe UI'; color: #4a5568; background: #f0f2f5; "
+        "border: 1px solid #d5d9e0; border-radius: 3px; padding: 2px 8px; }"
+        "QPushButton:hover { background: #e8eaef; }");
+    manualBtn->setCursor(Qt::PointingHandCursor);
+    connect(manualBtn, &QPushButton::clicked, this, &MainWindow::onManualConnect);
+    devSelRow->addWidget(manualBtn);
     devSelCol->addLayout(devSelRow);
     topLayout->addLayout(devSelCol);
 
@@ -752,6 +762,52 @@ void MainWindow::onDeviceSelected(int index) {
 
 void MainWindow::onRefreshDevices() {
     m_connManager->refreshDevices();
+}
+
+void MainWindow::onManualConnect() {
+    bool ok = false;
+    QString text = QInputDialog::getText(this,
+        QString::fromUtf8("手动连接"),
+        QString::fromUtf8("输入手机 IP 地址和端口\n格式: 192.168.x.x:9999"),
+        QLineEdit::Normal,
+        QString::fromUtf8("192.168.1.100:9999"),
+        &ok);
+    if (!ok || text.trimmed().isEmpty()) return;
+
+    QString input = text.trimmed();
+
+    // Parse host:port
+    QString host;
+    quint16 port = 9999;
+    if (input.contains(':')) {
+        QStringList parts = input.split(':');
+        host = parts[0].trimmed();
+        bool portOk = false;
+        int p = parts[1].trimmed().toInt(&portOk);
+        if (!portOk || p < 1 || p > 65535) {
+            QMessageBox::warning(this, QString::fromUtf8("输入错误"),
+                QString::fromUtf8("端口必须是 1-65535 之间的数字"));
+            return;
+        }
+        port = static_cast<quint16>(p);
+    } else {
+        host = input;
+    }
+
+    // Validate host
+    if (host.isEmpty()) {
+        QMessageBox::warning(this, QString::fromUtf8("输入错误"),
+            QString::fromUtf8("IP 地址不能为空"));
+        return;
+    }
+
+    // Add manual device
+    m_connManager->addManualDevice(host, port);
+    qDebug() << "[CONN] Manual device added:" << host << ":" << port;
+
+    // Auto-select the manual device
+    QString manualId = QString("manual:%1:%2").arg(host).arg(port);
+    m_connManager->selectDevice(manualId);
 }
 
 void MainWindow::onExportLogs() {

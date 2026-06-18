@@ -76,6 +76,7 @@ private slots:
     void onExportLogs();
     void onDeviceSelected(int index);
     void onRefreshDevices();
+    void onManualConnect();
 
 
 protected:
