@@ -6,8 +6,53 @@
 #include <memory>
 #include <Windows.h>
 #include <cstdio>
+#include <ctime>
+#include <mutex>
+
+// ── Phase 4.1: RGB24-only safe default ──
+// Set to 1 to force DirectShow to only expose RGB24/BGR24 (safe, compatible default).
+// Set to 0 to expose NV12 as preferred format (fast path, experimental).
+#define VCAM_DEFAULT_RGB24_ONLY 1
+
+// ── VCAM file logger ──
+// Writes to logs/phonecam-vcam-YYYYMMDD-HHMMSS.log alongside OutputDebugStringA.
+static FILE* s_vcamLogFile = nullptr;
+static std::mutex s_vcamLogMutex;
+static bool s_vcamLogInit = false;
+
+static void vcam_file_log(const char* line) {
+    std::lock_guard<std::mutex> lock(s_vcamLogMutex);
+    if (!s_vcamLogInit) {
+        // Try to create logs/ directory (best-effort)
+        CreateDirectoryA("logs", nullptr);
+        // Generate filename with timestamp
+        time_t now = time(nullptr);
+        struct tm tm_buf;
+        localtime_s(&tm_buf, &now);
+        char path[256];
+        snprintf(path, sizeof(path), "logs/phonecam-vcam-%04d%02d%02d-%02d%02d%02d.log",
+                 tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
+                 tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec);
+        s_vcamLogFile = fopen(path, "w");
+        s_vcamLogInit = true;
+        if (s_vcamLogFile) {
+            fprintf(s_vcamLogFile, "\xEF\xBB\xBF"); // UTF-8 BOM
+            fflush(s_vcamLogFile);
+        }
+    }
+    if (s_vcamLogFile) {
+        // Timestamp prefix
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        fprintf(s_vcamLogFile, "[%04d-%02d-%02dT%02d:%02d:%02d.%03d] %s\n",
+                st.wYear, st.wMonth, st.wDay,
+                st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, line);
+        fflush(s_vcamLogFile);
+    }
+}
 
 // Always-visible debug output (OutputDebugStringA is never filtered)
+// Also writes to vcam log file for persistent capture.
 static void VCAM_LOG(const char* fmt, ...) {
     char buf[512];
     va_list args;
@@ -17,6 +62,10 @@ static void VCAM_LOG(const char* fmt, ...) {
     OutputDebugStringA("[VCAM] ");
     OutputDebugStringA(buf);
     OutputDebugStringA("\n");
+    // Also write to file (prepend [VCAM] tag)
+    char fileBuf[540];
+    snprintf(fileBuf, sizeof(fileBuf), "[VCAM] %s", buf);
+    vcam_file_log(fileBuf);
 }
 
 namespace phonecam {
@@ -112,6 +161,35 @@ void CVCamStream::convertBGR24ToNV12(uint8_t* dst, const uint8_t* src, int w, in
     }
 }
 
+// ── NV12 → BGR24 conversion (BT.601 limited range) ──
+// Used when consumer wants RGB24 but shared memory has NV12 (fallback path).
+// dstStride = row stride in bytes (may be > width*3 due to alignment).
+void CVCamStream::convertNV12ToBGR24(uint8_t* dst, int dstStride,
+                                      const uint8_t* src, int w, int h) {
+    const uint8_t* yPlane  = src;
+    const uint8_t* uvPlane = src + (w * h);
+
+    for (int row = 0; row < h; row++) {
+        uint8_t* dstRow = dst + row * dstStride;
+        for (int col = 0; col < w; col++) {
+            float yVal = static_cast<float>(yPlane[row * w + col]);
+            yVal = (yVal - 16.0f) / 219.0f;
+
+            const int uvIdx = (row / 2) * w + (col / 2) * 2;
+            float uVal = static_cast<float>(uvPlane[uvIdx])     - 128.0f;
+            float vVal = static_cast<float>(uvPlane[uvIdx + 1]) - 128.0f;
+
+            float r = yVal + 1.402f   * vVal / 224.0f;
+            float g = yVal - 0.34414f * uVal / 224.0f - 0.71414f * vVal / 224.0f;
+            float b = yVal + 1.772f   * uVal / 224.0f;
+
+            dstRow[col * 3]     = static_cast<uint8_t>(b < 0 ? 0 : (b > 1.0f ? 255 : (int)(b * 255)));
+            dstRow[col * 3 + 1] = static_cast<uint8_t>(g < 0 ? 0 : (g > 1.0f ? 255 : (int)(g * 255)));
+            dstRow[col * 3 + 2] = static_cast<uint8_t>(r < 0 ? 0 : (r > 1.0f ? 255 : (int)(r * 255)));
+        }
+    }
+}
+
 // ── Unified placeholder frame generator ──
 void CVCamStream::fillPlaceholderFrame(uint8_t* pData, int width, int height, PixelFormat fmt) {
     if (fmt == PixelFormat::NV12) {
@@ -203,55 +281,80 @@ void CVCamStream::fillMediaType_RGB24(CMediaType* pMediaType) {
     VIDEOINFOHEADER* pvi = reinterpret_cast<VIDEOINFOHEADER*>(
         pMediaType->AllocFormatBuffer(sizeof(VIDEOINFOHEADER)));
     ZeroMemory(pvi, sizeof(VIDEOINFOHEADER));
+    const LONG stride = (m_width * 3 + 3) & ~3;
+    const LONG sampleSize = stride * m_height;
     pvi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     pvi->bmiHeader.biWidth = m_width;
     pvi->bmiHeader.biHeight = -m_height;  // Negative = top-down
     pvi->bmiHeader.biPlanes = 1;
     pvi->bmiHeader.biBitCount = 24;
     pvi->bmiHeader.biCompression = BI_RGB;
-    pvi->bmiHeader.biSizeImage = DIBSIZE(pvi->bmiHeader);
+    pvi->bmiHeader.biSizeImage = sampleSize;
     pvi->AvgTimePerFrame = m_avgTimePerFrame;
 
     pMediaType->SetType(&MEDIATYPE_Video);
     pMediaType->SetSubtype(&MEDIASUBTYPE_RGB24);
     pMediaType->SetFormatType(&FORMAT_VideoInfo);
     pMediaType->SetTemporalCompression(FALSE);
+    pMediaType->SetSampleSize(sampleSize);
+    VCAM_LOG("fillMediaType_RGB24: %dx%d stride=%d sampleSize=%d biHeight=%d orientation=top-down",
+             m_width, m_height, (int)stride, (int)sampleSize, -m_height);
 }
 
 HRESULT CVCamStream::GetMediaType(CMediaType* pMediaType) {
-    // Default to NV12 (preferred by video conferencing apps)
+#if VCAM_DEFAULT_RGB24_ONLY
+    VCAM_LOG("GetMediaType(default) -> RGB24 %dx%d (RGB24-only mode)", m_width, m_height);
+    fillMediaType_RGB24(pMediaType);
+#else
     VCAM_LOG("GetMediaType(default) -> NV12 %dx%d", m_width, m_height);
     fillMediaType_NV12(pMediaType);
+#endif
     return S_OK;
 }
 
 HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType* pMediaType) {
     if (iPosition < 0) return E_INVALIDARG;
+#if VCAM_DEFAULT_RGB24_ONLY
+    // Only expose RGB24
+    if (iPosition > 0) return VFW_S_NO_MORE_ITEMS;
+    VCAM_LOG("GetMediaType(0) -> RGB24 %dx%d (RGB24-only)", m_width, m_height);
+    fillMediaType_RGB24(pMediaType);
+#else
     if (iPosition > 1) return VFW_S_NO_MORE_ITEMS;
-
     if (iPosition == 0) {
-        VCAM_LOG("GetMediaType(0) -> NV12 %dx%d", m_width, m_height);
-        fillMediaType_NV12(pMediaType);   // Index 0: NV12 (preferred)
+        VCAM_LOG("GetMediaType(0) -> NV12 %dx%d biComp=NV12 biBit=12 biSizeImage=%d sampleSize=%d",
+                 m_width, m_height, m_width * m_height * 3 / 2, m_width * m_height * 3 / 2);
+        fillMediaType_NV12(pMediaType);
     } else {
-        VCAM_LOG("GetMediaType(1) -> RGB24 %dx%d", m_width, m_height);
-        fillMediaType_RGB24(pMediaType);  // Index 1: RGB24 (fallback)
+        VCAM_LOG("GetMediaType(1) -> RGB24 %dx%d biComp=BI_RGB biBit=24", m_width, m_height);
+        fillMediaType_RGB24(pMediaType);
     }
+#endif
     return S_OK;
 }
 
 HRESULT CVCamStream::CheckMediaType(const CMediaType* pMediaType) {
     if (!pMediaType) return E_POINTER;
     const GUID* pMajor = pMediaType->Type();
-    if (*pMajor != MEDIATYPE_Video) return E_FAIL;
+    if (*pMajor != MEDIATYPE_Video) {
+        VCAM_LOG("CheckMediaType: REJECTED (not MEDIATYPE_Video)");
+        return E_FAIL;
+    }
     const GUID* pSub = pMediaType->Subtype();
+#if VCAM_DEFAULT_RGB24_ONLY
+    bool ok = (*pSub == MEDIASUBTYPE_RGB24);
+#else
     bool ok = (*pSub == MEDIASUBTYPE_NV12 || *pSub == MEDIASUBTYPE_RGB24);
-    VCAM_LOG("CheckMediaType: %s (sub=%s)",
+#endif
+    VCAM_LOG("CheckMediaType: %s (sub=%s mode=%s)",
         ok ? "OK" : "REJECTED",
         (*pSub == MEDIASUBTYPE_NV12) ? "NV12" :
-        (*pSub == MEDIASUBTYPE_RGB24) ? "RGB24" : "OTHER");
+        (*pSub == MEDIASUBTYPE_RGB24) ? "RGB24" : "OTHER",
+        VCAM_DEFAULT_RGB24_ONLY ? "RGB24-only" : "NV12+RGB24");
     if (!ok) return E_FAIL;
     const GUID* pFmt = pMediaType->FormatType();
     if (*pFmt == FORMAT_VideoInfo) return S_OK;
+    VCAM_LOG("CheckMediaType: REJECTED (not FORMAT_VideoInfo)");
     return E_FAIL;
 }
 
@@ -289,8 +392,8 @@ HRESULT CVCamStream::FillBuffer(IMediaSample* pSample) {
         return E_POINTER;
     }
     long buf_size = pSample->GetSize();
-    int width, height;
-    uint64_t sequence;
+    int width = 0, height = 0;
+    uint64_t sequence = 0;
 
     // Determine actual output format from negotiated media type (m_mt)
     PixelFormat actualFormat = PixelFormat::NV12;
@@ -299,33 +402,24 @@ HRESULT CVCamStream::FillBuffer(IMediaSample* pSample) {
         actualFormat = PixelFormat::RGB24;
     }
 
-    VCAM_LOG("FillBuffer: buf_size=%ld format=%d subtype=%s",
-        buf_size, (int)actualFormat,
-        (pSubtype && *pSubtype == MEDIASUBTYPE_NV12) ? "NV12" :
-        (pSubtype && *pSubtype == MEDIASUBTYPE_RGB24) ? "RGB24" : "UNKNOWN");
+    // Pre-calculate buffer sizes
+    long nv12_size = m_width * m_height * 3 / 2;
+    long rgb_stride = (m_width * 3 + 3) & ~3;
+    long rgb_size = rgb_stride * m_height;
+    long data_size = (actualFormat == PixelFormat::NV12) ? nv12_size : rgb_size;
 
-    // Pre-calculate buffer size (needed in exception handler too)
-    long data_size;
-    if (actualFormat == PixelFormat::NV12) {
-        data_size = m_width * m_height * 3 / 2;
-    } else {
-        LONG stride = (m_width * 3 + 3) & ~3;
-        data_size = stride * m_height;
-    }
-
-    // Short timeout — 10ms instead of 100ms for responsive stop/reconfigure
-    VCAM_LOG("FillBuffer: calling m_reader.read()...");
+    // Read shared memory (10ms timeout)
+    SharedPixelFormat shmFmt = SharedPixelFormat::BGR24;  // only valid if got_frame=true
     bool got_frame = false;
     __try {
         got_frame = m_reader.read(m_frame_buffer.get(), MAX_FRAME_SIZE,
-                                        width, height, sequence, 10);
+                                        width, height, sequence, shmFmt, 10);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         VCAM_LOG("FATAL: read() crashed! Exception code: 0x%08X", GetExceptionCode());
         fillPlaceholderFrame(pData, m_width, m_height, actualFormat);
         pSample->SetActualDataLength(data_size);
         return S_OK;
     }
-    VCAM_LOG("FillBuffer: read() returned %d", got_frame ? 1 : 0);
 
     // Sanity check: output data must fit in sample buffer
     if (data_size > buf_size) {
@@ -335,38 +429,73 @@ HRESULT CVCamStream::FillBuffer(IMediaSample* pSample) {
         return S_OK;
     }
 
+    // ── Determine effective format: prefer fresh read, fall back to cached ──
+    // Initialize with safe defaults so placeholder/no-frame log paths never
+    // read uninitialized variables (fixes KI-007 Debug Runtime Check #3).
+    SharedPixelFormat effectiveShmFmt = SharedPixelFormat::BGR24;
+    int effectiveWidth = 0, effectiveHeight = 0;
+    uint64_t effectiveSeq = 0;
+    bool hasFrame = false;
+
     if (got_frame) {
+        // Fresh frame — update cache
+        bool wasWaiting = !m_has_last_frame;  // P1-5: track first-frame transition
         m_has_last_frame = true;
-        
-        if (width != m_width || height != m_height) {
-            VCAM_LOG("Resolution mismatch! DShow wants %dx%d, but we received %dx%d. Will process safely.", m_width, m_height, width, height);
+        m_lastShmFmt   = shmFmt;
+        m_lastWidth    = width;
+        m_lastHeight   = height;
+        m_lastSequence = sequence;
+
+        effectiveShmFmt = shmFmt;
+        effectiveWidth  = width;
+        effectiveHeight = height;
+        effectiveSeq    = sequence;
+        hasFrame = true;
+
+        if (wasWaiting) {
+            VCAM_LOG("FIRST-FRAME: transition from placeholder to live stream %dx%d fmt=%d seq=%llu",
+                     width, height, (int)shmFmt, (unsigned long long)sequence);
         }
+
+        if (width != m_width || height != m_height) {
+            VCAM_LOG("Resolution mismatch! DShow wants %dx%d, received %dx%d", m_width, m_height, width, height);
+        }
+    } else if (m_has_last_frame) {
+        // No new frame — reuse cached last frame with its actual format
+        effectiveShmFmt = m_lastShmFmt;
+        effectiveWidth  = m_lastWidth;
+        effectiveHeight = m_lastHeight;
+        effectiveSeq    = m_lastSequence;
+        hasFrame = true;
+    } else {
+        hasFrame = false;
     }
 
-    if (m_has_last_frame) {
-        int frame_size = m_width * m_height * 3;
-        
-        if (frame_size <= MAX_FRAME_SIZE) {
-            if (actualFormat == PixelFormat::NV12) {
+    if (hasFrame) {
+        if (actualFormat == PixelFormat::NV12 && effectiveShmFmt == SharedPixelFormat::NV12) {
+            int copySize = m_width * m_height * 3 / 2;
+            if (copySize <= MAX_FRAME_SIZE) {
+                std::memcpy(pData, m_frame_buffer.get(), copySize);
+            }
+        } else if (actualFormat == PixelFormat::NV12 && effectiveShmFmt == SharedPixelFormat::BGR24) {
+            int frame_size = m_width * m_height * 3;
+            if (frame_size <= MAX_FRAME_SIZE) {
                 convertBGR24ToNV12(pData, m_frame_buffer.get(), m_width, m_height);
+            }
+        } else if (actualFormat == PixelFormat::RGB24) {
+            const LONG stride = rgb_stride;
+            std::memset(pData, 0, data_size);
+            if (effectiveShmFmt == SharedPixelFormat::NV12) {
+                convertNV12ToBGR24(pData, stride, m_frame_buffer.get(), m_width, m_height);
             } else {
-                LONG stride = (m_width * 3 + 3) & ~3;
-                if (stride == m_width * 3) {
-                    std::memcpy(pData, m_frame_buffer.get(), frame_size);
-                } else {
-                    for (int y = 0; y < m_height; y++) {
-                        std::memcpy(pData + y * stride,
-                                   m_frame_buffer.get() + y * m_width * 3,
-                                   m_width * 3);
-                    }
+                for (int y = 0; y < m_height; y++) {
+                    std::memcpy(pData + y * stride,
+                               m_frame_buffer.get() + y * m_width * 3,
+                               m_width * 3);
                 }
             }
-            pSample->SetActualDataLength(data_size);
-        } else {
-            VCAM_LOG("Frame too large %d, placeholder", frame_size);
-            fillPlaceholderFrame(pData, m_width, m_height, actualFormat);
-            pSample->SetActualDataLength(data_size);
         }
+        pSample->SetActualDataLength(data_size);
     } else {
         fillPlaceholderFrame(pData, m_width, m_height, actualFormat);
         pSample->SetActualDataLength(data_size);
@@ -379,9 +508,42 @@ HRESULT CVCamStream::FillBuffer(IMediaSample* pSample) {
     pSample->SetSyncPoint(TRUE);
     m_frame_count++;
 
-    if (m_frame_count <= 3 || m_frame_count % 300 == 0) {
-        VCAM_LOG("FillBuffer #%lld OK, data_size=%ld, got_frame=%d",
-            (long long)m_frame_count, data_size, got_frame ? 1 : 0);
+    if (m_frame_count <= 3 || m_frame_count % 60 == 0) {
+        const char* pathStr = "placeholder";
+        const char* stateStr = "waiting";  // P1-5: explicit startup state
+        // Use safe sentinel values for placeholder/no-frame log to avoid
+        // suggesting a real pixel format when no frame exists.
+        int logEffFmt = -1;
+        int logEffW = 0, logEffH = 0;
+        if (hasFrame) {
+            logEffFmt = (int)effectiveShmFmt;
+            logEffW = effectiveWidth;
+            logEffH = effectiveHeight;
+            if (got_frame) {
+                stateStr = "fresh";  // P1-5: first or new frame from shared memory
+                if (actualFormat == PixelFormat::NV12 && effectiveShmFmt == SharedPixelFormat::NV12)
+                    pathStr = "NV12->NV12";
+                else if (actualFormat == PixelFormat::NV12 && effectiveShmFmt == SharedPixelFormat::BGR24)
+                    pathStr = "BGR24->NV12";
+                else if (actualFormat == PixelFormat::RGB24 && effectiveShmFmt == SharedPixelFormat::NV12)
+                    pathStr = "NV12->BGR24";
+                else if (actualFormat == PixelFormat::RGB24)
+                    pathStr = "BGR24->RGB24";
+            } else {
+                stateStr = "cached";  // P1-5: reusing last frame
+                pathStr = "cached-reuse";
+            }
+        }
+        VCAM_LOG("FillBuffer #%lld: outFmt=%s effFmt=%d shmSize=%dx%d sample=%ld path=%s state=%s fresh=%d reuse=%d",
+            (long long)m_frame_count,
+            (actualFormat == PixelFormat::NV12) ? "NV12" : "RGB24",
+            logEffFmt,
+            logEffW, logEffH,
+            (long)data_size,
+            pathStr,
+            stateStr,
+            got_frame ? 1 : 0,
+            (hasFrame && !got_frame) ? 1 : 0);
     }
 
     return S_OK;
@@ -443,13 +605,22 @@ HRESULT CVCamStream::SetFormat(AM_MEDIA_TYPE* pmt) {
         m_fps = static_cast<int>(10000000LL / m_avgTimePerFrame);
 
         // Detect format from subtype
+        const char* subName = "UNKNOWN";
         if (pmt->subtype == MEDIASUBTYPE_NV12) {
             m_outputFormat = PixelFormat::NV12;
-            VCAM_LOG("SetFormat: NV12 %dx%d@%dfps", m_width, m_height, m_fps);
+            subName = "NV12";
         } else if (pmt->subtype == MEDIASUBTYPE_RGB24) {
             m_outputFormat = PixelFormat::RGB24;
-            VCAM_LOG("SetFormat: RGB24 %dx%d@%dfps", m_width, m_height, m_fps);
+            subName = "RGB24";
         }
+        VCAM_LOG("SetFormat: %s %dx%d@%dfps biComp=0x%08X biBit=%d biHeight=%d biSizeImage=%u",
+                 subName, m_width, m_height, m_fps,
+                 (unsigned)pvi->bmiHeader.biCompression,
+                 (int)pvi->bmiHeader.biBitCount,
+                 (int)pvi->bmiHeader.biHeight,
+                 (unsigned)pvi->bmiHeader.biSizeImage);
+    } else {
+        VCAM_LOG("SetFormat: UNSUPPORTED formattype");
     }
     return S_OK;
 }
@@ -465,21 +636,33 @@ HRESULT CVCamStream::GetFormat(AM_MEDIA_TYPE** ppmt) {
 
 HRESULT CVCamStream::GetNumberOfCapabilities(int* piCount, int* piSize) {
     if (!piCount || !piSize) return E_POINTER;
+#if VCAM_DEFAULT_RGB24_ONLY
+    *piCount = 1;  // RGB24 only
+#else
     *piCount = 2;  // NV12 + RGB24
+#endif
     *piSize = sizeof(VIDEO_STREAM_CONFIG_CAPS);
     return S_OK;
 }
 
 HRESULT CVCamStream::GetStreamCaps(int iIndex, AM_MEDIA_TYPE** ppmt, BYTE* pSCC) {
+#if VCAM_DEFAULT_RGB24_ONLY
+    if (iIndex < 0 || iIndex > 0) return VFW_S_NO_MORE_ITEMS;
+#else
     if (iIndex < 0 || iIndex > 1) return E_INVALIDARG;
+#endif
     if (!ppmt || !pSCC) return E_POINTER;
 
     CMediaType mt;
+#if VCAM_DEFAULT_RGB24_ONLY
+    fillMediaType_RGB24(&mt);
+#else
     if (iIndex == 0) {
         fillMediaType_NV12(&mt);
     } else {
         fillMediaType_RGB24(&mt);
     }
+#endif
 
     *ppmt = CreateMediaType(&mt);
     if (!*ppmt) return E_OUTOFMEMORY;
