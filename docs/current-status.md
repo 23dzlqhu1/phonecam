@@ -66,8 +66,11 @@
 | **NV12 主链路** | ✅ Pipeline truth audit 完成 (2026-06-18) — DecodeWorker→decodeFrame→composeFromDecodedFrame→Nv12Frame→updateNv12Frame+writeNv12 已恢复接入，QImage/rgbSwapped 仅在 legacy fallback 路径 |
 | 腾讯会议显示 | ✅ 产品闭环已跑通；灰色三图/闪烁已修复 |
 | 低延迟队列 | ✅ Phase 2 完成 — rawQ 30 cap, resync@15, displayQ 1, [LATENCY] 日志 |
-| WiFi/热点连接 | ⚠️ 代码已实现，需人工端到端验证 |
-| 设备选择 | ✅ 新增（下拉框 + USB/WiFi 候选） |
+| **WiFi/热点连接** | ⚠️ 代码已实现，需人工端到端验证 |
+| **设备选择** | ✅ 新增（下拉框 + USB/WiFi/手动 IP 候选 + ▶ 活跃标记 + last-connected 优先） |
+| **手动 IP 连接** | ✅ P2-1 手动连接按钮 + IP:port 输入校验 + addManualDevice + 手动选择后不自动切换 |
+| **连接失败诊断** | ✅ P2-1 诊断条覆盖 ADB/USB/WiFi/手动 IP 全场景，含中文下一步建议 |
+| **手机端连接页** | ✅ P2-1 复制 IP:port 按钮 + USB/WiFi/热点三种连接说明 + 无 IP 警告 |
 | **KI-007 修复** | ✅ Debug DLL 不再弹 Runtime Check（变量初始化 + 日志哨兵） |
 | **Release 包** | ✅ `release/PhoneCam/` 完整发布包（bin/driver/apk/install/uninstall/README） |
 | **一键安装** | ✅ `install.bat` 验收通过（管理员提权、依赖检测、DLL 注册、ADB/APK、DirectShow 验证） |
