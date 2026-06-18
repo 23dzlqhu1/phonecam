@@ -1,6 +1,6 @@
 # PhoneCam 当前状态
 
-> 最后更新：2026-06-18 M1 验收达成
+> 最后更新：2026-06-19 M1 已达成，P1 代码完成，GUI smoke 待验收
 
 ## 事实来源
 
@@ -63,7 +63,7 @@
 | NV12 OpenGL preview | ✅ GPU shader 路径 + CPU fallback |
 | Virtualcam NV12 fast path | ✅ DLL direct memcpy |
 | BGR24 fallback | ✅ 保留（NV12→BGR24, BGR24→NV12 双向） |
-| 画面比例一致性 | ✅ Phase 1 完成 — canonical 1280×720 contain/letterbox，Preview↔VirtualCam 同源 |
+| **NV12 主链路** | ✅ Pipeline truth audit 完成 (2026-06-18) — DecodeWorker→decodeFrame→composeFromDecodedFrame→Nv12Frame→updateNv12Frame+writeNv12 已恢复接入，QImage/rgbSwapped 仅在 legacy fallback 路径 |
 | 腾讯会议显示 | ✅ 产品闭环已跑通；灰色三图/闪烁已修复 |
 | 低延迟队列 | ✅ Phase 2 完成 — rawQ 30 cap, resync@15, displayQ 1, [LATENCY] 日志 |
 | WiFi/热点连接 | ⚠️ 代码已实现，需人工端到端验证 |
@@ -122,6 +122,9 @@ release/PhoneCam/
 - 腾讯会议 UI 中选择 PhoneCam Camera 并看到画面（需人工在腾讯会议中操作）
 - 腾讯会议运行时启动 PhoneCam exe，观察 preflight 面板实时状态（需人工启动 exe）
 - Debug DLL 腾讯会议先启动场景不弹 Runtime Check（需人工验证 Debug DLL 行为）
+- 三种启动顺序实际验证（PhoneCam→手机→腾讯会议；腾讯会议→PhoneCam→手机；手机→PhoneCam）
+- 切换前后摄像头后画面在 3 秒内恢复
+- 横屏锁定后旋转手机，腾讯会议输出画幅不变
 - WiFi 端到端连接
 
 ## M1 验收结果（2026-06-18）— M1 已达成
