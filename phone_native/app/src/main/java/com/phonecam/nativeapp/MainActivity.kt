@@ -13,37 +13,19 @@ import android.util.Log
 import android.view.TextureView
 import android.view.View
 import android.widget.Button
-import android.widget.ImageButton
-import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
 
 /**
- * MainActivity —— phone_native/ Phase X 主界面
+ * MainActivity — 用户首页版本
  *
- * 4 层垂直布局 (activity_main.xml):
- *   Layer A: 相机画面 (TextureView + 错误占位)
- *   Layer B: 状态 + 设置行 (状态点 / 调试 / 设置 / 切换按钮)
- *   Layer C: 推流按钮 (60% 宽, pill 圆角)
- *   Layer D: 底部状态文字 (等宽字体)
- *
- * 范围 (Phase X):
- *   - 4 层布局落地 (用 XML, 不再用 programmatic)
- *   - 4 个 Activity 导航入口 (Layer B 设置 / 切换按钮)
- *   - 运行时 CAMERA 权限申请
- *   - CameraController 接入 (批次 3 逻辑保留)
- *   - 双击退出 (Toast 1.5s 窗口)
- *
- * 不做 (Phase Y):
- *   - 推流按钮状态机 (本阶段只显示 Toast)
- *   - 相机前后切换逻辑 (按钮占位)
- *   - 错误占位显示逻辑 (XML 中默认 hidden, 等状态机接入)
- *   - 跨屏状态同步
+ * 设计原则：
+ * 1. 面向普通用户：中文文案，无 debug 术语
+ * 2. 状态卡片：空闲/等待连接/推流中/异常
+ * 3. 主操作：开始推流/停止推流
+ * 4. 工具栏：切换摄像头、横屏输出、连接方式
  */
 class MainActivity : AppCompatActivity() {
 
@@ -53,35 +35,40 @@ class MainActivity : AppCompatActivity() {
         private const val EXIT_TOAST_WINDOW_MS = 1500L
     }
 
-    // --- 视图引用 (从 activity_main.xml 查找) ---
-    private lateinit var textureView: TextureView
+    // --- 视图引用 ---
     private lateinit var statusDot: View
-    private lateinit var statusText: TextView
-    private lateinit var debugText: TextView
-    private lateinit var btnSettings: ImageButton
-    private lateinit var btnToggle: ImageButton
+    private lateinit var statusTitle: TextView
+    private lateinit var statusDesc: TextView
+    private lateinit var infoRow: View
+    private lateinit var infoResolution: TextView
+    private lateinit var infoFps: TextView
+    private lateinit var infoConnection: TextView
+    private lateinit var lockStatusText: TextView
     private lateinit var btnPush: Button
-    private lateinit var pushIndicator: View
-    private lateinit var footerText: TextView
-    private lateinit var errorPlaceholder: LinearLayout
-    private lateinit var errorTitle: TextView
-    private lateinit var errorHint: TextView
-    private lateinit var btnRetry: Button
+    private lateinit var btnToggle: Button
+    private lateinit var btnLockOrient: Button
+    private lateinit var btnConnect: Button
+    private lateinit var btnSettings: ImageView
+    private lateinit var textureView: TextureView
 
     // --- 业务引用 ---
     private var cameraController: CameraController? = null
 
-    // --- 设置 (Phase Y-1 加) ---
+    // --- 设置 ---
     private lateinit var settings: SettingsStore
-    private var currentLensPref: String = "back"  // 用于 Layer B 状态显示
+    private var currentLensPref: String = "back"
 
-    // --- 摄像头帧状态 (ImageReader 线程写, 主线程读) ---
+    // --- 摄像头帧状态 ---
     @Volatile private var cameraW: Int = 0
     @Volatile private var cameraH: Int = 0
     @Volatile private var cameraFrameCount: Int = 0
 
-    // 批次 3.2.0.3f: 推流状态/句柄全部移到 StreamingService (sActive/sH264Encoder/sEglRenderer/sTcpServer)
-    //  避免 Oplus Hans 冻结, 见 StreamingService.kt 注释
+    // --- 画幅锁定 ---
+    @Volatile private var orientationLockEnabled: Boolean = false
+    @Volatile private var lockedStreamRotation: Int = 0
+
+    // --- 广播接收器（需手动 unregister） ---
+    private var streamReceiver: BroadcastReceiver? = null
 
     // --- 双击退出 ---
     private var lastBackPressedMs: Long = 0L
@@ -91,26 +78,21 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // 1. 绑定视图 (从新 XML 布局)
         bindViews()
+        setupButtons()
+        setupSettingsButton()
 
-        // 2. 设置导航监听 (Layer B 设置 / 切换按钮)
-        setupNavigation()
-
-        // 3. 实例化 CameraController (批次 3 逻辑, 仍接 TextureView)
+        // 实例化 CameraController
         cameraController = CameraController(this, textureView)
 
-        // 3.5. 读取设置 (Phase Y-1 加)
+        // 读取设置
         settings = SettingsStore(this)
         applySettingsToController()
 
-        // 4. 设置 Layer D 底部状态
-        updateFooter()
+        // 启动 1Hz 定时器更新状态
+        startStatusTicker()
 
-        // 5. 启动 1Hz 定时器更新 Layer D 时间
-        startFooterTick()
-
-        // 6. 申请 CAMERA 权限
+        // 申请 CAMERA 权限
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "CAMERA permission already granted")
             onCameraPermissionGranted()
@@ -118,108 +100,145 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "CAMERA permission not granted, requesting...")
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
         }
+
+        // 注册广播接收器
+        registerBroadcastReceivers()
     }
 
-    /**
-     * 从 activity_main.xml 绑定所有视图引用
-     */
     private fun bindViews() {
-        textureView = findViewById(R.id.textureView)
         statusDot = findViewById(R.id.statusDot)
-        statusText = findViewById(R.id.statusText)
-        debugText = findViewById(R.id.debugText)
-        btnSettings = findViewById(R.id.btnSettings)
-        btnToggle = findViewById(R.id.btnToggle)
+        statusTitle = findViewById(R.id.statusTitle)
+        statusDesc = findViewById(R.id.statusDesc)
+        infoRow = findViewById(R.id.infoRow)
+        infoResolution = findViewById(R.id.infoResolution)
+        infoFps = findViewById(R.id.infoFps)
+        infoConnection = findViewById(R.id.infoConnection)
+        lockStatusText = findViewById(R.id.lockStatusText)
         btnPush = findViewById(R.id.btnPush)
-        pushIndicator = findViewById(R.id.pushIndicator)
-        footerText = findViewById(R.id.footerText)
-        errorPlaceholder = findViewById(R.id.errorPlaceholder)
-        errorTitle = findViewById(R.id.errorTitle)
-        errorHint = findViewById(R.id.errorHint)
-        btnRetry = findViewById(R.id.btnRetry)
+        btnToggle = findViewById(R.id.btnToggle)
+        btnLockOrient = findViewById(R.id.btnLockOrient)
+        btnConnect = findViewById(R.id.btnConnect)
+        btnSettings = findViewById(R.id.btnSettings)
+
+        // TextureView: CameraController 需要，不可删除
+        // alpha=0 保证不可见；尺寸必须足够大以触发 SurfaceTexture 分配（1x1 在某些设备上不够）
+        textureView = TextureView(this).apply {
+            alpha = 0f
+            visibility = View.VISIBLE
+        }
+        val rootLayout = findViewById<android.widget.LinearLayout>(R.id.rootLayout)
+        val lp = android.widget.LinearLayout.LayoutParams(64, 64)  // 64x64 px，保证 surface 创建
+        rootLayout.addView(textureView, 0, lp)
     }
 
-    /**
-     * 设置导航监听: Layer B 右上角 2 个按钮 + Layer C 推流按钮 + 重试按钮
-     */
-    private fun setupNavigation() {
-        // 设置按钮 → SettingsActivity
-        btnSettings.setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+    private fun setupButtons() {
+        btnPush.setOnClickListener {
+            val snap = StreamingService.getStateSnapshot()
+            // P1-3: 基于 streamState 判断按钮行为
+            when (snap.streamState) {
+                StreamingService.Companion.StreamState.WAITING_PC,
+                StreamingService.Companion.StreamState.PC_CONNECTED -> {
+                    // 启动中，不允许操作
+                    return@setOnClickListener
+                }
+                StreamingService.Companion.StreamState.STREAMING,
+                StreamingService.Companion.StreamState.DISCONNECTED -> {
+                    // 推流中或断开，允许停止
+                    btnPush.isEnabled = false
+                    btnPush.text = "停止中…"
+                    StreamingService.stop(this)
+                }
+                else -> {
+                    // 空闲或失败，允许启动
+                    btnPush.isEnabled = false
+                    btnPush.text = "启动中…"
+                    StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
+                    StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
+                    StreamingService.sCameraFps = settings.fps.toIntOrNull() ?: 30
+                    StreamingService.start(this)
+                }
+            }
         }
 
-        // 切换按钮 → 切换前后摄像头 (Phase Y-1 加, 不再 Toast)
         btnToggle.setOnClickListener {
             toggleLens()
         }
 
-        // 推流按钮 → 批次 3.2.0.3f 启前台 StreamingService (走 Service.start/stop, 避免 Oplus Hans 冻结)
-        //  Hans 冻结的是非前台任务的子线程, 启前台 Service 后 Hans 不冻
-        btnPush.setOnClickListener {
-            val snap = StreamingService.getStateSnapshot()
-            if (snap.isStarting) return@setOnClickListener
-
-            if (snap.isActive) {
-                // 先更新 UI 快速反馈
-                btnPush.isEnabled = false
-                btnPush.text = "停止中..."
-                StreamingService.stop(this)
-            } else {
-                btnPush.isEnabled = false
-                btnPush.text = "连接中..."
-                // 把 MainActivity 当前的相机实际尺寸塞给 Service, 编码器用真实尺寸
-                StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
-                StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
-                StreamingService.start(this)
-            }
+        btnConnect.setOnClickListener {
+            startActivity(Intent(this, ConnectActivity::class.java))
         }
 
+        btnLockOrient.setOnClickListener {
+            toggleOrientationLock()
+        }
+    }
 
-        // 批次 3.2.0.3f: 注册 broadcast receiver (调试备用入口, 走 StreamingService)
-        //  用法: adb shell am broadcast -a com.phonecam.START_STREAMING
-        //        adb shell am broadcast -a com.phonecam.STOP_STREAMING
+    private fun setupSettingsButton() {
+        btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+    }
+
+    private fun registerBroadcastReceivers() {
         val streamFilter = IntentFilter().apply {
             addAction("com.phonecam.START_STREAMING")
             addAction("com.phonecam.STOP_STREAMING")
+            addAction("com.phonecam.TOGGLE_ORIENT_LOCK")
         }
-        val streamReceiver = object : BroadcastReceiver() {
+        streamReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 when (intent.action) {
                     "com.phonecam.START_STREAMING" -> {
-                        InAppLogStore.i(TAG, "[3.2.0.3f-BROADCAST] 收到 START_STREAMING, 启 StreamingService")
+                        InAppLogStore.i(TAG, "[BROADCAST] START_STREAMING")
                         if (!StreamingService.getStateSnapshot().isActive) {
                             StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
                             StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
+                            StreamingService.sCameraFps = settings.fps.toIntOrNull() ?: 30
                             StreamingService.start(ctx)
                         }
                     }
                     "com.phonecam.STOP_STREAMING" -> {
-                        InAppLogStore.i(TAG, "[3.2.0.3f-BROADCAST] 收到 STOP_STREAMING, 停 StreamingService")
+                        InAppLogStore.i(TAG, "[BROADCAST] STOP_STREAMING")
                         if (StreamingService.getStateSnapshot().isActive) StreamingService.stop(ctx)
+                    }
+                    "com.phonecam.TOGGLE_ORIENT_LOCK" -> {
+                        InAppLogStore.i(TAG, "[BROADCAST] TOGGLE_ORIENT_LOCK")
+                        toggleOrientationLock()
                     }
                 }
             }
         }
-        // Android 13+ (API 33+) 必须指定 RECEIVER_EXPORTED 或 RECEIVER_NOT_EXPORTED flag
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(streamReceiver, streamFilter, Context.RECEIVER_EXPORTED)
         } else {
             registerReceiver(streamReceiver, streamFilter)
         }
-        InAppLogStore.i(TAG, "[3.2.0.3e-BROADCAST] 广播接收器已注册 (START/STOP_STREAMING)")
+    }
 
-        // 重试按钮 → 重新申请权限
-        btnRetry.setOnClickListener {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
+    private fun toggleOrientationLock() {
+        if (orientationLockEnabled) {
+            orientationLockEnabled = false
+            lockedStreamRotation = 0
+            btnLockOrient.text = "锁定方向"
+            Log.i(TAG, "orientation lock OFF")
+        } else {
+            lockedStreamRotation = 0  // Lock to current rotation (0°)
+            orientationLockEnabled = true
+            btnLockOrient.text = "解锁方向"
+            Log.i(TAG, "orientation lock ON")
+        }
+        updateLockStatus()
+    }
+
+    private fun updateLockStatus() {
+        if (orientationLockEnabled) {
+            lockStatusText.text = "方向已锁定（旋转手机不会改变画面）"
+            lockStatusText.visibility = View.VISIBLE
+        } else {
+            lockStatusText.visibility = View.GONE
         }
     }
 
-    /**
-     * 切换前后摄像头 (Phase Y-1 加)
-     * 1) 把 settings.lens 翻转
-     * 2) 把新值注入 CameraController
-     * 3) close + open 重启相机
-     */
     private fun toggleLens() {
         val newLens = if (currentLensPref == "back") "front" else "back"
         currentLensPref = newLens
@@ -233,113 +252,196 @@ class MainActivity : AppCompatActivity() {
         ).show()
         Log.d(TAG, "toggleLens: $newLens")
 
-        // 重启相机
-        cameraController?.close()
-        cameraController?.open()
+        val snap = StreamingService.getStateSnapshot()
+        if (snap.isActive || snap.isStarting) {
+            StreamingService.stop(this)
+            cameraController?.close()
+            mainHandler.postDelayed({
+                cameraController?.open()
+                StreamingService.start(this)
+            }, 500)
+        } else {
+            cameraController?.close()
+            cameraController?.open()
+        }
     }
 
-    /**
-     * 把 SettingsStore 里的设置注入 CameraController (Phase Y-1 加)
-     * 也在 onResume 里调, 这样从 Settings 页返回后会用新设置
-     */
     private fun applySettingsToController() {
         currentLensPref = settings.lens
         cameraController?.setLensFacing(settings.lens)
         cameraController?.setTargetResolution(settings.resolution)
-
-        // 调试信息显隐
-        debugText.visibility = if (settings.showDebug) View.VISIBLE else View.GONE
-
-        InAppLogStore.d(TAG, "applySettings: lens=${settings.lens} res=${settings.resolution} showDebug=${settings.showDebug}")
+        cameraController?.setTargetFps(settings.fps)
+        InAppLogStore.d(TAG, "applySettings: lens=${settings.lens} res=${settings.resolution} fps=${settings.fps}")
     }
 
     /**
-     * 更新 Layer D 底部状态: PHONECAM v0.2.4 — CAM0 — 00:00:00
+     * 1Hz 定时器：更新首页状态
      */
-    private fun updateFooter() {
-        val camId = cameraController?.getCameraId() ?: getString(R.string.layer_d_cam_unknown)
-        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-        footerText.text = getString(R.string.layer_d_format, "v0.2.8-x", camId, time)
-    }
-
-    /**
-     * 启动 1Hz 定时器: 每秒更新 Layer D 时间戳和按钮状态
-     */
-    private val footerTickRunnable = object : Runnable {
+    private val statusTicker = object : Runnable {
         override fun run() {
-            updateFooter()
-            updatePushBtnState()
+            updateStatus()
             mainHandler.postDelayed(this, 1000L)
         }
     }
 
-    private fun updatePushBtnState() {
+    private fun startStatusTicker() {
+        mainHandler.post(statusTicker)
+    }
+
+    private fun stopStatusTicker() {
+        mainHandler.removeCallbacks(statusTicker)
+    }
+
+    private fun updateStatus() {
         val snap = StreamingService.getStateSnapshot()
-        if (snap.isStarting) {
-            btnPush.text = "连接中 (等 PC).."
-            btnPush.isEnabled = false
-            pushIndicator.visibility = View.GONE
-        } else if (snap.isActive) {
-            btnPush.text = getString(R.string.layer_c_btn_stop)
-            btnPush.isEnabled = true
-            pushIndicator.visibility = View.VISIBLE
-        } else {
-            btnPush.text = getString(R.string.layer_c_btn_start)
-            btnPush.isEnabled = true
-            pushIndicator.visibility = View.GONE
+
+        // P1-3: 基于 streamState 的精细状态显示
+        when (snap.streamState) {
+            StreamingService.Companion.StreamState.STREAMING -> {
+                statusDot.setBackgroundResource(R.drawable.status_dot_connected)
+                statusTitle.text = "推流中"
+                statusDesc.text = "请在腾讯会议或 OBS 中选择 PhoneCam Camera"
+                infoRow.visibility = View.VISIBLE
+
+                val elapsedSec = if (snap.startTimeMs > 0) {
+                    (android.os.SystemClock.elapsedRealtime() - snap.startTimeMs) / 1000.0
+                } else 0.0
+                val actualFps = if (elapsedSec > 0) (snap.naluOutputCount / elapsedSec).toInt() else 0
+
+                infoResolution.text = "${snap.cameraWidth}×${snap.cameraHeight}"
+                infoFps.text = "${actualFps} fps"
+                infoConnection.text = if (snap.isPcClientConnected) "PC 已连接" else "等待连接…"
+            }
+            StreamingService.Companion.StreamState.PC_CONNECTED -> {
+                statusDot.setBackgroundResource(R.drawable.status_dot_waiting)
+                statusTitle.text = "PC 已连接"
+                statusDesc.text = "正在准备推流…"
+                infoRow.visibility = View.GONE
+            }
+            StreamingService.Companion.StreamState.WAITING_PC -> {
+                statusDot.setBackgroundResource(R.drawable.status_dot_waiting)
+                statusTitle.text = "等待电脑连接"
+                // P1-3: 30s 后显示检查建议
+                val waitSec = if (snap.waitStartTimeMs > 0) {
+                    (System.currentTimeMillis() - snap.waitStartTimeMs) / 1000
+                } else 0
+                statusDesc.text = if (waitSec > 30) {
+                    "已等待 ${waitSec}秒，请检查：\n" +
+                    "1. USB 已连接或手机热点已开启\n" +
+                    "2. 电脑端 PhoneCam 已启动\n" +
+                    "3. 如果用热点，确认电脑已连接手机热点"
+                } else {
+                    "请确保：\n1. USB 已连接或手机热点已开启\n2. 电脑端 PhoneCam 已启动"
+                }
+                infoRow.visibility = View.GONE
+            }
+            StreamingService.Companion.StreamState.DISCONNECTED -> {
+                statusDot.setBackgroundResource(R.drawable.status_dot_waiting)
+                statusTitle.text = "连接断开"
+                statusDesc.text = "PC 端已断开连接，正在等待重连…\n请确认电脑端 PhoneCam 仍在运行"
+                infoRow.visibility = View.GONE
+            }
+            StreamingService.Companion.StreamState.START_FAILED -> {
+                statusDot.setBackgroundResource(R.drawable.dot_inactive)
+                statusTitle.text = "启动失败"
+                statusDesc.text = snap.startFailedReason.ifEmpty { "未知错误，请重试" }
+                infoRow.visibility = View.GONE
+            }
+            StreamingService.Companion.StreamState.IDLE -> {
+                statusDot.setBackgroundResource(R.drawable.dot_inactive)
+                statusTitle.text = "空闲"
+                statusDesc.text = "点击下方按钮开始推流"
+                infoRow.visibility = View.GONE
+            }
         }
+
+        // P1-3: 主按钮状态 (基于 streamState)
+        when (snap.streamState) {
+            StreamingService.Companion.StreamState.WAITING_PC,
+            StreamingService.Companion.StreamState.PC_CONNECTED -> {
+                btnPush.text = "启动中…"
+                btnPush.isEnabled = false
+            }
+            StreamingService.Companion.StreamState.STREAMING,
+            StreamingService.Companion.StreamState.DISCONNECTED -> {
+                btnPush.text = "停止推流"
+                btnPush.isEnabled = true
+            }
+            else -> {
+                btnPush.text = "开始推流"
+                btnPush.isEnabled = true
+            }
+        }
+
+        // 横屏锁定状态
+        updateLockStatus()
     }
 
-    private fun startFooterTick() {
-        mainHandler.post(footerTickRunnable)
+    private fun onCameraPermissionGranted() {
+        cameraController?.onPermissionGranted()
+        setupCameraImageCallback()
     }
 
-    private fun stopFooterTick() {
-        mainHandler.removeCallbacks(footerTickRunnable)
+    private fun setupCameraImageCallback() {
+        cameraController?.setOnImageAvailableListener { image ->
+            try {
+                val w = image.width
+                val h = image.height
+                val yuv = Yuv420Extractor.imageToI420(image)
+                cameraW = w
+                cameraH = h
+                cameraFrameCount++
+
+                val snap = StreamingService.getStateSnapshot()
+                if (snap.isActive) {
+                    val rotation = if (orientationLockEnabled) {
+                        lockedStreamRotation
+                    } else {
+                        cameraController?.getStreamRotation() ?: 0
+                    }
+                    StreamingService.submitFrame(yuv, w, h, image.timestamp, rotation)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "提取帧异常", e)
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        InAppLogStore.d(TAG, "onResume")
-        // 重新读取设置 (从 Settings 页返回后会用新设置)
         if (::settings.isInitialized) {
             applySettingsToController()
         }
         cameraController?.open()
-        startFooterTick()
+        startStatusTicker()
     }
 
     override fun onPause() {
         super.onPause()
-        InAppLogStore.d(TAG, "onPause")
         cameraController?.close()
-        stopFooterTick()
+        stopStatusTicker()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        stopFooterTick()
+        stopStatusTicker()
+        streamReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+            streamReceiver = null
+        }
     }
 
-    /**
-     * 双击退出: 1.5s 窗口内再次按返回才真正退出
-     */
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         val now = System.currentTimeMillis()
         if (now - lastBackPressedMs < EXIT_TOAST_WINDOW_MS) {
-            // 第二次按: 真正退出
             super.onBackPressed()
             return
         }
-        // 第一次按: 显示 Toast
         lastBackPressedMs = now
         Toast.makeText(this, R.string.toast_press_again_to_exit, Toast.LENGTH_SHORT).show()
     }
 
-    /**
-     * 权限回调 (API 23+, 原生 onRequestPermissionsResult)
-     */
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -353,77 +455,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 Log.w(TAG, "user denied CAMERA permission")
                 cameraController?.onPermissionDenied()
-                showError(
-                    title = getString(R.string.err_no_permission_title),
-                    hint = getString(R.string.err_no_permission_hint)
-                )
             }
         }
     }
-
-    /**
-     * 权限通过: 通知 Controller + 更新 Layer B 状态 + 注册 ImageReader 帧回调
-     */
-    private fun onCameraPermissionGranted() {
-        cameraController?.onPermissionGranted()
-        hideError()
-        val camId = cameraController?.getCameraId() ?: "?"
-        statusText.text = getString(R.string.layer_b_status_idle)
-        debugText.text = "CAM$camId — 等待推流"
-        // 批次 3.2.0.2: 注册 ImageReader 真实帧回调 (供 btnPush 拍 1 帧 H.264 用)
-        setupCameraImageCallback()
-    }
-
-    /**
-     * 批次 3.2.0.2: 给 CameraController 注册 ImageReader 帧回调, 把每帧 YUV420_888 转 I420 缓存
-     *
-     * 注意: CameraController 在 listener finally 里已经 image.close() 了, 我们只读不关
-     */
-    private fun setupCameraImageCallback() {
-        cameraController?.setOnImageAvailableListener { image ->
-            try {
-                val w = image.width
-                val h = image.height
-                val yuv = Yuv420Extractor.imageToI420(image)
-                cameraW = w
-                cameraH = h
-                cameraFrameCount++
-                InAppLogStore.d(TAG, "帧 #$cameraFrameCount ${w}x${h} -> ${yuv.size} 字节 I420")
-
-                // 批次 3.2.0.3f: 推流状态下把 YUV 投递给 StreamingService.submitFrame
-                //  Service 持 EglRenderer, submitFrame 内部把任务投到 EGL owner thread
-                //  (EGL context 是 thread-local, listener 线程不能直接调 drawYuv)
-                val snap = StreamingService.getStateSnapshot()
-                if (cameraFrameCount % 30 == 0) {
-                    InAppLogStore.i(TAG, "[3.2.0.3f-DEBUG] 帧#$cameraFrameCount sActive=${snap.isActive}")
-                }
-                if (snap.isActive) {
-                    // 批次 3.2.0.3g: 传 image.timestamp (纳秒, Camera2 单调时钟)
-                    //  PC 端用这个 + 解码时间算端到端时延
-                    val rotation = cameraController?.getStreamRotation() ?: 0
-                    StreamingService.submitFrame(yuv, w, h, image.timestamp, rotation)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "[3.2.0.2] 提取真实帧异常", e)
-            }
-        }
-    }
-
-    /**
-     * 显示错误占位 (Layer A 中央)
-     */
-    private fun showError(title: String, hint: String) {
-        errorTitle.text = title
-        errorHint.text = hint
-        errorPlaceholder.visibility = View.VISIBLE
-    }
-
-    /**
-     * 隐藏错误占位
-     */
-    private fun hideError() {
-        errorPlaceholder.visibility = View.GONE
-    }
-
-    // 推流逻辑在 StreamingService 中实现，MainActivity 仅通过 onClick 调用 StreamingService.start/stop
 }

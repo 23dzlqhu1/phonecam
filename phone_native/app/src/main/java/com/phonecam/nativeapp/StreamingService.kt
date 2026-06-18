@@ -53,6 +53,23 @@ class StreamingService : Service() {
         // 前台 Service 专属 worker thread, Hans 不冻 (因为整个 Service 标记为前台)
         const val WORKER_THREAD_NAME = "Streaming-Service-Thread"
 
+        // P1-3: 推流状态枚举 (取代分散的 sActive/sStarting bool)
+        enum class StreamState {
+            IDLE,               // 空闲 — 未启动推流
+            WAITING_PC,         // 等待 PC 连接 — TCP server 已启动，等客户端
+            PC_CONNECTED,       // PC 已连接 — 客户端连上，准备推流
+            STREAMING,          // 正在推流 — 编码+发送中
+            DISCONNECTED,       // 连接断开 — PC 断开，等待重连
+            START_FAILED        // 启动失败 — 超时/权限/异常
+        }
+
+        @Volatile var sStreamState: StreamState = StreamState.IDLE
+        @Volatile var sStartFailedReason: String = ""
+        @Volatile var sWaitStartTimeMs: Long = 0L  // 等待 PC 连接的开始时间
+
+        // P1-3: 连接断开事件 (TcpStreamServer onEvent 回调设置)
+        @Volatile var sClientDisconnected: Boolean = false
+
         // 跨 Service 边界给 MainActivity listener 读 (推流资源)
         @Volatile var sActive: Boolean = false
         @Volatile var sStarting: Boolean = false
@@ -61,6 +78,7 @@ class StreamingService : Service() {
         @Volatile var sTcpServer: TcpStreamServer? = null
         @Volatile var sCameraW: Int = 1280
         @Volatile var sCameraH: Int = 720
+        @Volatile var sCameraFps: Int = 30    // 从 SettingsStore 读取, 写入 MediaCodec KEY_FRAME_RATE
         // 批次 3.2.0.3f 跨线程 EGL 修复: EGL context 是 thread-local, listener 在 imageReaderHandler 线程
         //   不能直接调 EglRenderer.drawYuv (EglRenderer 在 Service worker thread 启的)
         //   解决: 提交任务到 eglExecutor (单线程), 由 EGL owner thread 调 drawYuv
@@ -129,13 +147,21 @@ class StreamingService : Service() {
         @Volatile var sNaluSentCount: Int = 0
         @Volatile var sBytesSentCount: Long = 0L
 
+        // P0 修复: keyframe/P-frame 发送统计
+        @Volatile var sKeyframeCount: Long = 0
+        @Volatile var sNonKeyframeCount: Long = 0
+
         /**
          * 只读状态快照 —— 供 MainActivity UI 更新用，减少直接读取多个 sXXX 字段。
          * 不替代 submitFrame() 等功能性调用。
          */
         data class StreamingStateSnapshot(
+            val streamState: StreamState,  // P1-3: 精细状态
+            val startFailedReason: String, // P1-3: 失败原因
+            val waitStartTimeMs: Long,     // P1-3: 等待 PC 连接的开始时间
             val isStarting: Boolean,
             val isActive: Boolean,
+            val isPcClientConnected: Boolean,
             val cameraWidth: Int,
             val cameraHeight: Int,
             val frameSubmitCount: Long,
@@ -147,8 +173,12 @@ class StreamingService : Service() {
         )
 
         fun getStateSnapshot(): StreamingStateSnapshot = StreamingStateSnapshot(
+            streamState = sStreamState,
+            startFailedReason = sStartFailedReason,
+            waitStartTimeMs = sWaitStartTimeMs,
             isStarting = sStarting,
             isActive = sActive,
+            isPcClientConnected = sTcpServer?.isClientConnected() ?: false,
             cameraWidth = sCameraW,
             cameraHeight = sCameraH,
             frameSubmitCount = sFrameSubmitCount,
@@ -229,12 +259,22 @@ class StreamingService : Service() {
         Thread({
             try {
                 InAppLogStore.i(TAG, "[3.2.0.3f] Service worker thread 启动, 6 步走起")
+                sStreamState = StreamState.WAITING_PC  // P1-3
+                sWaitStartTimeMs = System.currentTimeMillis()  // P1-3
+                sClientDisconnected = false  // P1-3
 
                 // 1) TCP server 起来 (注册 onCommand 监听 PC 端的反向控制指令)
                 val server = TcpStreamServer(
                     port = 9999,
                     onEvent = { status ->
                         InAppLogStore.i(TAG, "[3.2.0.3f-TCP] $status")
+                        // P1-3: 检测客户端断开
+                        if (status.contains("客户端已断开") || status.contains("sendPacket 客户端断开")) {
+                            sClientDisconnected = true
+                            if (sActive) {
+                                sStreamState = StreamState.DISCONNECTED
+                            }
+                        }
                     },
                     onCommand = { cmd ->
                         if (cmd == "PLI") {
@@ -260,6 +300,8 @@ class StreamingService : Service() {
                 }
                 if (!server.isClientConnected()) {
                     InAppLogStore.e(TAG, "[3.2.0.3f] 120s 内无客户端连接, 启动失败, 自动 stop")
+                    sStreamState = StreamState.START_FAILED  // P1-3
+                    sStartFailedReason = "120秒内未收到电脑端连接"  // P1-3
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         Toast.makeText(this, "推流启动失败: 120s 内未收到 PC 端连接", Toast.LENGTH_LONG).show()
                     }
@@ -267,6 +309,9 @@ class StreamingService : Service() {
                     stopStreamingInternal()
                     return@Thread
                 }
+
+                // P1-3: PC 已连接
+                sStreamState = StreamState.PC_CONNECTED
 
                 // 3) H264Encoder.start
                 val w = sCameraW
@@ -282,6 +327,7 @@ class StreamingService : Service() {
                         //  PC 端用这个 + 解码时间算端到端时延
                         val ptsNs = readLatestPtsNs()
                         val isKeyframe = (type == 5)  // H.264 NALU type 5 = IDR slice
+                        if (isKeyframe) sKeyframeCount++ else sNonKeyframeCount++
                         val flags = PcpPacketWriter.encodeRotationFlags(sCurrentRotation, isKeyframe)
                         val header = PcpPacketWriter.buildHeader(
                             sequence = seq,
@@ -305,7 +351,7 @@ class StreamingService : Service() {
                         }
                     }
                 }
-                val inputSurface = encoder.start(w, h, naluCb)
+                val inputSurface = encoder.start(w, h, sCameraFps, naluCb)
                 sH264Encoder = encoder
 
                 // 4) EglRenderer 绑到 inputSurface
@@ -347,6 +393,8 @@ class StreamingService : Service() {
                 sPcpSequence = 0
                 sNaluSentCount = 0
                 sBytesSentCount = 0L
+                sKeyframeCount = 0
+                sNonKeyframeCount = 0
                 // 批次 3.2.0.3g 帧率统计 reset
                 sFrameSubmitCount = 0
                 sFrameEncodeCount = 0
@@ -355,6 +403,7 @@ class StreamingService : Service() {
 
                 // 6) 翻转 sActive 标志位 → MainActivity listener 看到后会送帧
                 sActive = true
+                sStreamState = StreamState.STREAMING  // P1-3
                 InAppLogStore.i(TAG, "[3.2.0.3f] sActive=true, 推流中...")
 
                 // 批次 3.2.0.3g 帧率统计: 启动 1s 定时打印 (主线程 Handler, 1s 一次, 推流期间持续)
@@ -363,6 +412,8 @@ class StreamingService : Service() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "[3.2.0.3f] 启动异常", e)
+                sStreamState = StreamState.START_FAILED  // P1-3
+                sStartFailedReason = "启动异常: ${e.message}"  // P1-3
                 Toast.makeText(this, "推流启动异常: ${e.message}", Toast.LENGTH_LONG).show()
                 sStarting = false
                 stopStreamingInternal()
@@ -377,6 +428,9 @@ class StreamingService : Service() {
     private fun stopStreamingInternal() {
         sActive = false
         sStarting = false
+        sStreamState = StreamState.IDLE  // P1-3: reset to idle
+        sStartFailedReason = ""  // P1-3
+        sClientDisconnected = false  // P1-3
         // 批次 3.2.0.3g: 停帧率统计 timer
         stopStatsTimer()
         Thread.sleep(200)  // 让 listener 看到 sActive=false 后再释放
@@ -408,9 +462,12 @@ class StreamingService : Service() {
                 val draws = sEglRenderer?.drawCallCount ?: 0
                 InAppLogStore.i(
                     TAG,
-                    "[3.2.0.3g-STATS] T=${"%.1f".format(elapsedSec)}s 送帧=${"%.1f".format(submitFps)}fps 编码=${"%.1f".format(encodeFps)}fps " +
-                            "NALU出=${"%.1f".format(naluFps)}fps 发送=${"%.1f".format(sendFps)}fps ${"%.1f".format(bps)}kbps " +
-                            "EGL画=$draws 错误=$eglErr swap失败=$eglSwapFail"
+                    "[STATS] T=${"%.1f".format(elapsedSec)}s " +
+                            "送帧=${"%.1f".format(submitFps)}fps 编码=${"%.1f".format(encodeFps)}fps " +
+                            "NALU=${"%.1f".format(naluFps)}fps 发送=${"%.1f".format(sendFps)}fps " +
+                            "${"%.1f".format(bps)}kbps " +
+                            "IDR=$sKeyframeCount P=$sNonKeyframeCount " +
+                            "EGL:draw=$draws err=$eglErr swapFail=$eglSwapFail"
                 )
             }
             statsHandler.postDelayed(this, 1000L)
