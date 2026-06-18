@@ -741,6 +741,13 @@ void MainWindow::updateDiagnosticsBar() {
             }
         }
     }
+    // P2-1 Loop 3: Manual device failure diagnostics
+    for (const auto& c : m_connManager->candidates()) {
+        if (c.transport == "manual" && c.status == "Failed") {
+            msgs << QString::fromUtf8("❌ 手动连接 %1 失败: %2 — 请确认手机端已开始推流且 IP 正确")
+                .arg(c.displayName, c.lastError);
+        }
+    }
     if (msgs.isEmpty()) {
         m_diagLabel->setVisible(false);
     } else {
