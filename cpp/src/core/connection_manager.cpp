@@ -50,6 +50,7 @@ void ConnectionManager::confirmStreamActive() {
     if (m_info.state == ConnectionState::WaitingForPhone) {
         m_info.state = ConnectionState::Connected;
         m_streamConfirmed = true;
+        m_lastConnectedDeviceId = m_activeDeviceId;  // P2-1: remember last connected
         DeviceCandidate* cand = findCandidate(m_activeDeviceId);
         if (cand) {
             cand->status = "Connected";
@@ -247,15 +248,34 @@ void ConnectionManager::checkConnection() {
                 emit diagnosticsChanged(m_diagnostics);
 
                 if (!m_manualSelection && m_activeDeviceId.isEmpty() && !m_candidates.isEmpty()) {
+                    // P2-1 Loop 4: Priority: last connected > USB > WiFi > manual
+                    // 1. Last connected device
+                    if (!m_lastConnectedDeviceId.isEmpty()) {
+                        for (const auto& c : m_candidates) {
+                            if (c.id == m_lastConnectedDeviceId && c.status == "Found") {
+                                qDebug() << "[CONN] Auto-selecting last connected:" << c.displayName;
+                                m_activeDeviceId = c.id; connectToCandidate(c.id); return;
+                            }
+                        }
+                    }
+                    // 2. USB
                     for (const auto& c : m_candidates) {
                         if (c.transport == "usb" && c.status == "Found") {
                             qDebug() << "[CONN] Auto-selecting USB device:" << c.displayName << c.url;
                             m_activeDeviceId = c.id; connectToCandidate(c.id); return;
                         }
                     }
+                    // 3. WiFi
                     for (const auto& c : m_candidates) {
                         if (c.transport == "wifi" && c.status == "Found") {
                             qDebug() << "[CONN] Auto-selecting WiFi device:" << c.displayName << c.url;
+                            m_activeDeviceId = c.id; connectToCandidate(c.id); return;
+                        }
+                    }
+                    // 4. Manual (lowest priority in auto mode)
+                    for (const auto& c : m_candidates) {
+                        if (c.transport == "manual" && c.status == "Found") {
+                            qDebug() << "[CONN] Auto-selecting manual device:" << c.displayName;
                             m_activeDeviceId = c.id; connectToCandidate(c.id); return;
                         }
                     }

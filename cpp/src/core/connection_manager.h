@@ -2,7 +2,10 @@
 #include <QObject>
 #include <QTimer>
 #include <QString>
+#include <QVector>
+#include <QStringList>
 #include <memory>
+#include "core/device_discovery.h"
 
 namespace phonecam {
 
@@ -16,13 +19,32 @@ enum class ConnectionState {
 
 struct ConnectionInfo {
     ConnectionState state = ConnectionState::Disconnected;
-    QString connectionType;  // "usb" or "hotspot"
+    QString connectionType;
     QString url;
     QString error;
 };
 
-// Manages ADB reverse port forwarding and connection state machine.
-// Priority: USB (adb reverse) > Hotspot (gateway probe).
+// Device candidate model
+struct DeviceCandidate {
+    QString id;           // "usb:<serial>" | "wifi:<ip>" | "manual:<host>:<port>"
+    QString displayName;  // "USB - vivo V2243A" | "WiFi - 192.168.43.1"
+    QString transport;    // "usb", "wifi", "manual"
+    QString url;          // "host:port"
+    QString adbSerial;    // ADB serial for USB (empty otherwise)
+    QString status;       // "Found", "Connecting", "Connected", "Failed"
+    QString lastError;
+    qint64 lastSeen = 0;
+};
+
+// Aggregated connection diagnostics
+struct ConnectionDiagnostics {
+    QString gatewayIp;
+    QStringList localNics;
+    QVector<ProbeDiagnostic> probeResults;
+    QString adbStatus;
+    QStringList adbDevices;
+};
+
 class ConnectionManager : public QObject {
     Q_OBJECT
 public:
@@ -32,25 +54,53 @@ public:
     void start(quint16 port = 9999);
     void stop();
     void confirmStreamActive();
+    void markStreamLost();
+
+    // Device selection
+    void selectDevice(const QString& deviceId);     // "" = auto
+    void addManualDevice(const QString& host, quint16 port);
+    void refreshDevices();
+    void onConnectionFailed(const QString& error);
+    QVector<DeviceCandidate> candidates() const { return m_candidates; }
+    QString activeDeviceId() const { return m_activeDeviceId; }  // P2-1 Loop 4
 
     ConnectionInfo info() const { return m_info; }
 
 signals:
     void stateChanged(const phonecam::ConnectionInfo& info);
     void connectionReady(const QString& url);
+    void candidatesChanged(const QVector<phonecam::DeviceCandidate>& candidates);
+    void diagnosticsChanged(const phonecam::ConnectionDiagnostics& diag);
 
 private slots:
     void checkConnection();
 
 private:
-    bool setupAdbReverse();
+    bool setupAdbForwardForDevice(const QString& serial, quint16 localPort);
     QString findAdb();
+    DeviceCandidate* findCandidate(const QString& id);
+    void connectToCandidate(const QString& id);
 
     QTimer* m_timer = nullptr;
+    DeviceDiscovery* m_discovery = nullptr;
     ConnectionInfo m_info;
     quint16 m_port = 9999;
-    bool m_adbReverseOk = false;
+    int m_nextLocalPort = 19999;
+
+    QVector<DeviceCandidate> m_candidates;
+    QString m_activeDeviceId;
+    bool m_manualSelection = false;
+    QString m_lastConnectedDeviceId;  // P2-1 Loop 4: last successful device
+
+    ConnectionDiagnostics m_diagnostics;
+
+    bool m_adbProbeRunning = false;
+    bool m_hotspotDiscoveryRunning = false;
     bool m_streamConfirmed = false;
 };
 
 } // namespace phonecam
+
+Q_DECLARE_METATYPE(phonecam::DeviceCandidate)
+Q_DECLARE_METATYPE(QVector<phonecam::DeviceCandidate>)
+Q_DECLARE_METATYPE(phonecam::ConnectionDiagnostics)

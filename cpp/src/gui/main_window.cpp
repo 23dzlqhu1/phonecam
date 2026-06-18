@@ -97,6 +97,24 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onConnectionStateChanged);
     connect(m_connManager, &ConnectionManager::diagnosticsChanged,
             this, &MainWindow::onDiagnosticsChanged);
+    // P2-1 Loop 4: Wire connectionReady to restart receiver for device switching
+    connect(m_connManager, &ConnectionManager::connectionReady, this, [this](const QString& url) {
+        // Parse host:port from URL
+        QStringList parts = url.split(':');
+        QString host = parts.value(0, "127.0.0.1");
+        quint16 port = parts.value(1, "9999").toUShort();
+
+        // Stop current receiver, clear queues, flush decoder
+        m_receiver->stop();
+        m_legacyDisplayQueue->clear();
+        if (m_decodeWorker) {
+            QMetaObject::invokeMethod(m_decodeWorker, "requestFlush", Qt::QueuedConnection);
+        }
+
+        // Restart receiver with new endpoint
+        m_receiver->start(host, port);
+        qDebug() << "[MAIN] Switching receiver to" << host << ":" << port;
+    });
     connect(m_connManager, &ConnectionManager::candidatesChanged,
             this, [this](const QVector<DeviceCandidate>& candidates) {
         // P1-1: Update device combo box
@@ -113,8 +131,10 @@ MainWindow::MainWindow(QWidget* parent)
             QString statusIcon = (c.status == "Connected") ? "✅" :
                                  (c.status == "Connecting") ? "⏳" :
                                  (c.status == "Failed") ? "❌" : "⬜";
-            QString label = QString("%1 %2 %3 [%4]")
-                .arg(icon, c.displayName, statusIcon, c.status);
+            // P2-1 Loop 4: Mark active device with ▶
+            QString activePrefix = (c.id == m_connManager->activeDeviceId()) ? "▶ " : "";
+            QString label = QString("%1%2 %3 %4 [%5]")
+                .arg(activePrefix, icon, c.displayName, statusIcon, c.status);
             if (!c.lastError.isEmpty() && c.status == "Failed") {
                 label += QString(" — %1").arg(c.lastError);
             }
