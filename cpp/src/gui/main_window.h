@@ -12,27 +12,43 @@
 #include "core/connection_manager.h"
 #include "core/video_frame.h"
 #include "core/bounded_queue.h"
+#include "core/nv12_frame.h"
+#include "core/final_frame_composer.h"
 #include "gui/preview_widget.h"
 #include "output/virtual_cam.h"
 #include "vcam/shared_memory.h"
 
 namespace phonecam {
 
-// Decode worker runs on a dedicated thread
+// Decode worker runs on a dedicated thread.
+// Primary path: decodeFrame() → FinalFrameComposer → Nv12Frame
+// Legacy fallback: decode() → QImage (when mirror/flip/manualRotation active)
 class DecodeWorker : public QObject {
     Q_OBJECT
 public:
-    explicit DecodeWorker(HwDecoder* decoder, BoundedQueue<QImage>* queue, QObject* parent = nullptr);
+    explicit DecodeWorker(HwDecoder* decoder, FinalFrameComposer* composer,
+                          BoundedQueue<QImage>* legacyQueue, QObject* parent = nullptr);
+
+    void setUseLegacyCompose(bool legacy) { m_useLegacyCompose = legacy; }
+    void setTransformState(bool mirror, bool flip, int manualRotation);
 
 public slots:
     void decodeFrame(const phonecam::VideoFrame& frame);
+    void requestFlush();
 
 signals:
+    void finalFrameReady(const phonecam::Nv12Frame& frame);
     void frameDecoded(const QImage& image);
 
 private:
     HwDecoder* m_decoder;
-    BoundedQueue<QImage>* m_displayQueue;
+    FinalFrameComposer* m_composer;
+    BoundedQueue<QImage>* m_legacyDisplayQueue;
+    uint32_t m_sequence = 0;
+    bool m_useLegacyCompose = false;
+    bool m_mirror = false;
+    bool m_flip = false;
+    int m_manualRotation = 0;
 };
 
 class MainWindow : public QMainWindow {
@@ -49,7 +65,8 @@ public:
 private slots:
     void onConnectionStateChanged(const phonecam::ConnectionInfo& info);
     void onDiagnosticsChanged(const phonecam::ConnectionDiagnostics& diag);
-    void onFrameDecoded(const QImage& image);
+    void onFinalFrameReady(const phonecam::Nv12Frame& frame);
+    void onFrameDecoded(const QImage& image);  // legacy fallback
     void onMirrorToggled();
     void onFlipToggled();
     void onRotationToggled();
@@ -75,6 +92,7 @@ private:
     // Core components
     PcpReceiver* m_receiver;
     HwDecoder* m_decoder;
+    FinalFrameComposer* m_composer;
     ConnectionManager* m_connManager;
     VirtualCam* m_virtualCam;
     vcam::SharedMemoryWriter m_sharedWriter;  // For virtual camera DLL
@@ -82,7 +100,7 @@ private:
     // Decode thread
     QThread* m_decodeThread = nullptr;
     DecodeWorker* m_decodeWorker = nullptr;
-    BoundedQueue<QImage>* m_displayQueue = nullptr;
+    BoundedQueue<QImage>* m_legacyDisplayQueue = nullptr;  // legacy fallback only
 
     // UI elements
     QLabel* m_statusDot;
@@ -107,6 +125,8 @@ private:
     bool m_flip = false;
     int m_rotation = 0;
     int m_frameCount = 0;
+    int m_nv12FrameCount = 0;  // NV12 path counter
+    int m_legacyFrameCount = 0;  // legacy QImage path counter
     int m_last_width = 0;
     int m_last_height = 0;
     QTimer* m_statsTimer;

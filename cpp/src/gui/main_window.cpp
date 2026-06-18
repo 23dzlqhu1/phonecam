@@ -18,32 +18,63 @@ namespace phonecam {
 
 // ── DecodeWorker ──
 
-DecodeWorker::DecodeWorker(HwDecoder* decoder, BoundedQueue<QImage>* queue, QObject* parent)
-    : QObject(parent), m_decoder(decoder), m_displayQueue(queue) {}
+DecodeWorker::DecodeWorker(HwDecoder* decoder, FinalFrameComposer* composer,
+                           BoundedQueue<QImage>* legacyQueue, QObject* parent)
+    : QObject(parent), m_decoder(decoder), m_composer(composer), m_legacyDisplayQueue(legacyQueue) {}
+
+void DecodeWorker::setTransformState(bool mirror, bool flip, int manualRotation) {
+    m_mirror = mirror;
+    m_flip = flip;
+    m_manualRotation = manualRotation;
+}
 
 void DecodeWorker::decodeFrame(const VideoFrame& frame) {
     if (!m_decoder || !m_decoder->isInitialized()) return;
 
-    QImage img;
-    {
-        std::lock_guard<std::mutex> lock(m_decoder->mutex());
-        img = m_decoder->decode(frame.data.data(), static_cast<int>(frame.data.size()));
+    // Build transform state
+    FrameTransform transform;
+    transform.mirror = m_mirror;
+    transform.flip = m_flip;
+    transform.manualRotation = m_manualRotation;
+    transform.androidRotation = frame.rotation;
+
+    if (m_useLegacyCompose || transform.needsFallback()) {
+        // Legacy QImage path: decode → QImage → apply transforms
+        QImage img;
+        {
+            std::lock_guard<std::mutex> lock(m_decoder->mutex());
+            img = m_decoder->decode(frame.data.data(), static_cast<int>(frame.data.size()));
+        }
+        if (img.isNull()) return;
+
+        // Apply rotation via QImage transform (legacy)
+        if (frame.rotation == 90) {
+            img = img.transformed(QTransform().rotate(90));
+        } else if (frame.rotation == 180) {
+            img = img.transformed(QTransform().rotate(180));
+        } else if (frame.rotation == 270) {
+            img = img.transformed(QTransform().rotate(-90));
+        }
+
+        if (m_legacyDisplayQueue) m_legacyDisplayQueue->push(img);
+        emit frameDecoded(img);
+    } else {
+        // Primary NV12 path: decodeFrame → composeFromDecodedFrame → Nv12Frame
+        DecodedFrame decoded;
+        {
+            std::lock_guard<std::mutex> lock(m_decoder->mutex());
+            decoded = m_decoder->decodeFrame(frame.data.data(), static_cast<int>(frame.data.size()));
+        }
+        if (!decoded.valid()) return;
+
+        Nv12Frame nv12 = m_composer->composeFromDecodedFrame(
+            decoded, transform, m_sequence++, frame.pts_ns, frame.receive_time);
+        emit finalFrameReady(nv12);
     }
+}
 
-    if (img.isNull()) return;
-
-    // Apply rotation
-    if (frame.rotation == 90) {
-        img = img.transformed(QTransform().rotate(90));
-    } else if (frame.rotation == 180) {
-        img = img.transformed(QTransform().rotate(180));
-    } else if (frame.rotation == 270) {
-        img = img.transformed(QTransform().rotate(-90));
-    }
-
-    // Push to bounded queue (drop oldest if full)
-    m_displayQueue->push(img);
-    emit frameDecoded(img);
+void DecodeWorker::requestFlush() {
+    if (m_decoder) m_decoder->flush();
 }
 
 // ── MainWindow ──
@@ -52,9 +83,10 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_receiver(new PcpReceiver(this))
     , m_decoder(new HwDecoder(this))
+    , m_composer(new FinalFrameComposer())
     , m_connManager(new ConnectionManager(this))
     , m_virtualCam(new VirtualCam(this))
-    , m_displayQueue(new BoundedQueue<QImage>(3))
+    , m_legacyDisplayQueue(new BoundedQueue<QImage>(3))
     , m_statsTimer(new QTimer(this))
 {
     setupUi();
@@ -114,16 +146,17 @@ MainWindow::MainWindow(QWidget* parent)
     // Setup decode thread
     startPipeline();
 
-    // Frame display timer (poll BoundedQueue at 60fps)
-    QTimer* displayTimer = new QTimer(this);
-    connect(displayTimer, &QTimer::timeout, this, [this]() {
-        auto frame = m_displayQueue->tryPop();
+    // Legacy frame display timer (poll BoundedQueue<QImage> at 60fps — only for legacy fallback path)
+    QTimer* legacyDisplayTimer = new QTimer(this);
+    connect(legacyDisplayTimer, &QTimer::timeout, this, [this]() {
+        auto frame = m_legacyDisplayQueue->tryPop();
         if (frame.has_value()) {
             m_preview->updateFrame(frame.value());
             m_frameCount++;
+            m_legacyFrameCount++;
         }
     });
-    displayTimer->start(16);  // ~60fps
+    legacyDisplayTimer->start(16);  // ~60fps
 
     // Pipeline stats timer (1 Hz — logs atomic counters + queue sizes)
     connect(m_statsTimer, &QTimer::timeout, this, &MainWindow::onStatsTimer);
@@ -167,7 +200,7 @@ MainWindow::~MainWindow() {
     m_receiver->stop();
 
     // 4. Shutdown queue and stop decode thread
-    m_displayQueue->shutdown();
+    m_legacyDisplayQueue->shutdown();
     if (m_decodeThread) {
         m_decodeThread->quit();
         m_decodeThread->wait(3000);
@@ -435,7 +468,8 @@ void MainWindow::startPipeline() {
 
     // Create decode thread
     m_decodeThread = new QThread(this);
-    m_decodeWorker = new DecodeWorker(m_decoder, m_displayQueue);
+    m_decodeWorker = new DecodeWorker(m_decoder, m_composer, m_legacyDisplayQueue);
+    m_decodeWorker->setUseLegacyCompose(m_useLegacyCompose);
     m_decodeWorker->moveToThread(m_decodeThread);
     connect(m_decodeThread, &QThread::finished, m_decodeWorker, &QObject::deleteLater);
 
@@ -443,7 +477,11 @@ void MainWindow::startPipeline() {
     connect(m_receiver, &PcpReceiver::frameReceived,
             m_decodeWorker, &DecodeWorker::decodeFrame, Qt::QueuedConnection);
 
-    // Wire: DecodeWorker → onFrameDecoded (for shared memory writer)
+    // Wire: DecodeWorker → MainWindow (NV12 primary path)
+    connect(m_decodeWorker, &DecodeWorker::finalFrameReady,
+            this, &MainWindow::onFinalFrameReady, Qt::QueuedConnection);
+
+    // Wire: DecodeWorker → MainWindow (legacy QImage fallback path)
     connect(m_decodeWorker, &DecodeWorker::frameDecoded,
             this, &MainWindow::onFrameDecoded, Qt::QueuedConnection);
 
@@ -481,13 +519,39 @@ void MainWindow::onConnectionStateChanged(const ConnectionInfo& info) {
     }
 }
 
-void MainWindow::onFrameDecoded(const QImage& image) {
-    // HIGH-1 fix: removed m_preview->updateFrame() — displayTimer already handles rendering.
-    // This method only handles shared memory writing for virtual camera.
+void MainWindow::onFinalFrameReady(const Nv12Frame& frame) {
+    // Primary NV12 path: update preview + write to shared memory
     m_frameCount++;
+    m_nv12FrameCount++;
+
+    // Update NV12 OpenGL preview
+    m_preview->updateNv12Frame(frame);
+
+    // Write NV12 to shared memory for virtual camera DLL
+    if (!m_sharedWriter.is_open() || m_last_width != frame.width || m_last_height != frame.height) {
+        if (m_sharedWriter.is_open()) {
+            m_sharedWriter.close();
+            qDebug() << "[MAIN] SharedMemoryWriter closed due to resolution change";
+        }
+        m_sharedWriter.open(frame.width, frame.height);
+        m_last_width = frame.width;
+        m_last_height = frame.height;
+        qDebug() << "[MAIN] SharedMemoryWriter opened:" << frame.width << "x" << frame.height;
+    }
+    if (m_sharedWriter.is_open()) {
+        m_sharedWriter.writeNv12(
+            reinterpret_cast<const uint8_t*>(frame.data.constData()),
+            frame.width, frame.height);
+    }
+}
+
+void MainWindow::onFrameDecoded(const QImage& image) {
+    // Legacy fallback path: QImage → BGR24 → shared memory
+    // Only used when mirror/flip/manualRotation active or --legacy-qimage-compose
+    m_frameCount++;
+    m_legacyFrameCount++;
 
     // Write BGR frame to shared memory for virtual camera DLL
-    // Re-open if resolution changes (e.g. phone rotation)
     if (!m_sharedWriter.is_open() || m_last_width != image.width() || m_last_height != image.height()) {
         if (m_sharedWriter.is_open()) {
             m_sharedWriter.close();
@@ -496,10 +560,9 @@ void MainWindow::onFrameDecoded(const QImage& image) {
         m_sharedWriter.open(image.width(), image.height());
         m_last_width = image.width();
         m_last_height = image.height();
-        qDebug() << "[MAIN] SharedMemoryWriter opened with new resolution:" << image.width() << "x" << image.height();
+        qDebug() << "[MAIN] SharedMemoryWriter opened (legacy):" << image.width() << "x" << image.height();
     }
     if (m_sharedWriter.is_open()) {
-        // QImage is RGB32, need to convert to BGR24 for DirectShow
         QImage bgr = image.convertToFormat(QImage::Format_RGB888).rgbSwapped();
         m_sharedWriter.write(bgr.bits(), bgr.width(), bgr.height());
     }
@@ -507,7 +570,7 @@ void MainWindow::onFrameDecoded(const QImage& image) {
 
 void MainWindow::onMirrorToggled() {
     m_mirror = !m_mirror;
-    m_preview->setMirror(m_mirror);
+    if (m_decodeWorker) m_decodeWorker->setTransformState(m_mirror, m_flip, m_rotation);
     m_mirrorBtn->setStyleSheet(m_mirror ?
         "QPushButton { background: #e8f0fe; color: #2b6cb0; border: 1px solid #90b4e0; padding: 5px 16px; border-radius: 3px; font: 12px 'Segoe UI'; }"
         "QPushButton:hover { background: #d4e4fc; }" :
@@ -517,7 +580,7 @@ void MainWindow::onMirrorToggled() {
 
 void MainWindow::onFlipToggled() {
     m_flip = !m_flip;
-    m_preview->setFlip(m_flip);
+    if (m_decodeWorker) m_decodeWorker->setTransformState(m_mirror, m_flip, m_rotation);
     m_flipBtn->setStyleSheet(m_flip ?
         "QPushButton { background: #e8f0fe; color: #2b6cb0; border: 1px solid #90b4e0; padding: 5px 16px; border-radius: 3px; font: 12px 'Segoe UI'; }"
         "QPushButton:hover { background: #d4e4fc; }" :
@@ -527,7 +590,7 @@ void MainWindow::onFlipToggled() {
 
 void MainWindow::onRotationToggled() {
     m_rotation = (m_rotation + 90) % 360;
-    m_preview->setRotation(m_rotation);
+    if (m_decodeWorker) m_decodeWorker->setTransformState(m_mirror, m_flip, m_rotation);
     m_rotateBtn->setText(QString("旋转 %1°").arg(m_rotation));
     m_rotateBtn->setStyleSheet(m_rotation != 0 ?
         "QPushButton { background: #e8f0fe; color: #2b6cb0; border: 1px solid #90b4e0; padding: 5px 16px; border-radius: 3px; font: 12px 'Segoe UI'; }"
@@ -569,7 +632,10 @@ void MainWindow::onStatsTimer() {
 
     QStringList parts;
     parts << QString("接收: %1fps").arg(fps);
-    parts << QString("显示: %1fps").arg(fps);
+    parts << QString("NV12: %1").arg(m_nv12FrameCount);
+    if (m_legacyFrameCount > 0) {
+        parts << QString("Legacy: %1").arg(m_legacyFrameCount);
+    }
     m_infoLabel->setText(parts.join(" | "));
 }
 
