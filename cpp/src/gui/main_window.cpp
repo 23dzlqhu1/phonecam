@@ -390,6 +390,11 @@ void MainWindow::setupUi() {
         return btn;
     };
 
+    // P1-2: 画面设置分组标签
+    QLabel* imgSettingsLabel = new QLabel(QString::fromUtf8("画面设置:"));
+    imgSettingsLabel->setStyleSheet("font: 11px 'Segoe UI'; color: #8b95a5; background: transparent;");
+    toolLayout->addWidget(imgSettingsLabel);
+
     m_mirrorBtn = makeBtn("镜像", btnStyle);
     connect(m_mirrorBtn, &QPushButton::clicked, this, &MainWindow::onMirrorToggled);
     toolLayout->addWidget(m_mirrorBtn);
@@ -401,6 +406,13 @@ void MainWindow::setupUi() {
     m_rotateBtn = makeBtn("旋转 0°", btnStyle);
     connect(m_rotateBtn, &QPushButton::clicked, this, &MainWindow::onRotationToggled);
     toolLayout->addWidget(m_rotateBtn);
+
+    // P1-2: 预览输出说明
+    QLabel* previewNote = new QLabel(QString::fromUtf8("预览 = 腾讯会议输出"));
+    previewNote->setStyleSheet("font: 10px 'Segoe UI'; color: #a0aec0; background: transparent;");
+    toolLayout->addWidget(previewNote);
+
+    toolLayout->addStretch();
 
     m_exportLogBtn = makeBtn(QString::fromUtf8("导出日志"), btnStyle);
     connect(m_exportLogBtn, &QPushButton::clicked, this, &MainWindow::onExportLogs);
