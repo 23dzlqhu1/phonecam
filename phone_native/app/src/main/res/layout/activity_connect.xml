@@ -70,6 +70,40 @@
                 android:text="@string/connect_status_disconnected_hint" />
         </LinearLayout>
 
+        <!-- 手机 IP 地址显示 + 复制按钮 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_card"
+            android:padding="16dp"
+            android:layout_marginBottom="20dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/connectIpText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="16sp"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:text="手机 IP: 获取中…" />
+
+            <!-- P2-1: Copy IP button -->
+            <Button
+                android:id="@+id/btnCopyIp"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="24dp"
+                android:background="@drawable/bg_input"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:textAllCaps="false"
+                android:text="复制地址" />
+        </LinearLayout>
+
         <!-- ============== 2. 方式 A: 扫码 ============== -->
         <TextView
             android:layout_width="match_parent"
