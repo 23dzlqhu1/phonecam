@@ -57,6 +57,8 @@ private slots:
     void onStatsTimer();
     void toggleFullScreen();
     void onExportLogs();
+    void onDeviceSelected(int index);
+    void onRefreshDevices();
 
 
 protected:
@@ -90,6 +92,8 @@ private:
     QWidget* m_preflightPanel;   // P0-2: pre-flight check panel
     QLabel* m_preflightLabels[4]; // P0-2: 4 check item labels
     QComboBox* m_resolutionCombo;
+    QComboBox* m_deviceCombo;       // P1-1: device selector
+    QPushButton* m_refreshBtn;      // P1-1: refresh devices
     PreviewWidget* m_preview;
     QLabel* m_infoLabel;
     QPushButton* m_mirrorBtn;

@@ -64,6 +64,33 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onConnectionStateChanged);
     connect(m_connManager, &ConnectionManager::diagnosticsChanged,
             this, &MainWindow::onDiagnosticsChanged);
+    connect(m_connManager, &ConnectionManager::candidatesChanged,
+            this, [this](const QVector<DeviceCandidate>& candidates) {
+        // P1-1: Update device combo box
+        m_deviceCombo->blockSignals(true);
+        int prevIndex = m_deviceCombo->currentIndex();
+        QString prevData = m_deviceCombo->currentData().toString();
+        m_deviceCombo->clear();
+        m_deviceCombo->addItem(QString::fromUtf8("自动选择"), "");
+        int restoreIndex = 0;
+        for (int i = 0; i < candidates.size(); i++) {
+            const auto& c = candidates[i];
+            QString icon = (c.transport == "usb") ? "🔌" :
+                           (c.transport == "wifi") ? "📶" : "🔗";
+            QString statusIcon = (c.status == "Connected") ? "✅" :
+                                 (c.status == "Connecting") ? "⏳" :
+                                 (c.status == "Failed") ? "❌" : "⬜";
+            QString label = QString("%1 %2 %3 [%4]")
+                .arg(icon, c.displayName, statusIcon, c.status);
+            if (!c.lastError.isEmpty() && c.status == "Failed") {
+                label += QString(" — %1").arg(c.lastError);
+            }
+            m_deviceCombo->addItem(label, c.id);
+            if (c.id == prevData) restoreIndex = i + 1;
+        }
+        m_deviceCombo->setCurrentIndex(restoreIndex);
+        m_deviceCombo->blockSignals(false);
+    });
 
     // Wire up PcpReceiver
     connect(m_receiver, &PcpReceiver::connectionEstablished, this, [this]() {
@@ -265,6 +292,39 @@ void MainWindow::setupUi() {
     // FPS
     QVBoxLayout* fpsCol = makeStatusCol("FPS", m_infoLabel);
     topLayout->addLayout(fpsCol);
+
+    topLayout->addSpacing(24);
+    topLayout->addWidget(makeSep());
+    topLayout->addSpacing(24);
+
+    // P1-1: 设备选择
+    QVBoxLayout* devSelCol = new QVBoxLayout;
+    devSelCol->setSpacing(2);
+    QLabel* devSelLabel = new QLabel(QString::fromUtf8("设备"));
+    devSelLabel->setStyleSheet("font: 10px 'Segoe UI'; color: #8b95a5; background: transparent;");
+    devSelCol->addWidget(devSelLabel);
+    QHBoxLayout* devSelRow = new QHBoxLayout;
+    devSelRow->setSpacing(4);
+    m_deviceCombo = new QComboBox;
+    m_deviceCombo->setMinimumWidth(180);
+    m_deviceCombo->setStyleSheet(
+        "QComboBox { font: 11px 'Segoe UI'; color: #2c3e50; background: #f8f9fa; "
+        "border: 1px solid #d5d9e0; border-radius: 3px; padding: 2px 8px; }"
+        "QComboBox:hover { border-color: #b0b8c4; }");
+    m_deviceCombo->addItem(QString::fromUtf8("自动选择"));
+    connect(m_deviceCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onDeviceSelected);
+    devSelRow->addWidget(m_deviceCombo);
+    m_refreshBtn = new QPushButton(QString::fromUtf8("刷新"));
+    m_refreshBtn->setStyleSheet(
+        "QPushButton { font: 10px 'Segoe UI'; color: #4a5568; background: #f0f2f5; "
+        "border: 1px solid #d5d9e0; border-radius: 3px; padding: 2px 8px; }"
+        "QPushButton:hover { background: #e8eaef; }");
+    m_refreshBtn->setCursor(Qt::PointingHandCursor);
+    connect(m_refreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshDevices);
+    devSelRow->addWidget(m_refreshBtn);
+    devSelCol->addLayout(devSelRow);
+    topLayout->addLayout(devSelCol);
 
     topLayout->addStretch();
 
@@ -600,6 +660,20 @@ void MainWindow::updateDiagnosticsBar() {
         m_diagLabel->setText(msgs.join("  |  "));
         m_diagLabel->setVisible(true);
     }
+}
+
+void MainWindow::onDeviceSelected(int index) {
+    if (index <= 0) {
+        // "自动选择" selected
+        m_connManager->selectDevice("");
+    } else {
+        QString deviceId = m_deviceCombo->itemData(index).toString();
+        m_connManager->selectDevice(deviceId);
+    }
+}
+
+void MainWindow::onRefreshDevices() {
+    m_connManager->refreshDevices();
 }
 
 void MainWindow::onExportLogs() {
