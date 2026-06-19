@@ -73,6 +73,10 @@ class H264Encoder {
     private var frameIndex: Long = 0
     private var outputThread: Thread? = null
 
+    // BUG-013: 存储 encoder 尺寸，用于输出日志和校验
+    private var encoderWidth: Int = 0
+    private var encoderHeight: Int = 0
+
     // 诊断统计（P0 修复：编码器侧 bitrate/IDR/SPS/PPS 统计）
     private var statsIdrCount: Long = 0
     private var statsPFrameCount: Long = 0
@@ -100,6 +104,8 @@ class H264Encoder {
         }
         callback = naluCb
         frameIndex = 0
+        encoderWidth = width   // BUG-013
+        encoderHeight = height // BUG-013
         // 重置诊断统计
         statsIdrCount = 0
         statsPFrameCount = 0
@@ -305,12 +311,20 @@ class H264Encoder {
                                 val totalFrames = totalEncFrames + statsSpsPpsCount
                                 val bitrateKbps = if (elapsedMs > 0) (statsTotalBytes * 8L * 1000L / elapsedMs / 1000L) else 0L
                                 val avgBytes = if (totalFrames > 0) statsTotalBytes / totalFrames else 0L
-                                Log.i(TAG, "[ENC-STATS] elapsed=${elapsedMs/1000}s frames=$totalFrames " +
+                                Log.i(TAG, "[ENC-STATS] ${encoderWidth}x${encoderHeight} " +
+                                    "elapsed=${elapsedMs/1000}s frames=$totalFrames " +
                                     "IDR=$statsIdrCount P=$statsPFrameCount SPS/PPS=$statsSpsPpsCount " +
-                                    "avg=${avgBytes}B/frame bitrate=${bitrateKbps}kbps")
+                                    "avg=${avgBytes}B/frame bitrate=${bitrateKbps}kbps " +
+                                    "running=$running")
                             }
 
-                            callback?.onNalu(finalBytes, if (isKey) 5 else 1)
+                            // BUG-013: callback 前检查 running，stop() 后不再发送旧 NALU
+                            if (running) {
+                                callback?.onNalu(finalBytes, if (isKey) 5 else 1)
+                            } else {
+                                Log.w(TAG, "[BUG-013] drop NALU after stop: running=false, " +
+                                    "size=${finalBytes.size} key=$isKey")
+                            }
                         }
                         codec?.releaseOutputBuffer(outIndex, false)
                     }

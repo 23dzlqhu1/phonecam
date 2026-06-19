@@ -74,12 +74,15 @@
 - **根因假设 A（已修）**：`EglRenderer` 上传 `GL_LUMINANCE` U/V 纹理时沿用 OpenGL 默认 `GL_UNPACK_ALIGNMENT=4`。1080p 等场景下 UV 半宽可能非 4 字节对齐，OpenGL 会按错误行距读取紧凑 I420 U/V 面。
 - **根因假设 B（已修）**：当前 `H264Encoder` 只在 `CODEC_CONFIG` buffer 中缓存 SPS/PPS，且 keyframe 依赖 Annex-B 扫描；部分 encoder 只通过 `INFO_OUTPUT_FORMAT_CHANGED` 暴露 `csd-0/csd-1`，或输出封包不是预期 Annex-B，导致 PC 端收到缺参数集/错误 keyframe 标记的 H.264 流。1080p30 固定 AVC Level 3.1 也不匹配。
 - **根因假设 C（2026-06-19 二次修复）**：编码器尺寸与实际帧尺寸不匹配。`StreamingService` 默认 `sCameraW=1280, sCameraH=720`，但 ImageReader 可能输出 1920x1080。`EglRenderer.drawYuv()` 用帧尺寸设 `glViewport`，但 MediaCodec Surface 只有 1280x720 → Y/U/V 三平面被挤入错误大小的画布，产生三段式花屏。
-- **修复（二次）**：
-  1. `StreamingService` 延迟 encoder/EGL 创建到首帧到达后，使用 `image.width/height` 真实尺寸
-  2. `submitFrameWithOwnership()` 检测运行时帧尺寸变化，不匹配时标记失败
-  3. `Yuv420Extractor` 改用 `buffer.duplicate()` + 绝对索引 + 边界保护
-  4. `EglRenderer` 新增纯色诊断模式（`solidColorTestMode`），用于区分 YUV 提取 vs H264 编码问题
-  5. 全链路尺寸日志：`image.width/height`、`frame.width/height`、`encoder.start w/h`、`drawYuv w/h`
+- **根因假设 D（2026-06-19 三代际隔离修复）**：即使尺寸正确，画面仍在纯色/三平面/两平面间闪烁。根因是 lifecycle 竞态：旧 executor 队列中未执行的 task 仍用旧 renderer/encoder 继续 draw/encode；旧 H264Encoder output loop 在 stop() 后仍可能吐出缓存的旧 NALU。没有代际隔离机制。
+- **修复（二次+三代际隔离）**：
+  1. `StreamingService.sStreamGeneration` 代际 ID：每次 encoder/EGL 创建递增，submit 时捕获，execute 时校验
+  2. `initializeEncoderAndEgl()` 完整生命周期：pause → shutdownNow old executor → stop old encoder → release old renderer → gen++ → create new → unpause + IDR
+  3. `submitFrameWithOwnership()` task 内双重校验：generation match + renderer/encoder identity check
+  4. `EglRenderer(surfaceWidth, surfaceHeight)` 构造时保存 surface 尺寸，`drawYuv()` 帧尺寸≠surface 尺寸时丢帧
+  5. `H264Encoder` callback 前检查 `running`，stop() 后不发送旧 NALU
+  6. `switchCamera()` 切换后递增 generation
+  7. 全链路尺寸日志 + 代际日志
 - **验证**：`gradlew assembleDebug` 通过；真机三段式花屏复测和 10 分钟 1080p30 内存曲线仍待人工验证。
 
 ## 已验证修复（历史）

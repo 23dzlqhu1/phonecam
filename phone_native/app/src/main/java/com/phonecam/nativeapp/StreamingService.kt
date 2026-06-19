@@ -103,6 +103,10 @@ class StreamingService : Service() {
         // camera switch: 暂停帧提交
         @Volatile var sPauseFrameSubmit: Boolean = false
 
+        // BUG-013 代际隔离: 每次 encoder/EGL 创建递增，submit 时捕获，task 执行时校验
+        // 防止旧 executor 队列里的 task 用旧 renderer/encoder 继续 draw/encode
+        @Volatile var sStreamGeneration: Int = 0
+
         /**
          * 批次 3.2.0.3f: 跨线程投递一帧 YUV 给 EGL owner thread
          *  listener 线程 (imageReaderHandler) 调这个, 实际 EGL drawYuv 在 EGL owner thread 跑
@@ -143,6 +147,7 @@ class StreamingService : Service() {
          *
          * BUG-013: 首帧时初始化 encoder/EGL（使用真实帧尺寸），
          *          并检测运行时尺寸变化。
+         * BUG-013 代际隔离: capture generation at submit, check at execute.
          */
         fun submitFrameWithOwnership(frame: YuvFramePool.YuvFrameBuffer) {
             // ── 首帧初始化: encoder/EGL 尚未创建 ──
@@ -161,11 +166,11 @@ class StreamingService : Service() {
             val renderer = sEglRenderer
             val encoder = sH264Encoder
             if (exec == null || renderer == null || encoder == null || !sActive) {
-                frame.release()  // 立即释放，避免泄漏
+                frame.release()
                 return
             }
             if (sPauseFrameSubmit) {
-                frame.release()  // 立即释放
+                frame.release()
                 return
             }
 
@@ -175,37 +180,56 @@ class StreamingService : Service() {
                     "[BUG-013] 帧尺寸变化! encoder=${sCameraW}x${sCameraH} " +
                     "→ frame=${frame.width}x${frame.height}，需重启推流")
                 frame.release()
-                // 标记失败，触发 UI 提示
                 sStartFailedReason = "相机分辨率变化(${sCameraW}x${sCameraH}→${frame.width}x${frame.height})，请重新推流"
                 sStreamState = StreamState.START_FAILED
                 sActive = false
                 return
             }
 
+            // ── BUG-013 代际隔离: 捕获当前 generation ──
+            val gen = sStreamGeneration
             sCurrentRotation = frame.rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = frame.ptsNs }
             sFrameSubmitCount++
 
             exec.execute {
+                // ── generation 校验: 旧代 task 直接丢弃 ──
+                if (gen != sStreamGeneration) {
+                    Log.w(TAG, "[BUG-013] drop stale task: gen=$gen current=${sStreamGeneration}")
+                    frame.release()
+                    return@execute
+                }
+                // 再次确认 renderer/encoder 仍是最新的（防御性检查）
+                val curRenderer = sEglRenderer
+                val curEncoder = sH264Encoder
+                if (curRenderer == null || curEncoder == null || curRenderer !== renderer || curEncoder !== encoder) {
+                    Log.w(TAG, "[BUG-013] drop stale task: renderer/encoder replaced")
+                    frame.release()
+                    return@execute
+                }
                 try {
-                    renderer.drawYuv(frame.data, frame.width, frame.height)
-                    encoder.encodeFrame(frame.data)
+                    curRenderer.drawYuv(frame.data, frame.width, frame.height)
+                    curEncoder.encodeFrame(frame.data)
                     sFrameEncodeCount++
                 } catch (e: Exception) {
-                    Log.e(TAG, "[OOM-fix] EGL/encoder 异常", e)
+                    Log.e(TAG, "[BUG-013] EGL/encoder 异常", e)
                 } finally {
-                    frame.release()  // 关键：EGL 线程完成后释放 buffer 回池
+                    frame.release()
                 }
             }
         }
 
         /**
          * BUG-013: 首帧到达后初始化 encoder + EGL
-         * 在 ImageReader 线程调用，同步等待 encoder/EGL 创建完成
+         * 完整生命周期隔离: pause → drain old → teardown → gen++ → create new → unpause
          */
         private fun initializeEncoderAndEgl(frameW: Int, frameH: Int, ptsNs: Long, rotation: Int) {
             InAppLogStore.i(TAG,
-                "[BUG-013] 首帧到达: ${frameW}x${frameH}，初始化 encoder + EGL...")
+                "[BUG-013] 首帧到达: ${frameW}x${frameH}，初始化 encoder + EGL (gen=${sStreamGeneration + 1})...")
+
+            // ── 1) 暂停帧提交，标记未就绪 ──
+            sPauseFrameSubmit = true
+            sEncoderReady = false
 
             // 更新真实尺寸
             sCameraW = frameW
@@ -213,11 +237,46 @@ class StreamingService : Service() {
             sCurrentRotation = rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
 
+            // ── 2) 关闭旧 executor（排空队列中未执行的 task）──
+            val oldExec = sEglExecutor
+            if (oldExec != null) {
+                oldExec.shutdownNow()  // 中断正在执行的 task，丢弃排队中的 task
+                try {
+                    if (!oldExec.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                        Log.w(TAG, "[BUG-013] old executor 未在 2s 内终止")
+                    }
+                } catch (e: InterruptedException) {
+                    Log.w(TAG, "[BUG-013] awaitTermination interrupted")
+                }
+                sEglExecutor = null
+                InAppLogStore.i(TAG, "[BUG-013] old executor 已关闭")
+            }
+
+            // ── 3) 停旧 encoder（先 running=false 阻止 output loop 吐旧 NALU）──
+            val oldEncoder = sH264Encoder
+            if (oldEncoder != null) {
+                sH264Encoder = null
+                try { oldEncoder.stop() } catch (e: Exception) { Log.w(TAG, "[BUG-013] old encoder stop: ${e.message}") }
+                InAppLogStore.i(TAG, "[BUG-013] old encoder 已停止")
+            }
+
+            // ── 4) 释放旧 renderer ──
+            val oldRenderer = sEglRenderer
+            if (oldRenderer != null) {
+                sEglRenderer = null
+                try { oldRenderer.release() } catch (e: Exception) { Log.w(TAG, "[BUG-013] old renderer release: ${e.message}") }
+                InAppLogStore.i(TAG, "[BUG-013] old renderer 已释放")
+            }
+
+            // ── 5) 递增 generation（旧代 task 从此被识别为 stale）──
+            sStreamGeneration++
+            val gen = sStreamGeneration
+            InAppLogStore.i(TAG, "[BUG-013] generation → $gen")
+
             try {
-                // 3) H264Encoder.start — 使用首帧真实尺寸
+                // ── 6) 创建新 encoder ──
                 val encoder = H264Encoder()
-                InAppLogStore.i(TAG, "[BUG-013] 启动 H264Encoder: ${frameW}x${frameH} fps=$sCameraFps")
-                // 获取 TcpStreamServer 引用（从 worker thread 设置的 sTcpServer）
+                InAppLogStore.i(TAG, "[BUG-013] 启动 H264Encoder: ${frameW}x${frameH} fps=$sCameraFps gen=$gen")
                 val server = sTcpServer
                 val naluCb = object : H264Encoder.NaluCallback {
                     override fun onNalu(nalu: ByteArray, type: Int) {
@@ -242,17 +301,17 @@ class StreamingService : Service() {
                             sBytesSentCount += pkt.size
                         }
                         if (seq % 30 == 0) {
-                            InAppLogStore.i(TAG, "[PCP] seq=$seq type=$type key=$isKeyframe bytes=${pkt.size}")
+                            InAppLogStore.i(TAG, "[PCP] gen=$seq seq=$seq type=$type key=$isKeyframe bytes=${pkt.size}")
                         }
                     }
                 }
                 val inputSurface = encoder.start(frameW, frameH, sCameraFps, naluCb)
                 sH264Encoder = encoder
 
-                // 4) EglRenderer — 在专用 EGL 线程构造
-                InAppLogStore.i(TAG, "[BUG-013] 创建 eglExecutor (单线程, EGL owner)")
+                // ── 7) 创建新 executor + renderer ──
+                InAppLogStore.i(TAG, "[BUG-013] 创建 eglExecutor gen=$gen")
                 val exec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-                    Thread(r, "Streaming-EGL-Thread")
+                    Thread(r, "Streaming-EGL-Thread-g$gen")
                 }
                 sEglExecutor = exec
 
@@ -260,9 +319,10 @@ class StreamingService : Service() {
                 val rendererHolder = arrayOfNulls<EglRenderer>(1)
                 exec.execute {
                     try {
-                        val r = EglRenderer(inputSurface)
+                        // EglRenderer 接收 surface 尺寸用于内部校验
+                        val r = EglRenderer(inputSurface, frameW, frameH)
                         rendererHolder[0] = r
-                        InAppLogStore.i(TAG, "[BUG-013] EglRenderer 构造完成")
+                        InAppLogStore.i(TAG, "[BUG-013] EglRenderer 构造完成 gen=$gen ${frameW}x${frameH}")
                     } catch (e: Exception) {
                         Log.e(TAG, "[BUG-013] EglRenderer 构造失败", e)
                     } finally {
@@ -274,6 +334,7 @@ class StreamingService : Service() {
                     sStartFailedReason = "EGL 初始化超时"
                     sStreamState = StreamState.START_FAILED
                     sActive = false
+                    sPauseFrameSubmit = false
                     return
                 }
                 sEglRenderer = rendererHolder[0] ?: run {
@@ -281,10 +342,11 @@ class StreamingService : Service() {
                     sStartFailedReason = "EGL 初始化失败"
                     sStreamState = StreamState.START_FAILED
                     sActive = false
+                    sPauseFrameSubmit = false
                     return
                 }
 
-                // 5) 重置统计
+                // ── 8) 重置统计 + 标记就绪 ──
                 sPcpSequence = 0
                 sNaluSentCount = 0
                 sBytesSentCount = 0L
@@ -295,14 +357,16 @@ class StreamingService : Service() {
                 sNaluOutputCount = 0
                 sStartTimeMs = android.os.SystemClock.elapsedRealtime()
 
-                // 6) 标记 encoder 就绪
                 sEncoderReady = true
                 sStreamState = StreamState.STREAMING
                 sStarting = false
+                sPauseFrameSubmit = false  // 恢复帧提交
                 InAppLogStore.i(TAG,
-                    "[BUG-013] encoder+EGL 就绪 (${frameW}x${frameH})，开始推流")
+                    "[BUG-013] encoder+EGL 就绪 (${frameW}x${frameH} gen=$gen)，开始推流")
 
-                // 启动统计 timer
+                // 请求 IDR（让 PC 端尽快看到第一帧）
+                encoder.requestKeyframe()
+
                 startStatsTimer()
 
             } catch (e: Exception) {
@@ -311,6 +375,7 @@ class StreamingService : Service() {
                 sStreamState = StreamState.START_FAILED
                 sActive = false
                 sStarting = false
+                sPauseFrameSubmit = false
             }
         }
 
@@ -353,11 +418,14 @@ class StreamingService : Service() {
 
                 override fun onFirstFrameAvailable() {
                     InAppLogStore.i(TAG, "[CAM-SWITCH] First frame available, requesting keyframe")
+                    // BUG-013: 切换摄像头后递增 generation，旧帧全部失效
+                    sStreamGeneration++
+                    InAppLogStore.i(TAG, "[CAM-SWITCH] generation → ${sStreamGeneration}")
                     // Force IDR and resume frame submission
                     triggerKeyframeRequest()
                     sPauseFrameSubmit = false
                     sStreamState = StreamState.STREAMING
-                    InAppLogStore.i(TAG, "[CAM-SWITCH] Switch complete, resumed streaming")
+                    InAppLogStore.i(TAG, "[CAM-SWITCH] Switch complete, resumed streaming (gen=${sStreamGeneration})")
                     callback(true)
                 }
             })
@@ -623,22 +691,25 @@ class StreamingService : Service() {
     private fun stopStreamingInternal() {
         sActive = false
         sStarting = false
-        sEncoderReady = false  // BUG-013: 重置 encoder 就绪标志
-        sStreamState = StreamState.IDLE  // P1-3: reset to idle
-        sStartFailedReason = ""  // P1-3
-        sClientDisconnected = false  // P1-3
-        // 批次 3.2.0.3g: 停帧率统计 timer
+        sEncoderReady = false
+        sPauseFrameSubmit = true  // 立即停止帧提交
+        sStreamState = StreamState.IDLE
+        sStartFailedReason = ""
+        sClientDisconnected = false
+        // BUG-013: 递增 generation，使所有旧 task 失效
+        StreamingService.sStreamGeneration++
         stopStatsTimer()
         Thread.sleep(200)  // 让 listener 看到 sActive=false 后再释放
-        try { sEglExecutor?.shutdownNow() } catch (e: Exception) { Log.w(TAG, "eglExecutor shutdown 异常: ${e.message}") }
+        try { sEglExecutor?.shutdownNow() } catch (e: Exception) { Log.w(TAG, "eglExecutor shutdown: ${e.message}") }
+        try { sEglExecutor?.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
         sEglExecutor = null
-        try { sH264Encoder?.stop() } catch (e: Exception) { Log.w(TAG, "h264Encoder.stop 异常: ${e.message}") }
+        try { sH264Encoder?.stop() } catch (e: Exception) { Log.w(TAG, "h264Encoder.stop: ${e.message}") }
         sH264Encoder = null
-        try { sEglRenderer?.release() } catch (e: Exception) { Log.w(TAG, "eglRenderer.release 异常: ${e.message}") }
+        try { sEglRenderer?.release() } catch (e: Exception) { Log.w(TAG, "eglRenderer.release: ${e.message}") }
         sEglRenderer = null
-        try { sTcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop 异常: ${e.message}") }
+        try { sTcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop: ${e.message}") }
         sTcpServer = null
-        InAppLogStore.i(TAG, "[3.2.0.3f] 推流已完全停止")
+        InAppLogStore.i(TAG, "[BUG-013] 推流已完全停止 (gen=${sStreamGeneration})")
     }
 
     // 批次 3.2.0.3g 帧率统计 timer (主线程 Handler, 5s 一次)

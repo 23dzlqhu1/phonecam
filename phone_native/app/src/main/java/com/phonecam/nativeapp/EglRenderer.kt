@@ -35,7 +35,9 @@ import java.nio.FloatBuffer
  *   - 3.2.0.2: 接 Camera2 ImageReader 连续帧
  *   - 3.2.0.3: 长时连拍 + 状态机
  */
-class EglRenderer(private val inputSurface: Surface) {
+class EglRenderer(private val inputSurface: Surface,
+                  private val surfaceWidth: Int = 0,
+                  private val surfaceHeight: Int = 0) {
 
     companion object {
         private const val TAG = "EglRenderer"
@@ -137,6 +139,9 @@ class EglRenderer(private val inputSurface: Surface) {
         initEgl()
         initShaders()
         initTextures()
+        if (surfaceWidth > 0) {
+            Log.d(TAG, "EglRenderer 构造: surface=${surfaceWidth}x${surfaceHeight}")
+        }
     }
 
     /**
@@ -273,9 +278,18 @@ class EglRenderer(private val inputSurface: Surface) {
         val uvW = width / 2
         val uvH = height / 2
 
+        // BUG-013: surface 尺寸校验 — 帧尺寸必须等于 encoder surface 尺寸
+        if (surfaceWidth > 0 && surfaceHeight > 0 &&
+            (width != surfaceWidth || height != surfaceHeight)) {
+            Log.w(TAG, "[BUG-013] drop size mismatch: frame=${width}x${height} " +
+                "surface=${surfaceWidth}x${surfaceHeight}")
+            return  // 丢帧，不画
+        }
+
         // BUG-013: 每 30 帧记录 drawYuv 尺寸，验证与 encoder surface 一致
         if (drawCallCount % 30 == 0L) {
             Log.d(TAG, "[BUG-013] drawYuv ${width}x${height} " +
+                "surface=${surfaceWidth}x${surfaceHeight} " +
                 "ySize=$ySize uvW=$uvW uvH=$uvH frame#${drawCallCount + 1}")
         }
 
