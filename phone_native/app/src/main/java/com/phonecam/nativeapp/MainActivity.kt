@@ -409,28 +409,45 @@ class MainActivity : AppCompatActivity() {
         val framePool = YuvFramePool(1280, 720)  // 初始尺寸，会自动适配实际分辨率
         val scratchBuffer = ByteArray(1920 * 2)  // 足够 1080p 的行缓冲
 
+        // 诊断：每秒打印 pool 状态（前 10 秒）
+        val diagHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        var diagCount = 0
+        val diagRunnable = object : Runnable {
+            override fun run() {
+                if (diagCount < 10) {
+                    Log.i(TAG, "[POOL-DIAG] ${framePool.getDiagnostics()}")
+                    diagCount++
+                    diagHandler.postDelayed(this, 1000L)
+                }
+            }
+        }
+        diagHandler.post(diagRunnable)
+
         cameraController?.setOnImageAvailableListener { image ->
+            var frameBuffer: YuvFramePool.YuvFrameBuffer? = null
             try {
+                // 在 close 前读取所有需要的属性
                 val w = image.width
                 val h = image.height
+                val ptsNs = image.timestamp  // 必须在 close 前读取
                 cameraW = w
                 cameraH = h
                 cameraFrameCount++
 
                 // 从池中获取 buffer，失败则丢帧
-                val frameBuffer = framePool.acquire(w, h)
+                frameBuffer = framePool.acquire(w, h)
                 if (frameBuffer == null) {
-                    // 无可用 buffer，丢帧
-                    image.close()
+                    // 无可用 buffer，丢帧（CameraController finally 会 close image）
                     return@setOnImageAvailableListener
                 }
 
                 // 填充 YUV 数据到池 buffer
                 val success = Yuv420Extractor.imageToI420(image, frameBuffer.data, scratchBuffer)
-                image.close()  // 立即关闭 image，释放 ImageReader buffer
+                // 注意：不要在这里 close image，CameraController 的 finally 会统一 close
 
                 if (!success) {
                     frameBuffer.release()
+                    frameBuffer = null
                     return@setOnImageAvailableListener
                 }
 
@@ -441,15 +458,21 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         cameraController?.getStreamRotation() ?: 0
                     }
-                    frameBuffer.ptsNs = image.timestamp
+                    frameBuffer.ptsNs = ptsNs
                     frameBuffer.rotation = rotation
                     StreamingService.submitFrameWithOwnership(frameBuffer)
+                    frameBuffer = null  // ownership 已转移
                 } else {
                     frameBuffer.release()
+                    frameBuffer = null
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "提取帧异常", e)
+                Log.e(TAG, "[OOM-fix] 提取帧异常: ${e.message}", e)
+                // 关键：异常时必须 release 已 acquire 的 frameBuffer
+                frameBuffer?.release()
+                frameBuffer = null
             }
+            // 不要在这里 close image — CameraController 的 finally 会统一 close
         }
     }
 

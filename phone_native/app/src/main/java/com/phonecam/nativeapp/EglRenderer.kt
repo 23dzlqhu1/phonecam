@@ -262,15 +262,15 @@ class EglRenderer(private val inputSurface: Surface) {
         val uvH = height / 2
 
         // 1. 上传 Y 平面 → Y 纹理
-        uploadTextureLuminance(yTexture, yuv420planar, 0, ySize, width, height)
+        uploadTextureLuminance(yTexture, yuv420planar, 0, ySize, width, height, PlaneType.Y)
         checkGlError("[3.2.0.3g] glTexImage2D Y 失败")
 
         // 2. 上传 U 平面 → U 纹理
-        uploadTextureLuminance(uTexture, yuv420planar, ySize, uvSize, uvW, uvH)
+        uploadTextureLuminance(uTexture, yuv420planar, ySize, uvSize, uvW, uvH, PlaneType.U)
         checkGlError("[3.2.0.3g] glTexImage2D U 失败")
 
         // 3. 上传 V 平面 → V 纹理
-        uploadTextureLuminance(vTexture, yuv420planar, ySize + uvSize, uvSize, uvW, uvH)
+        uploadTextureLuminance(vTexture, yuv420planar, ySize + uvSize, uvSize, uvW, uvH, PlaneType.V)
         checkGlError("[3.2.0.3g] glTexImage2D V 失败")
 
         // 4. 清除画布
@@ -337,47 +337,42 @@ class EglRenderer(private val inputSurface: Surface) {
     private var lastVSize = 0
     var directBufferAllocCount = 0  // public for diagnostics
 
+    // Plane 类型枚举，避免用 srcOffset 判断
+    enum class PlaneType { Y, U, V }
+
     private fun uploadTextureLuminance(
-        textureId: Int, src: ByteArray, srcOffset: Int, size: Int, w: Int, h: Int
+        textureId: Int, src: ByteArray, srcOffset: Int, size: Int, w: Int, h: Int, plane: PlaneType
     ) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
 
-        // 根据 plane 选择对应的 direct buffer
-        val buffer: ByteBuffer
-        val isNew: Boolean
-        when {
-            srcOffset == 0 -> {
-                // Y plane
+        // 根据 plane 类型选择对应的 direct buffer
+        val buffer: ByteBuffer = when (plane) {
+            PlaneType.Y -> {
                 if (yDirectBuffer == null || lastYSize != size) {
                     yDirectBuffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
                     lastYSize = size
                     directBufferAllocCount++
                     Log.i(TAG, "Direct buffer allocated: Y plane, $size bytes, total=$directBufferAllocCount")
                 }
-                buffer = yDirectBuffer!!
-                isNew = false
+                yDirectBuffer!!
             }
-            srcOffset < size -> {
-                // U plane
+            PlaneType.U -> {
                 if (uDirectBuffer == null || lastUSize != size) {
                     uDirectBuffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
                     lastUSize = size
                     directBufferAllocCount++
                     Log.i(TAG, "Direct buffer allocated: U plane, $size bytes, total=$directBufferAllocCount")
                 }
-                buffer = uDirectBuffer!!
-                isNew = false
+                uDirectBuffer!!
             }
-            else -> {
-                // V plane
+            PlaneType.V -> {
                 if (vDirectBuffer == null || lastVSize != size) {
                     vDirectBuffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
                     lastVSize = size
                     directBufferAllocCount++
                     Log.i(TAG, "Direct buffer allocated: V plane, $size bytes, total=$directBufferAllocCount")
                 }
-                buffer = vDirectBuffer!!
-                isNew = false
+                vDirectBuffer!!
             }
         }
 

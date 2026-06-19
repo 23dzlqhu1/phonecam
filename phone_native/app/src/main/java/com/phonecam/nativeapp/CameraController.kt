@@ -365,10 +365,15 @@ class CameraController(
             val image = r.acquireLatestImage()
             if (image != null) {
                 try {
-                    // Camera switch: notify first frame available
+                    // Camera switch: notify first frame available (must be on main thread)
                     if (waitingForFirstFrame) {
                         waitingForFirstFrame = false
-                        switchCallback?.onFirstFrameAvailable()
+                        val cb = switchCallback
+                        if (cb != null) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                cb.onFirstFrameAvailable()
+                            }
+                        }
                     }
                     listener(image)
                 } finally {

@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * - pool size 3-4，够双缓冲 + pipeline 延迟
  * - acquire 失败直接丢帧，不阻塞 ImageReaderThread
  * - release 只能在 EGL 线程完成 drawYuv 后调用
- * - 分辨率变化时重建 pool
+ * - 分辨率变化时重建 pool（generation id 防 stale release）
  */
 class YuvFramePool(initialWidth: Int = 1280, initialHeight: Int = 720) {
     companion object {
@@ -26,7 +26,8 @@ class YuvFramePool(initialWidth: Int = 1280, initialHeight: Int = 720) {
         val data: ByteArray,
         val width: Int,
         val height: Int,
-        private val pool: YuvFramePool
+        private val pool: YuvFramePool,
+        val generation: Int  // 防 stale release
     ) {
         @Volatile var ptsNs: Long = 0L
         @Volatile var rotation: Int = 0
@@ -41,6 +42,7 @@ class YuvFramePool(initialWidth: Int = 1280, initialHeight: Int = 720) {
 
     @Volatile private var currentWidth = initialWidth
     @Volatile private var currentHeight = initialHeight
+    @Volatile private var currentGeneration = 0  // 每次 resetPool 递增
     private val bufferSize get() = currentWidth * currentHeight * 3 / 2
 
     // Diagnostics
@@ -48,12 +50,13 @@ class YuvFramePool(initialWidth: Int = 1280, initialHeight: Int = 720) {
     val inUseCount: AtomicInteger = AtomicInteger(0)
     val droppedFrames: AtomicInteger = AtomicInteger(0)
     val poolResets: AtomicInteger = AtomicInteger(0)
+    val staleReleases: AtomicInteger = AtomicInteger(0)
 
     init {
         // Pre-allocate all buffers
         synchronized(lock) {
             for (i in 0 until POOL_SIZE) {
-                buffers.add(YuvFrameBuffer(ByteArray(bufferSize), currentWidth, currentHeight, this))
+                buffers.add(YuvFrameBuffer(ByteArray(bufferSize), currentWidth, currentHeight, this, currentGeneration))
             }
         }
         Log.i(TAG, "Pool initialized: ${POOL_SIZE} buffers, ${currentWidth}x${currentHeight}, ${bufferSize} bytes each")
@@ -86,8 +89,15 @@ class YuvFramePool(initialWidth: Int = 1280, initialHeight: Int = 720) {
 
     /**
      * Release buffer back to pool. Called from EGL thread after drawYuv.
+     * Ignores stale buffers from old generations.
      */
     private fun release(buffer: YuvFrameBuffer) {
+        // Check generation — ignore stale buffers from old pool
+        if (buffer.generation != currentGeneration) {
+            staleReleases.incrementAndGet()
+            Log.w(TAG, "Stale release ignored: buffer gen=${buffer.generation}, current gen=$currentGeneration")
+            return
+        }
         synchronized(lock) {
             buffers.addLast(buffer)
             availableCount.incrementAndGet()
@@ -96,25 +106,26 @@ class YuvFramePool(initialWidth: Int = 1280, initialHeight: Int = 720) {
     }
 
     /**
-     * Reset pool on resolution change. Old buffers become garbage.
+     * Reset pool on resolution change. Old buffers become garbage (stale generation).
      */
     private fun resetPool(newWidth: Int, newHeight: Int) {
         synchronized(lock) {
             buffers.clear()
             currentWidth = newWidth
             currentHeight = newHeight
+            currentGeneration++  // 递增 generation，旧 buffer 的 release 会被忽略
             val size = bufferSize
             for (i in 0 until POOL_SIZE) {
-                buffers.add(YuvFrameBuffer(ByteArray(size), newWidth, newHeight, this))
+                buffers.add(YuvFrameBuffer(ByteArray(size), newWidth, newHeight, this, currentGeneration))
             }
             availableCount.set(POOL_SIZE)
             inUseCount.set(0)
             poolResets.incrementAndGet()
-            Log.i(TAG, "Pool reset: ${POOL_SIZE} buffers, ${newWidth}x${newHeight}, ${size} bytes each")
+            Log.i(TAG, "Pool reset: gen=$currentGeneration, ${POOL_SIZE} buffers, ${newWidth}x${newHeight}, ${size} bytes each")
         }
     }
 
     fun getDiagnostics(): String {
-        return "pool=${availableCount.get()}/${POOL_SIZE} inUse=${inUseCount.get()} dropped=${droppedFrames.get()} resets=${poolResets.get()}"
+        return "pool=${availableCount.get()}/${POOL_SIZE} inUse=${inUseCount.get()} dropped=${droppedFrames.get()} resets=${poolResets.get()} stale=${staleReleases.get()} gen=$currentGeneration"
     }
 }
