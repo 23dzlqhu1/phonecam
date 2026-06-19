@@ -1,9 +1,10 @@
 # PhoneCam 当前状态
 
-> 最后更新：2026-06-19 Android 花屏双热修
+> 最后更新：2026-06-19 BUG-013 二次修复（encoder 尺寸错配）
 
 ## 事实来源
 
+- 2026-06-19 BUG-013 二次修复：encoder 尺寸错配导致三段式花屏。`StreamingService` 延迟 encoder/EGL 创建到首帧到达后（使用 `image.width/height` 真实尺寸）；`submitFrameWithOwnership()` 检测运行时帧尺寸变化；`Yuv420Extractor` 改用 `buffer.duplicate()` + 绝对索引；`EglRenderer` 新增纯色诊断模式。`assembleDebug` 通过；真机三段式花屏复测待验收。
 - 2026-06-19 Android 花屏双热修（代码级）：`EglRenderer` 上传 `GL_LUMINANCE` Y/U/V 前固定 `GL_UNPACK_ALIGNMENT=1`；`H264Encoder` 从 `INFO_OUTPUT_FORMAT_CHANGED` 缓存 `csd-0/csd-1`，输出统一转 Annex-B，关键帧按 `BUFFER_FLAG_KEY_FRAME` 兜底补 SPS/PPS，并按分辨率选择 AVC level（720p→3.1，1080p→4.0）。`assembleDebug` 已通过；真机花屏复测和 10 分钟 1080p30 长跑仍需人工验证。
 - 2026-06-19 Camera switch 热修：WiFi 推流中切换前后置摄像头不再重启 TCP/encoder。Android 端 StreamingService.switchCamera() 暂停帧提交 → close camera → setLensFacing → open camera → 1.5s 后强制 IDR + 恢复帧提交。PC 端 DecodeWorker 增加帧间隔检测（>1.5s 显示"摄像头切换中"，>10s 显示"手机端暂停推流"），不触发 connection lost / discovery。
 - 2026-06-19 BUG-012 网关解析修复 + LAN proxy bypass：`getAllGateways()` 使用 `indexOf` 找关键字后冒号避免 IPv6 干扰；所有 LAN socket 加 `setProxy(QNetworkProxy::NoProxy)` 绕过 Clash/系统代理。

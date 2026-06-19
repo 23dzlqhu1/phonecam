@@ -114,7 +114,7 @@ class StreamingService : Service() {
             val exec = sEglExecutor
             val renderer = sEglRenderer
             val encoder = sH264Encoder
-            if (exec == null || renderer == null || encoder == null || !sActive) return
+            if (exec == null || renderer == null || encoder == null || !sActive || !sEncoderReady) return
             if (sPauseFrameSubmit) return  // camera switch in progress
             sCurrentRotation = rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
@@ -132,10 +132,31 @@ class StreamingService : Service() {
         }
 
         /**
+         * BUG-013 修复: encoder/EGL 延迟到首帧尺寸确认后创建
+         * 标志位: false = 等待首帧初始化, true = 正常推流
+         */
+        @Volatile var sEncoderReady: Boolean = false
+
+        /**
          * 带所有权的帧提交 — 解决 OOM 问题
          * buffer 在 EGL 线程完成 drawYuv 后自动 release 回池
+         *
+         * BUG-013: 首帧时初始化 encoder/EGL（使用真实帧尺寸），
+         *          并检测运行时尺寸变化。
          */
         fun submitFrameWithOwnership(frame: YuvFramePool.YuvFrameBuffer) {
+            // ── 首帧初始化: encoder/EGL 尚未创建 ──
+            if (!sEncoderReady) {
+                if (!sActive || sPauseFrameSubmit) {
+                    frame.release()
+                    return
+                }
+                // 初始化 encoder + EGL，使用首帧的真实尺寸
+                initializeEncoderAndEgl(frame.width, frame.height, frame.ptsNs, frame.rotation)
+                frame.release()  // 首帧只用于尺寸检测，不编码
+                return
+            }
+
             val exec = sEglExecutor
             val renderer = sEglRenderer
             val encoder = sH264Encoder
@@ -147,13 +168,24 @@ class StreamingService : Service() {
                 frame.release()  // 立即释放
                 return
             }
+
+            // ── BUG-013: 运行时尺寸变化检测 ──
+            if (frame.width != sCameraW || frame.height != sCameraH) {
+                InAppLogStore.e(TAG,
+                    "[BUG-013] 帧尺寸变化! encoder=${sCameraW}x${sCameraH} " +
+                    "→ frame=${frame.width}x${frame.height}，需重启推流")
+                frame.release()
+                // 标记失败，触发 UI 提示
+                sStartFailedReason = "相机分辨率变化(${sCameraW}x${sCameraH}→${frame.width}x${frame.height})，请重新推流"
+                sStreamState = StreamState.START_FAILED
+                sActive = false
+                return
+            }
+
             sCurrentRotation = frame.rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = frame.ptsNs }
             sFrameSubmitCount++
 
-            // 检查 executor backlog，避免积压
-            // 如果已有未消费帧，丢弃当前帧
-            // (这里简化实现：依赖 executor 的 queue 容量限制)
             exec.execute {
                 try {
                     renderer.drawYuv(frame.data, frame.width, frame.height)
@@ -164,6 +196,121 @@ class StreamingService : Service() {
                 } finally {
                     frame.release()  // 关键：EGL 线程完成后释放 buffer 回池
                 }
+            }
+        }
+
+        /**
+         * BUG-013: 首帧到达后初始化 encoder + EGL
+         * 在 ImageReader 线程调用，同步等待 encoder/EGL 创建完成
+         */
+        private fun initializeEncoderAndEgl(frameW: Int, frameH: Int, ptsNs: Long, rotation: Int) {
+            InAppLogStore.i(TAG,
+                "[BUG-013] 首帧到达: ${frameW}x${frameH}，初始化 encoder + EGL...")
+
+            // 更新真实尺寸
+            sCameraW = frameW
+            sCameraH = frameH
+            sCurrentRotation = rotation
+            synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
+
+            try {
+                // 3) H264Encoder.start — 使用首帧真实尺寸
+                val encoder = H264Encoder()
+                InAppLogStore.i(TAG, "[BUG-013] 启动 H264Encoder: ${frameW}x${frameH} fps=$sCameraFps")
+                // 获取 TcpStreamServer 引用（从 worker thread 设置的 sTcpServer）
+                val server = sTcpServer
+                val naluCb = object : H264Encoder.NaluCallback {
+                    override fun onNalu(nalu: ByteArray, type: Int) {
+                        sNaluOutputCount++
+                        val seq = sPcpSequence++
+                        val pts = System.nanoTime() / 1000L
+                        val latestPtsNs = readLatestPtsNs()
+                        val isKeyframe = (type == 5)
+                        if (isKeyframe) sKeyframeCount++ else sNonKeyframeCount++
+                        val flags = PcpPacketWriter.encodeRotationFlags(sCurrentRotation, isKeyframe)
+                        val header = PcpPacketWriter.buildHeader(
+                            sequence = seq, ptsUs = pts, ptsNs = latestPtsNs,
+                            payloadLen = nalu.size, codec = PcpPacketWriter.CODEC_H264,
+                            flags = flags, type = PcpPacketWriter.TYPE_VIDEO
+                        )
+                        val pkt = ByteArray(PcpPacketWriter.HEADER_SIZE + nalu.size)
+                        System.arraycopy(header, 0, pkt, 0, PcpPacketWriter.HEADER_SIZE)
+                        System.arraycopy(nalu, 0, pkt, PcpPacketWriter.HEADER_SIZE, nalu.size)
+                        val ok = server?.sendPacket(pkt) ?: false
+                        if (ok) {
+                            sNaluSentCount++
+                            sBytesSentCount += pkt.size
+                        }
+                        if (seq % 30 == 0) {
+                            InAppLogStore.i(TAG, "[PCP] seq=$seq type=$type key=$isKeyframe bytes=${pkt.size}")
+                        }
+                    }
+                }
+                val inputSurface = encoder.start(frameW, frameH, sCameraFps, naluCb)
+                sH264Encoder = encoder
+
+                // 4) EglRenderer — 在专用 EGL 线程构造
+                InAppLogStore.i(TAG, "[BUG-013] 创建 eglExecutor (单线程, EGL owner)")
+                val exec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+                    Thread(r, "Streaming-EGL-Thread")
+                }
+                sEglExecutor = exec
+
+                val rendererLatch = java.util.concurrent.CountDownLatch(1)
+                val rendererHolder = arrayOfNulls<EglRenderer>(1)
+                exec.execute {
+                    try {
+                        val r = EglRenderer(inputSurface)
+                        rendererHolder[0] = r
+                        InAppLogStore.i(TAG, "[BUG-013] EglRenderer 构造完成")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "[BUG-013] EglRenderer 构造失败", e)
+                    } finally {
+                        rendererLatch.countDown()
+                    }
+                }
+                if (!rendererLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    InAppLogStore.e(TAG, "[BUG-013] 5s 内 EglRenderer 未构造完")
+                    sStartFailedReason = "EGL 初始化超时"
+                    sStreamState = StreamState.START_FAILED
+                    sActive = false
+                    return
+                }
+                sEglRenderer = rendererHolder[0] ?: run {
+                    InAppLogStore.e(TAG, "[BUG-013] EglRenderer 为 null")
+                    sStartFailedReason = "EGL 初始化失败"
+                    sStreamState = StreamState.START_FAILED
+                    sActive = false
+                    return
+                }
+
+                // 5) 重置统计
+                sPcpSequence = 0
+                sNaluSentCount = 0
+                sBytesSentCount = 0L
+                sKeyframeCount = 0
+                sNonKeyframeCount = 0
+                sFrameSubmitCount = 0
+                sFrameEncodeCount = 0
+                sNaluOutputCount = 0
+                sStartTimeMs = android.os.SystemClock.elapsedRealtime()
+
+                // 6) 标记 encoder 就绪
+                sEncoderReady = true
+                sStreamState = StreamState.STREAMING
+                sStarting = false
+                InAppLogStore.i(TAG,
+                    "[BUG-013] encoder+EGL 就绪 (${frameW}x${frameH})，开始推流")
+
+                // 启动统计 timer
+                startStatsTimer()
+
+            } catch (e: Exception) {
+                Log.e(TAG, "[BUG-013] encoder/EGL 初始化异常", e)
+                sStartFailedReason = "编码器初始化失败: ${e.message}"
+                sStreamState = StreamState.START_FAILED
+                sActive = false
+                sStarting = false
             }
         }
 
@@ -283,6 +430,53 @@ class StreamingService : Service() {
             val intent = Intent(ctx, StreamingService::class.java).setAction(ACTION_STOP)
             ctx.startService(intent)
         }
+
+        // 批次 3.2.0.3g 帧率统计 timer (主线程 Handler, 5s 一次)
+        // BUG-013: 在 companion object 内，因为 initializeEncoderAndEgl() 需要调用
+        private val statsHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        private val statsRunnable: Runnable = object : Runnable {
+            override fun run() {
+                if (!sActive) return
+                val elapsedSec = (android.os.SystemClock.elapsedRealtime() - sStartTimeMs) / 1000.0
+                if (elapsedSec > 0) {
+                    val submitFps = sFrameSubmitCount / elapsedSec
+                    val encodeFps = sFrameEncodeCount / elapsedSec
+                    val naluFps = sNaluOutputCount / elapsedSec
+                    val sendFps = sNaluSentCount / elapsedSec
+                    val bps = sBytesSentCount * 8.0 / elapsedSec / 1_000.0
+                    val eglErr = sEglRenderer?.eglErrorCount ?: 0
+                    val eglSwapFail = sEglRenderer?.eglSwapFailCount ?: 0
+                    val draws = sEglRenderer?.drawCallCount ?: 0
+
+                    // OOM diagnostics
+                    val runtime = Runtime.getRuntime()
+                    val heapTotal = runtime.totalMemory() / 1024 / 1024
+                    val heapFree = runtime.freeMemory() / 1024 / 1024
+                    val heapMax = runtime.maxMemory() / 1024 / 1024
+                    val directAllocs = sEglRenderer?.directBufferAllocCount ?: 0
+
+                    InAppLogStore.i(
+                        TAG,
+                        "[STATS] T=${"%.1f".format(elapsedSec)}s " +
+                                "送帧=${"%.1f".format(submitFps)}fps 编码=${"%.1f".format(encodeFps)}fps " +
+                                "NALU=${"%.1f".format(naluFps)}fps 发送=${"%.1f".format(sendFps)}fps " +
+                                "${"%.1f".format(bps)}kbps " +
+                                "IDR=$sKeyframeCount P=$sNonKeyframeCount " +
+                                "EGL:draw=$draws err=$eglErr swapFail=$eglSwapFail " +
+                                "heap:${heapTotal}M/${heapFree}M/${heapMax}M " +
+                                "directBuf:$directAllocs"
+                    )
+                }
+                statsHandler.postDelayed(this, 5000L)
+            }
+        }
+        private fun startStatsTimer() {
+            statsHandler.removeCallbacks(statsRunnable)
+            statsHandler.post(statsRunnable)
+        }
+        private fun stopStatsTimer() {
+            statsHandler.removeCallbacks(statsRunnable)
+        }
     }
 
     override fun onCreate() {
@@ -387,101 +581,28 @@ class StreamingService : Service() {
                 // P1-3: PC 已连接
                 sStreamState = StreamState.PC_CONNECTED
 
-                // 3) H264Encoder.start
-                val w = sCameraW
-                val h = sCameraH
-                InAppLogStore.i(TAG, "[3.2.0.3f] 启动 H264Encoder: ${w}x${h}")
-                val encoder = H264Encoder()
-                val naluCb = object : H264Encoder.NaluCallback {
-                    override fun onNalu(nalu: ByteArray, type: Int) {
-                        sNaluOutputCount++  // 批次 3.2.0.3g 帧率统计
-                        val seq = sPcpSequence++
-                        val pts = System.nanoTime() / 1000L
-                        // 批次 3.2.0.3g: 读最近一次 listener 提交的 pts_ns, 写进 PCP header
-                        //  PC 端用这个 + 解码时间算端到端时延
-                        val ptsNs = readLatestPtsNs()
-                        val isKeyframe = (type == 5)  // H.264 NALU type 5 = IDR slice
-                        if (isKeyframe) sKeyframeCount++ else sNonKeyframeCount++
-                        val flags = PcpPacketWriter.encodeRotationFlags(sCurrentRotation, isKeyframe)
-                        val header = PcpPacketWriter.buildHeader(
-                            sequence = seq,
-                            ptsUs = pts,
-                            ptsNs = ptsNs,
-                            payloadLen = nalu.size,
-                            codec = PcpPacketWriter.CODEC_H264,
-                            flags = flags,
-                            type = PcpPacketWriter.TYPE_VIDEO
-                        )
-                        val pkt = ByteArray(PcpPacketWriter.HEADER_SIZE + nalu.size)
-                        System.arraycopy(header, 0, pkt, 0, PcpPacketWriter.HEADER_SIZE)
-                        System.arraycopy(nalu, 0, pkt, PcpPacketWriter.HEADER_SIZE, nalu.size)
-                        val ok = server.sendPacket(pkt)
-                        if (ok) {
-                            sNaluSentCount++
-                            sBytesSentCount += pkt.size
-                        }
-                        if (seq % 30 == 0) {
-                            InAppLogStore.i(TAG, "[3.2.0.3f-PCP] seq=$seq type=$type keyframe=$isKeyframe bytes=${pkt.size} ptsNs=$ptsNs (累计 $sNaluSentCount 包 / $sBytesSentCount B)")
-                        }
-                    }
-                }
-                val inputSurface = encoder.start(w, h, sCameraFps, naluCb)
-                sH264Encoder = encoder
+                // BUG-013: encoder/EGL 延迟到首帧到达后创建
+                // submitFrameWithOwnership() 会检测首帧并调用 initializeEncoderAndEgl()
 
-                // 4) EglRenderer 绑到 inputSurface
-                //    关键: EGL context 是 thread-local, 必须先创建 eglExecutor (新单线程)
-                //         然后在 eglExecutor 线程构造 EglRenderer, EGL context 就绑这个线程
-                //         listener.submitFrame → eglExecutor.execute(drawYuv) → EGL owner thread 执行
-                InAppLogStore.i(TAG, "[3.2.0.3f] 创建 eglExecutor (单线程, EGL owner)")
-                val exec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-                    Thread(r, "Streaming-EGL-Thread")
-                }
-                sEglExecutor = exec
-
-                // 同步 latch: 等 EglRenderer 在 eglExecutor 线程构造完成
-                val rendererLatch = java.util.concurrent.CountDownLatch(1)
-                val rendererHolder = arrayOfNulls<EglRenderer>(1)
-                exec.execute {
-                    try {
-                        val r = EglRenderer(inputSurface)
-                        rendererHolder[0] = r
-                        InAppLogStore.i(TAG, "[3.2.0.3f] EglRenderer 在 EGL owner thread 构造完成")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "[3.2.0.3f] EglRenderer 构造失败", e)
-                    } finally {
-                        rendererLatch.countDown()
-                    }
-                }
-                if (!rendererLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                    InAppLogStore.e(TAG, "[3.2.0.3f] 5s 内 EglRenderer 未构造完, 启动失败")
-                    sStarting = false
-                    return@Thread
-                }
-                sEglRenderer = rendererHolder[0] ?: run {
-                    InAppLogStore.e(TAG, "[3.2.0.3f] EglRenderer 为 null, 启动失败")
-                    sStarting = false
-                    return@Thread
-                }
-
-                // 5) 重置统计
+                // 重置统计 (encoder 创建后还会再 reset 一次)
                 sPcpSequence = 0
                 sNaluSentCount = 0
                 sBytesSentCount = 0L
                 sKeyframeCount = 0
                 sNonKeyframeCount = 0
-                // 批次 3.2.0.3g 帧率统计 reset
                 sFrameSubmitCount = 0
                 sFrameEncodeCount = 0
                 sNaluOutputCount = 0
                 sStartTimeMs = android.os.SystemClock.elapsedRealtime()
 
-                // 6) 翻转 sActive 标志位 → MainActivity listener 看到后会送帧
+                // 翻转 sActive → MainActivity listener 开始送帧
+                // submitFrameWithOwnership() 看到 sActive=true + sEncoderReady=false
+                // 会在首帧到达时初始化 encoder/EGL
+                sEncoderReady = false  // BUG-013: 等首帧确认尺寸后再设 true
                 sActive = true
-                sStreamState = StreamState.STREAMING  // P1-3
-                InAppLogStore.i(TAG, "[3.2.0.3f] sActive=true, 推流中...")
+                sStreamState = StreamState.PC_CONNECTED  // PC 已连接，等首帧初始化 encoder
+                InAppLogStore.i(TAG, "[BUG-013] sActive=true，等待首帧到达初始化 encoder+EGL...")
 
-                // 批次 3.2.0.3g 帧率统计: 启动 1s 定时打印 (主线程 Handler, 1s 一次, 推流期间持续)
-                startStatsTimer()
                 sStarting = false
 
             } catch (e: Exception) {
@@ -502,6 +623,7 @@ class StreamingService : Service() {
     private fun stopStreamingInternal() {
         sActive = false
         sStarting = false
+        sEncoderReady = false  // BUG-013: 重置 encoder 就绪标志
         sStreamState = StreamState.IDLE  // P1-3: reset to idle
         sStartFailedReason = ""  // P1-3
         sClientDisconnected = false  // P1-3
@@ -519,51 +641,9 @@ class StreamingService : Service() {
         InAppLogStore.i(TAG, "[3.2.0.3f] 推流已完全停止")
     }
 
-    // 批次 3.2.0.3g 帧率统计 timer (主线程 Handler, 1s 一次)
-    private val statsHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val statsRunnable: Runnable = object : Runnable {
-        override fun run() {
-            if (!sActive) return
-            val elapsedSec = (android.os.SystemClock.elapsedRealtime() - sStartTimeMs) / 1000.0
-            if (elapsedSec > 0) {
-                val submitFps = sFrameSubmitCount / elapsedSec
-                val encodeFps = sFrameEncodeCount / elapsedSec
-                val naluFps = sNaluOutputCount / elapsedSec
-                val sendFps = sNaluSentCount / elapsedSec
-                val bps = sBytesSentCount * 8.0 / elapsedSec / 1_000.0
-                val eglErr = sEglRenderer?.eglErrorCount ?: 0
-                val eglSwapFail = sEglRenderer?.eglSwapFailCount ?: 0
-                val draws = sEglRenderer?.drawCallCount ?: 0
-
-                // OOM diagnostics
-                val runtime = Runtime.getRuntime()
-                val heapTotal = runtime.totalMemory() / 1024 / 1024
-                val heapFree = runtime.freeMemory() / 1024 / 1024
-                val heapMax = runtime.maxMemory() / 1024 / 1024
-                val directAllocs = sEglRenderer?.directBufferAllocCount ?: 0
-
-                InAppLogStore.i(
-                    TAG,
-                    "[STATS] T=${"%.1f".format(elapsedSec)}s " +
-                            "送帧=${"%.1f".format(submitFps)}fps 编码=${"%.1f".format(encodeFps)}fps " +
-                            "NALU=${"%.1f".format(naluFps)}fps 发送=${"%.1f".format(sendFps)}fps " +
-                            "${"%.1f".format(bps)}kbps " +
-                            "IDR=$sKeyframeCount P=$sNonKeyframeCount " +
-                            "EGL:draw=$draws err=$eglErr swapFail=$eglSwapFail " +
-                            "heap:${heapTotal}M/${heapFree}M/${heapMax}M " +
-                            "directBuf:$directAllocs"
-                )
-            }
-            statsHandler.postDelayed(this, 5000L)  // 5 秒一次，减少日志量
-        }
-    }
-    private fun startStatsTimer() {
-        statsHandler.removeCallbacks(statsRunnable)
-        statsHandler.post(statsRunnable)
-    }
-    private fun stopStatsTimer() {
-        statsHandler.removeCallbacks(statsRunnable)
-    }
+    // 批次 3.2.0.3g 帧率统计 timer (主线程 Handler, 5s 一次)
+    // BUG-013: statsHandler/statsRunnable/startStatsTimer/stopStatsTimer 已移到 companion object
+    // （因为 initializeEncoderAndEgl() 在 companion 中需要调用 startStatsTimer）
 
     /**
      * Android 8+ 通知 channel 必需, 否则通知不显示 → startForeground 抛异常

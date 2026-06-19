@@ -70,11 +70,17 @@
 
 ### BUG-013: Android 花屏（2026-06-19）✅ 代码已热修
 
-- **现象**：`b486fa4` 后手机推流、PC 接收和 NV12 计数都在增长，但预览出现大面积绿色块、横向噪声线，随后出现紫绿交替闪烁。
+- **现象**：`b486fa4` 后手机推流、PC 接收和 NV12 计数都在增长，但预览出现大面积绿色块、横向噪声线，随后出现紫绿交替闪烁。三段式花屏（Y/U/V 平面可见）。
 - **根因假设 A（已修）**：`EglRenderer` 上传 `GL_LUMINANCE` U/V 纹理时沿用 OpenGL 默认 `GL_UNPACK_ALIGNMENT=4`。1080p 等场景下 UV 半宽可能非 4 字节对齐，OpenGL 会按错误行距读取紧凑 I420 U/V 面。
 - **根因假设 B（已修）**：当前 `H264Encoder` 只在 `CODEC_CONFIG` buffer 中缓存 SPS/PPS，且 keyframe 依赖 Annex-B 扫描；部分 encoder 只通过 `INFO_OUTPUT_FORMAT_CHANGED` 暴露 `csd-0/csd-1`，或输出封包不是预期 Annex-B，导致 PC 端收到缺参数集/错误 keyframe 标记的 H.264 流。1080p30 固定 AVC Level 3.1 也不匹配。
-- **修复**：`EglRenderer` 固定 `GL_UNPACK_ALIGNMENT=1`；`H264Encoder` 缓存 `csd-0/csd-1`、统一输出 Annex-B、关键帧按 `BUFFER_FLAG_KEY_FRAME` 兜底补 SPS/PPS，并按分辨率选择 AVC level。
-- **验证**：`phone_native\gradlew.bat assembleDebug` 通过；真机花屏复测和 10 分钟 1080p30 内存曲线仍待人工验证。
+- **根因假设 C（2026-06-19 二次修复）**：编码器尺寸与实际帧尺寸不匹配。`StreamingService` 默认 `sCameraW=1280, sCameraH=720`，但 ImageReader 可能输出 1920x1080。`EglRenderer.drawYuv()` 用帧尺寸设 `glViewport`，但 MediaCodec Surface 只有 1280x720 → Y/U/V 三平面被挤入错误大小的画布，产生三段式花屏。
+- **修复（二次）**：
+  1. `StreamingService` 延迟 encoder/EGL 创建到首帧到达后，使用 `image.width/height` 真实尺寸
+  2. `submitFrameWithOwnership()` 检测运行时帧尺寸变化，不匹配时标记失败
+  3. `Yuv420Extractor` 改用 `buffer.duplicate()` + 绝对索引 + 边界保护
+  4. `EglRenderer` 新增纯色诊断模式（`solidColorTestMode`），用于区分 YUV 提取 vs H264 编码问题
+  5. 全链路尺寸日志：`image.width/height`、`frame.width/height`、`encoder.start w/h`、`drawYuv w/h`
+- **验证**：`gradlew assembleDebug` 通过；真机三段式花屏复测和 10 分钟 1080p30 内存曲线仍待人工验证。
 
 ## 已验证修复（历史）
 

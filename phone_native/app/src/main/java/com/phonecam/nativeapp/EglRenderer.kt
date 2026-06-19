@@ -114,6 +114,11 @@ class EglRenderer(private val inputSurface: Surface) {
     @Volatile var eglSwapFailCount: Long = 0
     @Volatile var drawCallCount: Long = 0
 
+    // BUG-013: 诊断模式 — 渲染纯色测试帧代替 YUV
+    // 如果 PC 在纯色模式下仍花屏，问题在 H264/PC 端；如果纯色正常，问题在 YUV extraction
+    @Volatile var solidColorTestMode: Boolean = false
+    private var solidColorPhase: Int = 0  // 用于切换颜色
+
     // 顶点 / 纹理坐标 buffer (一次性分配)
     private val vertexBuffer: FloatBuffer = ByteBuffer
         .allocateDirect(VERTEX_COORDS.size * 4)
@@ -257,10 +262,22 @@ class EglRenderer(private val inputSurface: Surface) {
      * @param height 帧高
      */
     fun drawYuv(yuv420planar: ByteArray, width: Int, height: Int) {
+        // BUG-013: 诊断模式 — 渲染纯色代替 YUV
+        if (solidColorTestMode) {
+            drawSolidColorTest(width, height)
+            return
+        }
+
         val ySize = width * height
         val uvSize = ySize / 4
         val uvW = width / 2
         val uvH = height / 2
+
+        // BUG-013: 每 30 帧记录 drawYuv 尺寸，验证与 encoder surface 一致
+        if (drawCallCount % 30 == 0L) {
+            Log.d(TAG, "[BUG-013] drawYuv ${width}x${height} " +
+                "ySize=$ySize uvW=$uvW uvH=$uvH frame#${drawCallCount + 1}")
+        }
 
         // 1. 上传 Y 平面 → Y 纹理
         uploadTextureLuminance(yTexture, yuv420planar, 0, ySize, width, height, PlaneType.Y)
@@ -388,6 +405,38 @@ class EglRenderer(private val inputSurface: Surface) {
             GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, w, h, 0,
             GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, buffer
         )
+    }
+
+    /**
+     * BUG-013: 诊断模式 — 渲染纯色测试帧
+     * 灰/红/绿/蓝循环，每 30 帧换色
+     * 如果 PC 端能看到纯色画面且不花屏，说明 H264 编码+传输正常，问题在 YUV extraction
+     */
+    private fun drawSolidColorTest(width: Int, height: Int) {
+        val colors = arrayOf(
+            floatArrayOf(0.5f, 0.5f, 0.5f),  // 灰
+            floatArrayOf(1.0f, 0.0f, 0.0f),  // 红
+            floatArrayOf(0.0f, 1.0f, 0.0f),  // 绿
+            floatArrayOf(0.0f, 0.0f, 1.0f),  // 蓝
+        )
+        solidColorPhase++
+        val c = colors[(solidColorPhase / 30) % colors.size]
+
+        GLES20.glClearColor(c[0], c[1], c[2], 1.0f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glViewport(0, 0, width, height)
+
+        val swapped = EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+        if (!swapped) {
+            eglSwapFailCount++
+            Log.w(TAG, "[DIAG] eglSwapBuffers failed in solid color mode")
+        }
+        drawCallCount++
+
+        if (solidColorPhase % 30 == 0) {
+            Log.d(TAG, "[DIAG] solid color test frame #$solidColorPhase " +
+                "color=(${c[0]},${c[1]},${c[2]}) ${width}x${height}")
+        }
     }
 
     /**
