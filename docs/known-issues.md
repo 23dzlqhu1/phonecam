@@ -68,22 +68,25 @@
 - **修复内容**: 码率 8Mbps + IDR 全扫描 + CODEC_CONFIG 拦截 + 编码诊断日志；后续视频链路重构移除 QImage 热路径并统一 NV12 compositor；VirtualCam RGB24-only 兼容路径和 FillBuffer 缓存元数据修复。
 - **验证**: 用户实测确认腾讯会议可显示 PhoneCam 输出，灰色三图/闪烁修复，产品闭环跑通。
 
-### BUG-013: Android 花屏（2026-06-19）✅ 代码已热修
+### BUG-013: Android 花屏/延迟/transform（2026-06-19）✅ 已关闭
 
-- **现象**：`b486fa4` 后手机推流、PC 接收和 NV12 计数都在增长，但预览出现大面积绿色块、横向噪声线，随后出现紫绿交替闪烁。三段式花屏（Y/U/V 平面可见）。
-- **根因假设 A（已修）**：`EglRenderer` 上传 `GL_LUMINANCE` U/V 纹理时沿用 OpenGL 默认 `GL_UNPACK_ALIGNMENT=4`。1080p 等场景下 UV 半宽可能非 4 字节对齐，OpenGL 会按错误行距读取紧凑 I420 U/V 面。
-- **根因假设 B（已修）**：当前 `H264Encoder` 只在 `CODEC_CONFIG` buffer 中缓存 SPS/PPS，且 keyframe 依赖 Annex-B 扫描；部分 encoder 只通过 `INFO_OUTPUT_FORMAT_CHANGED` 暴露 `csd-0/csd-1`，或输出封包不是预期 Annex-B，导致 PC 端收到缺参数集/错误 keyframe 标记的 H.264 流。1080p30 固定 AVC Level 3.1 也不匹配。
-- **根因假设 C（2026-06-19 二次修复）**：编码器尺寸与实际帧尺寸不匹配。`StreamingService` 默认 `sCameraW=1280, sCameraH=720`，但 ImageReader 可能输出 1920x1080。`EglRenderer.drawYuv()` 用帧尺寸设 `glViewport`，但 MediaCodec Surface 只有 1280x720 → Y/U/V 三平面被挤入错误大小的画布，产生三段式花屏。
-- **根因假设 D（2026-06-19 三代际隔离修复）**：即使尺寸正确，画面仍在纯色/三平面/两平面间闪烁。根因是 lifecycle 竞态：旧 executor 队列中未执行的 task 仍用旧 renderer/encoder 继续 draw/encode；旧 H264Encoder output loop 在 stop() 后仍可能吐出缓存的旧 NALU。没有代际隔离机制。
-- **根因假设 E（2026-06-19 PC fast path 格式假设）**：`FinalFrameComposer::composeFromDecodedFrame()` 假设所有解码帧都是 NV12（2 平面 Y+UV interleaved）。但 D3D11VA 硬件解码可能输出 YUV420P（3 平面 Y/U/V）。代码把 `data[1]`（U 平面）当 NV12 UV interleaved 处理，丢失 `data[2]`（V 平面）。`rotateNv12()` 对 YUV420P 的 3 平面按 NV12 2 平面旋转 → 前置摄像头紫色/上下两平面。
-- **修复（二次+三代际+PC格式）**：
-  1. `StreamingService.sStreamGeneration` 代际 ID + 完整生命周期隔离
-  2. `EglRenderer(surfaceW, surfaceH)` 帧尺寸≠surface 尺寸时丢帧
-  3. `H264Encoder` callback 前检查 `running`
-  4. `FinalFrameComposer`: NV12 + rotation∈{0,90,180,270} → fast path；其他 → `fallbackToQImageCompose()` (sws_scale→RGB24→QImage→compose)
-  5. `HwDecoder::decodeFrame()`: `av_new_packet+memcpy` 替代直接指针赋值
-  6. 前 10 帧日志含 pix_fmt/linesize/data 指针
-- **验证**：`gradlew assembleDebug` 通过；真机三段式花屏复测和 10 分钟 1080p30 内存曲线仍待人工验证。
+- **现象**：`b486fa4` 后手机推流、PC 接收和 NV12 计数都在增长，但预览出现大面积绿色块、横向噪声线、紫绿交替闪烁、三段式花屏（Y/U/V 平面可见）。后续发现：非 NV12 格式走 RGB24/QImage 往返导致 20s 级延迟；手动 mirror/flip/rotation 触发 legacy 分支导致腾讯会议异常。
+- **最终根因链**（按因果顺序）：
+  1. **Android 尺寸错配（假设 C）**：`StreamingService` 默认 1280x720 启动 encoder，ImageReader 实际输出 1920x1080 → `EglRenderer.drawYuv()` viewport 与 MediaCodec Surface 不匹配 → 三段式花屏
+  2. **Android lifecycle 竞态（假设 D）**：旧 executor 队列中 stale task 继续用旧 renderer/encoder draw/encode；旧 H264Encoder output loop 在 stop() 后仍吐旧 NALU → 纯色/三平面/两平面闪烁
+  3. **PC NV12 格式假设（假设 E）**：`composeFromDecodedFrame()` 假设所有帧为 NV12（2 平面），D3D11VA 可能输出 YUV420P（3 平面）→ 丢 V 平面 + rotateNv12 按 NV12 旋转 → 前置紫色
+  4. **PC 无界队列延迟**：非 NV12 走 `fallbackToQImageCompose`（RGB24 往返）慢于 30fps 输入 + `Qt::QueuedConnection` 不丢旧帧 → 20s 延迟
+  5. **PC transform legacy 分支**：mirror/flip/manualRotation 触发 `needsFallback()` 绕过 NV12 快路径 → preview/shared-memory/腾讯会议不一致
+- **修复（6 轮，跨 Android + PC）**：
+  - **Android**: `StreamingService` 延迟 encoder/EGL 到首帧真实尺寸 + `sStreamGeneration` 代际隔离 + `EglRenderer(surfaceW,surfaceH)` 尺寸校验 + `H264Encoder` callback 检查 `running` + `Yuv420Extractor` buffer.duplicate + 绝对索引
+  - **PC**: `FinalFrameComposer` 任意 pix_fmt→sws_scale→NV12 直接路径（消除 RGB 往返）+ frame age >500ms 丢帧 + `mirrorNv12`/`flipNv12` UV pair-atomic 操作 + transform 统一 NV12 路径 + `HwDecoder::decodeFrame` av_new_packet+memcpy + `setTransformState` std::atomic 线程安全
+- **验收结果**（2026-06-19）：
+  - ✅ USB 推流：后置摄像头画面正常，NV12 计数持续增长
+  - ✅ WiFi 推流：连接稳定，画面正常
+  - ✅ 前置/后置摄像头切换：无花屏、无积压、generation 递增
+  - ✅ mirror/flip/rotation 按钮：Legacy 计数保持 0，NV12 持续增长，颜色正常
+  - ✅ 腾讯会议：画面正常，无横纹、无红色 tint
+- **稳定基线**：`bug-013-fixed` @ `72b33d7`
 
 ## 已验证修复（历史）
 
@@ -99,6 +102,7 @@
 | BUG-011 | 多设备无法选择 | 已修复，待验证 |
 | BUG-007 | 推流状态不更新（"等待推流"/"待机"卡死） | ✅ 代码已修复，2026-06-19 |
 | BUG-012 | WiFi 网关解析失败（IPv6 冒号干扰） | ✅ 代码已修复，2026-06-19 — getAllGateways 用 indexOf 找关键字后冒号 + UI 状态同步 |
+| BUG-013 | 花屏/延迟/transform（跨 Android+PC） | ✅ 已关闭，2026-06-19 — 6 轮修复：尺寸/代际/NV12 格式/延迟/transform 统一路径 |
 
 ### BUG-012 详情：WiFi 网关解析失败 ✅ 已修复
 
