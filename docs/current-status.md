@@ -1,9 +1,10 @@
 # PhoneCam 当前状态
 
-> 最后更新：2026-06-19 Camera switch 热修 + LAN proxy bypass
+> 最后更新：2026-06-19 Android 花屏双热修
 
 ## 事实来源
 
+- 2026-06-19 Android 花屏双热修（代码级）：`EglRenderer` 上传 `GL_LUMINANCE` Y/U/V 前固定 `GL_UNPACK_ALIGNMENT=1`；`H264Encoder` 从 `INFO_OUTPUT_FORMAT_CHANGED` 缓存 `csd-0/csd-1`，输出统一转 Annex-B，关键帧按 `BUFFER_FLAG_KEY_FRAME` 兜底补 SPS/PPS，并按分辨率选择 AVC level（720p→3.1，1080p→4.0）。`assembleDebug` 已通过；真机花屏复测和 10 分钟 1080p30 长跑仍需人工验证。
 - 2026-06-19 Camera switch 热修：WiFi 推流中切换前后置摄像头不再重启 TCP/encoder。Android 端 StreamingService.switchCamera() 暂停帧提交 → close camera → setLensFacing → open camera → 1.5s 后强制 IDR + 恢复帧提交。PC 端 DecodeWorker 增加帧间隔检测（>1.5s 显示"摄像头切换中"，>10s 显示"手机端暂停推流"），不触发 connection lost / discovery。
 - 2026-06-19 BUG-012 网关解析修复 + LAN proxy bypass：`getAllGateways()` 使用 `indexOf` 找关键字后冒号避免 IPv6 干扰；所有 LAN socket 加 `setProxy(QNetworkProxy::NoProxy)` 绕过 Clash/系统代理。
 - 2026-06-19 BUG-007 GUI 状态回归已修复：推流 QLabel 从局部变量改为 m_streamLabel 成员；onFinalFrameReady/onFrameDecoded 首帧触发 enterStreamingState() → confirmStreamActive + 诊断条隐藏 + 设备名回填 + 推流显示"推流中"；connectionLost 调用 exitStreamingState() 恢复"待机"；m_lastFps 解决 preflight 每秒 reset 误判；candidatesChanged 已推流时同步刷新设备名。

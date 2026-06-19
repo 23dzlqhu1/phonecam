@@ -1,6 +1,6 @@
 # PhoneCam 已知问题
 
-> 最后更新：2026-06-19 BUG-012 网关解析修复 + UI 状态同步修复
+> 最后更新：2026-06-19 BUG-013 Android 花屏双热修
 
 本文只记录当前有效问题、待验证修复和仍需处理的风险。已修复问题见历史 commit 及 `docs/archive/`。
 
@@ -14,6 +14,7 @@
 | KI-006 | 旧 DLL 无法读取 V2 shared memory | 旧 DLL 注册后看不到新帧 | 已通过 V2 name 隔离 | ✅ 已规避 |
 | KI-007 | VirtualCam Debug Runtime Check #3 | Debug DLL 在无首帧/placeholder 路径可能弹窗 | placeholder/no-frame 路径不读取未初始化元数据 | ✅ 代码已修复，GUI smoke 待验收 |
 | BUG-012 | WiFi 网关解析失败 | PC 端无法发现 WiFi 热点，只能 fallback 到硬编码 IP | 2026-06-19 ✅ 已修复 — IPv6 冒号解析 + UI 状态同步 |
+| BUG-013 | Android 推流绿屏/紫绿闪烁花屏 | H.264 帧持续到达，但画面出现大面积偏绿、横条或紫绿噪声 | 2026-06-19 ✅ 代码已热修 — EGL U/V 对齐 + H.264 SPS/PPS/Annex-B/level 修正；真机复测待验收 |
 
 ### KI-003 详情：画面比例不一致 ✅ 已关闭
 
@@ -67,6 +68,14 @@
 - **修复内容**: 码率 8Mbps + IDR 全扫描 + CODEC_CONFIG 拦截 + 编码诊断日志；后续视频链路重构移除 QImage 热路径并统一 NV12 compositor；VirtualCam RGB24-only 兼容路径和 FillBuffer 缓存元数据修复。
 - **验证**: 用户实测确认腾讯会议可显示 PhoneCam 输出，灰色三图/闪烁修复，产品闭环跑通。
 
+### BUG-013: Android 花屏（2026-06-19）✅ 代码已热修
+
+- **现象**：`b486fa4` 后手机推流、PC 接收和 NV12 计数都在增长，但预览出现大面积绿色块、横向噪声线，随后出现紫绿交替闪烁。
+- **根因假设 A（已修）**：`EglRenderer` 上传 `GL_LUMINANCE` U/V 纹理时沿用 OpenGL 默认 `GL_UNPACK_ALIGNMENT=4`。1080p 等场景下 UV 半宽可能非 4 字节对齐，OpenGL 会按错误行距读取紧凑 I420 U/V 面。
+- **根因假设 B（已修）**：当前 `H264Encoder` 只在 `CODEC_CONFIG` buffer 中缓存 SPS/PPS，且 keyframe 依赖 Annex-B 扫描；部分 encoder 只通过 `INFO_OUTPUT_FORMAT_CHANGED` 暴露 `csd-0/csd-1`，或输出封包不是预期 Annex-B，导致 PC 端收到缺参数集/错误 keyframe 标记的 H.264 流。1080p30 固定 AVC Level 3.1 也不匹配。
+- **修复**：`EglRenderer` 固定 `GL_UNPACK_ALIGNMENT=1`；`H264Encoder` 缓存 `csd-0/csd-1`、统一输出 Annex-B、关键帧按 `BUFFER_FLAG_KEY_FRAME` 兜底补 SPS/PPS，并按分辨率选择 AVC level。
+- **验证**：`phone_native\gradlew.bat assembleDebug` 通过；真机花屏复测和 10 分钟 1080p30 内存曲线仍待人工验证。
+
 ## 已验证修复（历史）
 
 | ID | 问题 | 当前状态 |
@@ -94,4 +103,3 @@
   1. `onCandidatesChanged` 中同时检查 `activeId` 和 `prevData` 来恢复下拉框选择
   2. 避免 ConnectionManager 自动选择了设备，但 UI 仍显示"自动选择"
 - **验证**：构建通过，待运行时验证日志输出 `[DISC] Gateway found: WLAN 10.142.34.164`
-

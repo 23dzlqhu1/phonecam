@@ -233,6 +233,7 @@ class EglRenderer(private val inputSurface: Surface) {
      * LUMINANCE 格式: 1 字节/像素, GL 内部存 R 通道 = 灰度值
      */
     private fun initTextures() {
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
         val texIds = IntArray(3)
         GLES20.glGenTextures(3, texIds, 0)
         yTexture = texIds[0]
@@ -344,6 +345,7 @@ class EglRenderer(private val inputSurface: Surface) {
         textureId: Int, src: ByteArray, srcOffset: Int, size: Int, w: Int, h: Int, plane: PlaneType
     ) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
 
         // 根据 plane 类型选择对应的 direct buffer
         val buffer: ByteBuffer = when (plane) {

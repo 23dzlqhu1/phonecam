@@ -49,7 +49,8 @@ class H264Encoder {
         private const val HEIGHT = 720
         private const val FRAME_RATE = 30
         private const val I_FRAME_INTERVAL = 1   // 1 秒 1 个 IDR 帧
-        private const val BIT_RATE = 4_000_000   // 4 Mbps
+        private const val BIT_RATE = 8_000_000   // 8 Mbps (720p30 高质量，原值 4_000_000)
+        private const val BIT_RATE_LOW = 4_000_000  // 4 Mbps 低带宽保留
 
         // dequeue 超时 (微秒, 10ms = 10000us)
         private const val DEQUEUE_TIMEOUT_US = 10_000L
@@ -72,6 +73,13 @@ class H264Encoder {
     private var frameIndex: Long = 0
     private var outputThread: Thread? = null
 
+    // 诊断统计（P0 修复：编码器侧 bitrate/IDR/SPS/PPS 统计）
+    private var statsIdrCount: Long = 0
+    private var statsPFrameCount: Long = 0
+    private var statsSpsPpsCount: Long = 0
+    private var statsTotalBytes: Long = 0
+    private var statsStartTimeMs: Long = 0L
+
     // SPS/PPS 缓存 (用于追加到每个 I 帧前，防止网络丢包或迟连导致 PC 端永远无法解码)
     private var spsPpsCache: ByteArray? = null
 
@@ -86,18 +94,49 @@ class H264Encoder {
      * @param naluCb NALU 回调 (编码器每吐一帧 NALU 都会调)
      * @return MediaCodec 的 InputSurface (EglRenderer 绑这个)
      */
-    fun start(width: Int = WIDTH, height: Int = HEIGHT, naluCb: NaluCallback): android.view.Surface {
+    fun start(width: Int = WIDTH, height: Int = HEIGHT, fps: Int = FRAME_RATE, naluCb: NaluCallback): android.view.Surface {
         if (running) {
             throw IllegalStateException("H264Encoder 已 start, 需先 stop()")
         }
         callback = naluCb
         frameIndex = 0
+        // 重置诊断统计
+        statsIdrCount = 0
+        statsPFrameCount = 0
+        statsSpsPpsCount = 0
+        statsTotalBytes = 0
+        statsStartTimeMs = System.currentTimeMillis()
 
         val mime = MediaFormat.MIMETYPE_VIDEO_AVC
         val format = MediaFormat.createVideoFormat(mime, width, height).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
-            setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
+
+            // ★ 显式设置 Surface 输入模式（EGL 零拷贝路径）
+            setInteger(MediaFormat.KEY_COLOR_FORMAT,
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+
+            // ★ 尝试 CBR 码率控制（恒定码率，减少突发花屏）
+            try {
+                setInteger(MediaFormat.KEY_BITRATE_MODE,
+                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            } catch (e: Exception) {
+                Log.w(TAG, "CBR not supported on this device, using default VBR: ${e.message}")
+            }
+
+            // ★ Baseline Profile + matching Level（1080p30 不能固定用 Level 3.1）
+            try {
+                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+                val level = if (width * height > 1280 * 720 || fps > 30) {
+                    MediaCodecInfo.CodecProfileLevel.AVCLevel4
+                } else {
+                    MediaCodecInfo.CodecProfileLevel.AVCLevel31
+                }
+                setInteger(MediaFormat.KEY_LEVEL, level)
+            } catch (e: Exception) {
+                Log.w(TAG, "Profile/Level not settable: ${e.message}")
+            }
         }
         codec = MediaCodec.createEncoderByType(mime)
         codec!!.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -106,7 +145,8 @@ class H264Encoder {
         inputSurface = codec!!.createInputSurface()
         codec!!.start()
         running = true
-        Log.d(TAG, "MediaCodec start (Surface 模式): ${width}x${height} @ ${BIT_RATE / 1_000_000}Mbps")
+        Log.i(TAG, "Encoder start (Surface): ${width}x${height} @ ${BIT_RATE/1_000_000}Mbps " +
+            "fps=$fps iframeInterval=${I_FRAME_INTERVAL}s color=Surface")
 
         // 起后台线程拉 NALU 输出 (持续 dequeueOutputBuffer)
         startOutputLoop()
@@ -145,6 +185,13 @@ class H264Encoder {
         } catch (e: Exception) {
             Log.e(TAG, "[CONTROL] 向 MediaCodec 请求 I 帧异常: ${e.message}", e)
         }
+    }
+
+    /**
+     * 更新现有的 NALU 回调流向 (热替换)
+     */
+    fun replaceNaluCallback(naluCb: NaluCallback) {
+        callback = naluCb
     }
 
     /**
@@ -201,7 +248,14 @@ class H264Encoder {
                         // 暂时无输出, 继续轮询
                     }
                     outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        Log.d(TAG, "output format changed: ${codec?.outputFormat}")
+                        val format = codec?.outputFormat
+                        Log.d(TAG, "output format changed: $format")
+                        val config = format?.let { buildCodecConfigFromFormat(it) }
+                        if (config != null) {
+                            spsPpsCache = config
+                            statsSpsPpsCount++
+                            Log.i(TAG, "已从 output format 缓存 SPS/PPS, 大小: ${config.size} B")
+                        }
                     }
                     outIndex >= 0 -> {
                         val outBuffer = codec?.getOutputBuffer(outIndex)
@@ -210,36 +264,53 @@ class H264Encoder {
                             outBuffer.position(bufferInfo.offset)
                             outBuffer.limit(bufferInfo.offset + bufferInfo.size)
                             outBuffer.get(outBytes)
+                            val annexBBytes = normalizeH264ToAnnexB(outBytes)
 
-                            // 解析 NALU type (跳过起始码 00 00 00 01 或 00 00 01)
-                            var offset = 0
-                            if (outBytes.size > 4 && outBytes[0].toInt() == 0 && outBytes[1].toInt() == 0 && outBytes[2].toInt() == 0 && outBytes[3].toInt() == 1) {
-                                offset = 4
-                            } else if (outBytes.size > 3 && outBytes[0].toInt() == 0 && outBytes[1].toInt() == 0 && outBytes[2].toInt() == 1) {
-                                offset = 3
-                            }
-                            val naluType = if (offset < outBytes.size) outBytes[offset].toInt() and 0x1F else 0
+                            // ── 扫描 buffer 内所有 Annex-B NAL 单元 ──
+                            val hasIdr = containsNalType(annexBBytes, 5)
+                            val hasSps = containsNalType(annexBBytes, 7)
+                            val hasPps = containsNalType(annexBBytes, 8)
 
-                            // 缓存 SPS/PPS (BUFFER_FLAG_CODEC_CONFIG)
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                                spsPpsCache = outBytes
-                                Log.i(TAG, "已缓存 SPS/PPS 字典, 大小: ${outBytes.size} 字节")
-                            }
-
-                            var finalBytes = outBytes
-                            // 遇到 I 帧 (IDR)，如果存在缓存的 SPS/PPS，则强制将其拼接到头部发送
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
-                                val spsPps = spsPpsCache
-                                if (spsPps != null) {
-                                    val combined = ByteArray(spsPps.size + outBytes.size)
-                                    System.arraycopy(spsPps, 0, combined, 0, spsPps.size)
-                                    System.arraycopy(outBytes, 0, combined, spsPps.size, outBytes.size)
-                                    finalBytes = combined
-                                    Log.i(TAG, "已为关键帧附加 SPS/PPS 头 (总大小: ${combined.size})")
-                                }
+                            // ── CODEC_CONFIG buffer：只缓存，不发送（不是视频帧） ──
+                            val isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                            if (isCodecConfig) {
+                                statsSpsPpsCount++
+                                spsPpsCache = annexBBytes
+                                Log.i(TAG, "已缓存 SPS/PPS 字典, 大小: ${outBytes.size} B, hasSPS=$hasSps hasPPS=$hasPps")
+                                codec?.releaseOutputBuffer(outIndex, false)
+                                continue  // ★ 不调用 callback，不把 CODEC_CONFIG buffer 当视频帧发送
                             }
 
-                            callback?.onNalu(finalBytes, naluType)
+                            // ── 只在 IDR 缺 SPS/PPS 时补（不重复拼接） ──
+                            var finalBytes = annexBBytes
+                            val isKeyByFlag = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
+                            val isKey = hasIdr || isKeyByFlag
+                            if (isKey && spsPpsCache != null && !(hasSps && hasPps)) {
+                                val spsPps = spsPpsCache!!
+                                val combined = ByteArray(spsPps.size + annexBBytes.size)
+                                System.arraycopy(spsPps, 0, combined, 0, spsPps.size)
+                                System.arraycopy(annexBBytes, 0, combined, spsPps.size, annexBBytes.size)
+                                finalBytes = combined
+                                Log.i(TAG, "已为关键帧附加 SPS/PPS (SPS/PPS=${spsPps.size}B + frame=${annexBBytes.size}B)")
+                            }
+
+                            // 回调：type=5 表示含 IDR，type=1 表示非 IDR
+                            if (isKey) statsIdrCount++ else statsPFrameCount++
+                            statsTotalBytes += finalBytes.size
+
+                            // 每 30 帧打印一次编码统计
+                            val totalEncFrames = statsIdrCount + statsPFrameCount
+                            if (totalEncFrames > 0 && totalEncFrames % 30L == 0L) {
+                                val elapsedMs = System.currentTimeMillis() - statsStartTimeMs
+                                val totalFrames = totalEncFrames + statsSpsPpsCount
+                                val bitrateKbps = if (elapsedMs > 0) (statsTotalBytes * 8L * 1000L / elapsedMs / 1000L) else 0L
+                                val avgBytes = if (totalFrames > 0) statsTotalBytes / totalFrames else 0L
+                                Log.i(TAG, "[ENC-STATS] elapsed=${elapsedMs/1000}s frames=$totalFrames " +
+                                    "IDR=$statsIdrCount P=$statsPFrameCount SPS/PPS=$statsSpsPpsCount " +
+                                    "avg=${avgBytes}B/frame bitrate=${bitrateKbps}kbps")
+                            }
+
+                            callback?.onNalu(finalBytes, if (isKey) 5 else 1)
                         }
                         codec?.releaseOutputBuffer(outIndex, false)
                     }
@@ -247,6 +318,132 @@ class H264Encoder {
             }
             Log.d(TAG, "输出循环退出")
         }.apply { name = "H264Encoder-OutputLoop"; start() }
+    }
+
+    private fun buildCodecConfigFromFormat(format: MediaFormat): ByteArray? {
+        val sps = readCsd(format, "csd-0")
+        val pps = readCsd(format, "csd-1")
+        if (sps == null && pps == null) return null
+
+        val total = (sps?.size ?: 0) + (pps?.size ?: 0)
+        val out = ByteArray(total)
+        var offset = 0
+        if (sps != null) {
+            System.arraycopy(sps, 0, out, offset, sps.size)
+            offset += sps.size
+        }
+        if (pps != null) {
+            System.arraycopy(pps, 0, out, offset, pps.size)
+        }
+        return out
+    }
+
+    private fun readCsd(format: MediaFormat, key: String): ByteArray? {
+        if (!format.containsKey(key)) return null
+        val buffer = format.getByteBuffer(key) ?: return null
+        val dup = buffer.duplicate()
+        dup.position(0)
+        val bytes = ByteArray(dup.remaining())
+        dup.get(bytes)
+        return normalizeH264ToAnnexB(bytes)
+    }
+
+    private fun normalizeH264ToAnnexB(bytes: ByteArray): ByteArray {
+        if (containsStartCode(bytes)) return bytes
+
+        val avcc = tryConvertAvccToAnnexB(bytes)
+        if (avcc != null) return avcc
+
+        val nalType = if (bytes.isNotEmpty()) bytes[0].toInt() and 0x1F else 0
+        if (nalType in 1..23) {
+            val out = ByteArray(4 + bytes.size)
+            out[0] = 0
+            out[1] = 0
+            out[2] = 0
+            out[3] = 1
+            System.arraycopy(bytes, 0, out, 4, bytes.size)
+            return out
+        }
+
+        return bytes
+    }
+
+    private fun tryConvertAvccToAnnexB(bytes: ByteArray): ByteArray? {
+        var pos = 0
+        var total = 0
+        var count = 0
+        while (pos + 4 <= bytes.size) {
+            val len = ((bytes[pos].toInt() and 0xFF) shl 24) or
+                ((bytes[pos + 1].toInt() and 0xFF) shl 16) or
+                ((bytes[pos + 2].toInt() and 0xFF) shl 8) or
+                (bytes[pos + 3].toInt() and 0xFF)
+            if (len <= 0 || pos + 4 + len > bytes.size) return null
+            total += 4 + len
+            count++
+            pos += 4 + len
+        }
+        if (pos != bytes.size || count == 0) return null
+
+        val out = ByteArray(total)
+        pos = 0
+        var dst = 0
+        while (pos + 4 <= bytes.size) {
+            val len = ((bytes[pos].toInt() and 0xFF) shl 24) or
+                ((bytes[pos + 1].toInt() and 0xFF) shl 16) or
+                ((bytes[pos + 2].toInt() and 0xFF) shl 8) or
+                (bytes[pos + 3].toInt() and 0xFF)
+            out[dst] = 0
+            out[dst + 1] = 0
+            out[dst + 2] = 0
+            out[dst + 3] = 1
+            System.arraycopy(bytes, pos + 4, out, dst + 4, len)
+            dst += 4 + len
+            pos += 4 + len
+        }
+        return out
+    }
+
+    private fun containsNalType(bytes: ByteArray, targetType: Int): Boolean {
+        var pos = 0
+        while (pos < bytes.size - 3) {
+            val scSize = startCodeSizeAt(bytes, pos)
+            if (scSize == 0) {
+                pos++
+                continue
+            }
+            val nalStart = pos + scSize
+            if (nalStart < bytes.size && (bytes[nalStart].toInt() and 0x1F) == targetType) {
+                return true
+            }
+            pos = nalStart + 1
+        }
+        return false
+    }
+
+    private fun containsStartCode(bytes: ByteArray): Boolean {
+        var pos = 0
+        while (pos < bytes.size - 3) {
+            if (startCodeSizeAt(bytes, pos) != 0) return true
+            pos++
+        }
+        return false
+    }
+
+    private fun startCodeSizeAt(bytes: ByteArray, pos: Int): Int {
+        if (pos + 4 <= bytes.size &&
+            bytes[pos].toInt() == 0 &&
+            bytes[pos + 1].toInt() == 0 &&
+            bytes[pos + 2].toInt() == 0 &&
+            bytes[pos + 3].toInt() == 1) {
+            return 4
+        }
+        if (pos + 3 <= bytes.size &&
+            bytes[pos].toInt() == 0 &&
+            bytes[pos + 1].toInt() == 0 &&
+            bytes[pos + 2].toInt() == 1) {
+            return 3
+        }
+        return 0
     }
 
     /**
