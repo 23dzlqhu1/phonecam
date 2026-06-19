@@ -52,7 +52,7 @@ D:/PhoneCam/
 │   ├── current-architecture.md   # 当前架构
 │   ├── known-issues.md           # 当前有效问题与待验证修复
 │   ├── project-map.md            # 本文件
-│   ├── user-manual.md            # 用户使用说明
+│   ├── dev-reference.md          # 开发参考（调试经验、设备陷阱、构建环境）
 │   └── archive/                  # 历史归档
 ├── installer/                    # 发布脚本
 │   ├── package.bat               # 从 Release 构建组装发布包
