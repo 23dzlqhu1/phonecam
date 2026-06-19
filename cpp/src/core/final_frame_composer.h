@@ -75,6 +75,10 @@ private:
                                   const uint8_t* srcUV, int srcUVStride,
                                   int srcW, int srcH, int rotation);  // 90/180/270
 
+    // BUG-013: safe fallback for non-NV12 formats — sws_scale → RGB24 → QImage → compose()
+    Nv12Frame fallbackToQImageCompose(const DecodedFrame& source, const FrameTransform& transform,
+                                       uint32_t sequence, uint64_t pts_ns, double receive_ms);
+
     SwsContext* m_swsCtx = nullptr;
     AVPixelFormat m_lastSrcFmt = AV_PIX_FMT_NONE;
     int m_lastSrcW = 0, m_lastSrcH = 0, m_lastDstW = 0, m_lastDstH = 0;

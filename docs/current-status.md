@@ -1,10 +1,11 @@
 # PhoneCam 当前状态
 
-> 最后更新：2026-06-19 BUG-013 三代际隔离修复
+> 最后更新：2026-06-19 BUG-013 PC fast path 格式假设修复
 
 ## 事实来源
 
-- 2026-06-19 BUG-013 三代际隔离修复：画面在纯色/三平面/两平面间闪烁，根因是 lifecycle 竞态（旧 executor 队列旧 task 继续 draw/encode，旧 encoder output loop 继续发送 NALU）。修复：`sStreamGeneration` 代际 ID + submit 时捕获/execute 时校验 + 重建时 pause→drain→teardown→gen++→create→unpause 完整生命周期隔离；`EglRenderer` surface 尺寸校验丢帧；`H264Encoder` callback 前检查 `running`。`assembleDebug` 通过；真机闪烁复测待验收。
+- 2026-06-19 BUG-013 PC fast path 格式假设修复：`FinalFrameComposer::composeFromDecodedFrame()` 假设所有解码帧都是 NV12（2 平面），对 YUV420P（3 平面 Y/U/V）会丢 V 平面并对 U 平面做 NV12 旋转 → 前置紫色/上下两平面。修复：NV12 + rotation∈{0,90,180,270} 走现有 fast path；其他格式走 `fallbackToQImageCompose()`（sws_scale→RGB24→QImage→compose）。`decodeFrame()` 改用 `av_new_packet+memcpy` 替代直接指针赋值。前 10 帧日志含 pix_fmt/linesize/data 指针。`build_quick.bat` 通过。
+- 2026-06-19 BUG-013 三代际隔离修复：画面在纯色/三平面/两平面间闪烁，根因是 lifecycle 竞态。`sStreamGeneration` 代际 ID + 完整生命周期隔离。`assembleDebug` 通过；真机闪烁复测待验收。
 - 2026-06-19 BUG-013 二次修复：encoder 尺寸错配导致三段式花屏。`StreamingService` 延迟 encoder/EGL 创建到首帧到达后（使用 `image.width/height` 真实尺寸）；`submitFrameWithOwnership()` 检测运行时帧尺寸变化；`Yuv420Extractor` 改用 `buffer.duplicate()` + 绝对索引；`EglRenderer` 新增纯色诊断模式。`assembleDebug` 通过；真机三段式花屏复测待验收。
 - 2026-06-19 Android 花屏双热修（代码级）：`EglRenderer` 上传 `GL_LUMINANCE` Y/U/V 前固定 `GL_UNPACK_ALIGNMENT=1`；`H264Encoder` 从 `INFO_OUTPUT_FORMAT_CHANGED` 缓存 `csd-0/csd-1`，输出统一转 Annex-B，关键帧按 `BUFFER_FLAG_KEY_FRAME` 兜底补 SPS/PPS，并按分辨率选择 AVC level（720p→3.1，1080p→4.0）。`assembleDebug` 已通过；真机花屏复测和 10 分钟 1080p30 长跑仍需人工验证。
 - 2026-06-19 Camera switch 热修：WiFi 推流中切换前后置摄像头不再重启 TCP/encoder。Android 端 StreamingService.switchCamera() 暂停帧提交 → close camera → setLensFacing → open camera → 1.5s 后强制 IDR + 恢复帧提交。PC 端 DecodeWorker 增加帧间隔检测（>1.5s 显示"摄像头切换中"，>10s 显示"手机端暂停推流"），不触发 connection lost / discovery。

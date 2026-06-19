@@ -323,6 +323,42 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
     const AVFrame* srcFrame = source.frame;
     int srcW = srcFrame->width;
     int srcH = srcFrame->height;
+    const AVPixelFormat srcFmt = source.format();
+
+    // ── BUG-013: format-aware fast/fallback path ──
+    // Only NV12 can use the fast NV12 rotation + sws_scale path.
+    // YUV420P/YUVJ420P/P010 etc. have 3 planes (Y, U, V) — the old code
+    // treated data[1] as interleaved UV, losing V and corrupting rotation.
+    //
+    // Decision: NV12 + rotation ∈ {0,90,180,270} → fast NV12 path
+    //           Everything else → safe fallback: sws_scale → RGB24 → QImage → compose()
+    static int composeCount = 0;
+    composeCount++;
+    const bool isNv12 = (srcFmt == AV_PIX_FMT_NV12);
+    const bool canFastNv12 = isNv12 &&
+        (transform.androidRotation == 0 || transform.androidRotation == 90 ||
+         transform.androidRotation == 180 || transform.androidRotation == 270);
+
+    if (composeCount <= 10 || composeCount % 300 == 0) {
+        qDebug() << "[COMPOSER] composeFromDecodedFrame#" << composeCount
+                 << "pix_fmt=" << av_get_pix_fmt_name(srcFmt)
+                 << "isNv12=" << isNv12
+                 << "rotation=" << transform.androidRotation
+                 << "canFast=" << canFastNv12
+                 << "size=" << srcW << "x" << srcH;
+    }
+
+    if (!canFastNv12) {
+        // ── Safe fallback: any format → sws_scale → RGB24 → QImage → compose() ──
+        qDebug() << "[COMPOSER] FALLBACK: srcFmt=" << av_get_pix_fmt_name(srcFmt)
+                 << "rotation=" << transform.androidRotation
+                 << "— using QImage compose path";
+        return fallbackToQImageCompose(source, transform, sequence, pts_ns, receive_ms);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Fast NV12 path (existing code, only reached for NV12 + valid rotation)
+    // ═══════════════════════════════════════════════════════════════
 
     // ── Handle androidRotation: rotate NV12 in-place, then scale ──
     // For 90/270, dimensions swap after rotation.
@@ -355,8 +391,6 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
                  << "(fast YUV path)";
     }
 
-    const AVPixelFormat srcFmt = source.format();
-
     // Calculate scaled dimensions using effective (post-rotation) dimensions
     const double scale = qMin(static_cast<double>(kOutputWidth) / effectiveW,
                               static_cast<double>(kOutputHeight) / effectiveH);
@@ -364,7 +398,7 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
     int scaledH = (static_cast<int>(effectiveH * scale)) & ~1;
 
     // Init sws context for effective source → scaled NV12
-    if (!initSwsContext(srcFmt, effectiveW, effectiveH, scaledW, scaledH)) {
+    if (!initSwsContext(AV_PIX_FMT_NV12, effectiveW, effectiveH, scaledW, scaledH)) {
         qWarning() << "[COMPOSER] sws init failed — returning black";
         QByteArray black(ySize + uvSize, 0);
         fillNv12Black(reinterpret_cast<uint8_t*>(black.data()), kOutputWidth, kOutputHeight);
@@ -422,6 +456,48 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
     av_frame_free(&scaledFrame);
     result.data = outBuf;
     return result;
+}
+
+Nv12Frame FinalFrameComposer::fallbackToQImageCompose(const DecodedFrame& source,
+                                                       const FrameTransform& transform,
+                                                       uint32_t sequence, uint64_t pts_ns,
+                                                       double receive_ms) {
+    const AVFrame* srcFrame = source.frame;
+    const int srcW = srcFrame->width;
+    const int srcH = srcFrame->height;
+    const AVPixelFormat srcFmt = source.format();
+
+    // Create sws context: srcFmt → RGB24
+    SwsContext* swsCtx = sws_getContext(
+        srcW, srcH, srcFmt,
+        srcW, srcH, AV_PIX_FMT_RGB24,
+        SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!swsCtx) {
+        qWarning() << "[COMPOSER] fallback: sws_getContext failed for" << av_get_pix_fmt_name(srcFmt);
+        Nv12Frame result;
+        result.width = kOutputWidth;
+        result.height = kOutputHeight;
+        result.sequence = sequence;
+        result.pts_ns = pts_ns;
+        result.receive_ms = receive_ms;
+        const int ySize = kOutputWidth * kOutputHeight;
+        QByteArray black(ySize + ySize / 2, 0);
+        fillNv12Black(reinterpret_cast<uint8_t*>(black.data()), kOutputWidth, kOutputHeight);
+        result.data = black;
+        return result;
+    }
+
+    // Convert to RGB24 QImage
+    QImage rgbImg(srcW, srcH, QImage::Format_RGB888);
+    uint8_t* dstData[4] = { rgbImg.bits(), nullptr, nullptr, nullptr };
+    int dstStride[4] = { static_cast<int>(rgbImg.bytesPerLine()), 0, 0, 0 };
+    // BUG-013: pass frame->data and frame->linesize directly — sws_scale handles
+    // any pix_fmt (yuv420p, yuvj420p, nv12, p010, etc.) correctly with proper planes.
+    sws_scale(swsCtx, srcFrame->data, srcFrame->linesize, 0, srcH, dstData, dstStride);
+    sws_freeContext(swsCtx);
+
+    // Delegate to legacy compose() which handles transforms + NV12 conversion
+    return compose(rgbImg, transform, sequence, pts_ns, receive_ms);
 }
 
 } // namespace phonecam

@@ -75,14 +75,14 @@
 - **根因假设 B（已修）**：当前 `H264Encoder` 只在 `CODEC_CONFIG` buffer 中缓存 SPS/PPS，且 keyframe 依赖 Annex-B 扫描；部分 encoder 只通过 `INFO_OUTPUT_FORMAT_CHANGED` 暴露 `csd-0/csd-1`，或输出封包不是预期 Annex-B，导致 PC 端收到缺参数集/错误 keyframe 标记的 H.264 流。1080p30 固定 AVC Level 3.1 也不匹配。
 - **根因假设 C（2026-06-19 二次修复）**：编码器尺寸与实际帧尺寸不匹配。`StreamingService` 默认 `sCameraW=1280, sCameraH=720`，但 ImageReader 可能输出 1920x1080。`EglRenderer.drawYuv()` 用帧尺寸设 `glViewport`，但 MediaCodec Surface 只有 1280x720 → Y/U/V 三平面被挤入错误大小的画布，产生三段式花屏。
 - **根因假设 D（2026-06-19 三代际隔离修复）**：即使尺寸正确，画面仍在纯色/三平面/两平面间闪烁。根因是 lifecycle 竞态：旧 executor 队列中未执行的 task 仍用旧 renderer/encoder 继续 draw/encode；旧 H264Encoder output loop 在 stop() 后仍可能吐出缓存的旧 NALU。没有代际隔离机制。
-- **修复（二次+三代际隔离）**：
-  1. `StreamingService.sStreamGeneration` 代际 ID：每次 encoder/EGL 创建递增，submit 时捕获，execute 时校验
-  2. `initializeEncoderAndEgl()` 完整生命周期：pause → shutdownNow old executor → stop old encoder → release old renderer → gen++ → create new → unpause + IDR
-  3. `submitFrameWithOwnership()` task 内双重校验：generation match + renderer/encoder identity check
-  4. `EglRenderer(surfaceWidth, surfaceHeight)` 构造时保存 surface 尺寸，`drawYuv()` 帧尺寸≠surface 尺寸时丢帧
-  5. `H264Encoder` callback 前检查 `running`，stop() 后不发送旧 NALU
-  6. `switchCamera()` 切换后递增 generation
-  7. 全链路尺寸日志 + 代际日志
+- **根因假设 E（2026-06-19 PC fast path 格式假设）**：`FinalFrameComposer::composeFromDecodedFrame()` 假设所有解码帧都是 NV12（2 平面 Y+UV interleaved）。但 D3D11VA 硬件解码可能输出 YUV420P（3 平面 Y/U/V）。代码把 `data[1]`（U 平面）当 NV12 UV interleaved 处理，丢失 `data[2]`（V 平面）。`rotateNv12()` 对 YUV420P 的 3 平面按 NV12 2 平面旋转 → 前置摄像头紫色/上下两平面。
+- **修复（二次+三代际+PC格式）**：
+  1. `StreamingService.sStreamGeneration` 代际 ID + 完整生命周期隔离
+  2. `EglRenderer(surfaceW, surfaceH)` 帧尺寸≠surface 尺寸时丢帧
+  3. `H264Encoder` callback 前检查 `running`
+  4. `FinalFrameComposer`: NV12 + rotation∈{0,90,180,270} → fast path；其他 → `fallbackToQImageCompose()` (sws_scale→RGB24→QImage→compose)
+  5. `HwDecoder::decodeFrame()`: `av_new_packet+memcpy` 替代直接指针赋值
+  6. 前 10 帧日志含 pix_fmt/linesize/data 指针
 - **验证**：`gradlew assembleDebug` 通过；真机三段式花屏复测和 10 分钟 1080p30 内存曲线仍待人工验证。
 
 ## 已验证修复（历史）
