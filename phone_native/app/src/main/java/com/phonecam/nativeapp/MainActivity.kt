@@ -405,14 +405,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupCameraImageCallback() {
+        // OOM fix: 预分配 YuvFramePool 和 scratch buffer
+        val framePool = YuvFramePool(1280, 720)  // 初始尺寸，会自动适配实际分辨率
+        val scratchBuffer = ByteArray(1920 * 2)  // 足够 1080p 的行缓冲
+
         cameraController?.setOnImageAvailableListener { image ->
             try {
                 val w = image.width
                 val h = image.height
-                val yuv = Yuv420Extractor.imageToI420(image)
                 cameraW = w
                 cameraH = h
                 cameraFrameCount++
+
+                // 从池中获取 buffer，失败则丢帧
+                val frameBuffer = framePool.acquire(w, h)
+                if (frameBuffer == null) {
+                    // 无可用 buffer，丢帧
+                    image.close()
+                    return@setOnImageAvailableListener
+                }
+
+                // 填充 YUV 数据到池 buffer
+                val success = Yuv420Extractor.imageToI420(image, frameBuffer.data, scratchBuffer)
+                image.close()  // 立即关闭 image，释放 ImageReader buffer
+
+                if (!success) {
+                    frameBuffer.release()
+                    return@setOnImageAvailableListener
+                }
 
                 val snap = StreamingService.getStateSnapshot()
                 if (snap.isActive) {
@@ -421,7 +441,11 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         cameraController?.getStreamRotation() ?: 0
                     }
-                    StreamingService.submitFrame(yuv, w, h, image.timestamp, rotation)
+                    frameBuffer.ptsNs = image.timestamp
+                    frameBuffer.rotation = rotation
+                    StreamingService.submitFrameWithOwnership(frameBuffer)
+                } else {
+                    frameBuffer.release()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "提取帧异常", e)

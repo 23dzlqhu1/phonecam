@@ -328,13 +328,64 @@ class EglRenderer(private val inputSurface: Surface) {
         }
     }
 
+    // OOM fix: 复用 direct ByteBuffer，避免每帧 allocateDirect
+    private var yDirectBuffer: ByteBuffer? = null
+    private var uDirectBuffer: ByteBuffer? = null
+    private var vDirectBuffer: ByteBuffer? = null
+    private var lastYSize = 0
+    private var lastUSize = 0
+    private var lastVSize = 0
+    var directBufferAllocCount = 0  // public for diagnostics
+
     private fun uploadTextureLuminance(
         textureId: Int, src: ByteArray, srcOffset: Int, size: Int, w: Int, h: Int
     ) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-        val buffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+
+        // 根据 plane 选择对应的 direct buffer
+        val buffer: ByteBuffer
+        val isNew: Boolean
+        when {
+            srcOffset == 0 -> {
+                // Y plane
+                if (yDirectBuffer == null || lastYSize != size) {
+                    yDirectBuffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+                    lastYSize = size
+                    directBufferAllocCount++
+                    Log.i(TAG, "Direct buffer allocated: Y plane, $size bytes, total=$directBufferAllocCount")
+                }
+                buffer = yDirectBuffer!!
+                isNew = false
+            }
+            srcOffset < size -> {
+                // U plane
+                if (uDirectBuffer == null || lastUSize != size) {
+                    uDirectBuffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+                    lastUSize = size
+                    directBufferAllocCount++
+                    Log.i(TAG, "Direct buffer allocated: U plane, $size bytes, total=$directBufferAllocCount")
+                }
+                buffer = uDirectBuffer!!
+                isNew = false
+            }
+            else -> {
+                // V plane
+                if (vDirectBuffer == null || lastVSize != size) {
+                    vDirectBuffer = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+                    lastVSize = size
+                    directBufferAllocCount++
+                    Log.i(TAG, "Direct buffer allocated: V plane, $size bytes, total=$directBufferAllocCount")
+                }
+                buffer = vDirectBuffer!!
+                isNew = false
+            }
+        }
+
+        // 复用 buffer: clear/put/position
+        buffer.clear()
         buffer.put(src, srcOffset, size)
         buffer.position(0)
+
         // LUMINANCE 格式: 1 字节/像素, GL 自动取 R 通道 = Y/U/V 灰度
         GLES20.glTexImage2D(
             GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, w, h, 0,

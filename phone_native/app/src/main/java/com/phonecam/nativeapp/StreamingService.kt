@@ -131,6 +131,42 @@ class StreamingService : Service() {
             }
         }
 
+        /**
+         * 带所有权的帧提交 — 解决 OOM 问题
+         * buffer 在 EGL 线程完成 drawYuv 后自动 release 回池
+         */
+        fun submitFrameWithOwnership(frame: YuvFramePool.YuvFrameBuffer) {
+            val exec = sEglExecutor
+            val renderer = sEglRenderer
+            val encoder = sH264Encoder
+            if (exec == null || renderer == null || encoder == null || !sActive) {
+                frame.release()  // 立即释放，避免泄漏
+                return
+            }
+            if (sPauseFrameSubmit) {
+                frame.release()  // 立即释放
+                return
+            }
+            sCurrentRotation = frame.rotation
+            synchronized(sPtsNsLock) { sLatestPtsNs = frame.ptsNs }
+            sFrameSubmitCount++
+
+            // 检查 executor backlog，避免积压
+            // 如果已有未消费帧，丢弃当前帧
+            // (这里简化实现：依赖 executor 的 queue 容量限制)
+            exec.execute {
+                try {
+                    renderer.drawYuv(frame.data, frame.width, frame.height)
+                    encoder.encodeFrame(frame.data)
+                    sFrameEncodeCount++
+                } catch (e: Exception) {
+                    Log.e(TAG, "[OOM-fix] EGL/encoder 异常", e)
+                } finally {
+                    frame.release()  // 关键：EGL 线程完成后释放 buffer 回池
+                }
+            }
+        }
+
         // 批次 3.2.0.3g: naluCb.onNalu 调这个读"最近一次 submitFrame 携带的 pts_ns"
         //  延迟差: 1 帧 (33ms), 对时延统计影响小
         fun readLatestPtsNs(): Long {
@@ -498,6 +534,14 @@ class StreamingService : Service() {
                 val eglErr = sEglRenderer?.eglErrorCount ?: 0
                 val eglSwapFail = sEglRenderer?.eglSwapFailCount ?: 0
                 val draws = sEglRenderer?.drawCallCount ?: 0
+
+                // OOM diagnostics
+                val runtime = Runtime.getRuntime()
+                val heapTotal = runtime.totalMemory() / 1024 / 1024
+                val heapFree = runtime.freeMemory() / 1024 / 1024
+                val heapMax = runtime.maxMemory() / 1024 / 1024
+                val directAllocs = sEglRenderer?.directBufferAllocCount ?: 0
+
                 InAppLogStore.i(
                     TAG,
                     "[STATS] T=${"%.1f".format(elapsedSec)}s " +
@@ -505,10 +549,12 @@ class StreamingService : Service() {
                             "NALU=${"%.1f".format(naluFps)}fps 发送=${"%.1f".format(sendFps)}fps " +
                             "${"%.1f".format(bps)}kbps " +
                             "IDR=$sKeyframeCount P=$sNonKeyframeCount " +
-                            "EGL:draw=$draws err=$eglErr swapFail=$eglSwapFail"
+                            "EGL:draw=$draws err=$eglErr swapFail=$eglSwapFail " +
+                            "heap:${heapTotal}M/${heapFree}M/${heapMax}M " +
+                            "directBuf:$directAllocs"
                 )
             }
-            statsHandler.postDelayed(this, 1000L)
+            statsHandler.postDelayed(this, 5000L)  // 5 秒一次，减少日志量
         }
     }
     private fun startStatsTimer() {
