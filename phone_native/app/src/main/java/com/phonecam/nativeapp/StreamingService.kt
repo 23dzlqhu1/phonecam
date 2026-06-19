@@ -163,27 +163,21 @@ class StreamingService : Service() {
             sStreamState = StreamState.SWITCHING_CAMERA
             sPauseFrameSubmit = true
 
-            // Step 1: Close current camera
-            cameraController.close()
+            cameraController.switchCameraWithCallback(lensFacing, object : CameraController.CameraSwitchCallback {
+                override fun onCaptureSessionConfigured() {
+                    InAppLogStore.i(TAG, "[CAM-SWITCH] Capture session configured")
+                }
 
-            // Step 2: Update lens facing
-            cameraController.setLensFacing(lensFacing)
-
-            // Step 3: Reopen camera (on camera thread)
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                cameraController.open()
-
-                // Step 4: Wait for camera to be ready (poll for a few seconds)
-                val deadline = System.currentTimeMillis() + 5000
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    // Step 5: Force IDR and resume frame submission
+                override fun onFirstFrameAvailable() {
+                    InAppLogStore.i(TAG, "[CAM-SWITCH] First frame available, requesting keyframe")
+                    // Force IDR and resume frame submission
                     triggerKeyframeRequest()
                     sPauseFrameSubmit = false
                     sStreamState = StreamState.STREAMING
                     InAppLogStore.i(TAG, "[CAM-SWITCH] Switch complete, resumed streaming")
                     callback(true)
-                }, 1500)  // 1.5s delay for camera to stabilize
-            }
+                }
+            })
         }
 
         // PCP 包统计

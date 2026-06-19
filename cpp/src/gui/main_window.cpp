@@ -32,16 +32,6 @@ void DecodeWorker::setTransformState(bool mirror, bool flip, int manualRotation)
 void DecodeWorker::decodeFrame(const VideoFrame& frame) {
     if (!m_decoder || !m_decoder->isInitialized()) return;
 
-    // Frame gap detection for camera switch
-    qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (m_lastFrameTimeMs > 0) {
-        qint64 gap = now - m_lastFrameTimeMs;
-        if (gap > kCameraSwitchThresholdMs) {
-            emit frameGapDetected(gap);
-        }
-    }
-    m_lastFrameTimeMs = now;
-
     // Build transform state
     FrameTransform transform;
     transform.mirror = m_mirror;
@@ -99,6 +89,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_virtualCam(new VirtualCam(this))
     , m_legacyDisplayQueue(new BoundedQueue<QImage>(3))
     , m_statsTimer(new QTimer(this))
+    , m_frameIdleTimer(new QTimer(this))
 {
     setupUi();
 
@@ -180,7 +171,8 @@ MainWindow::MainWindow(QWidget* parent)
             QMetaObject::invokeMethod(m_decodeWorker, "requestFlush", Qt::QueuedConnection);
         }
     });
-    connect(m_receiver, &PcpReceiver::connectionLost, this, [this]() {
+    connect(m_receiver, &PcpReceiver::connectionLost, this, [this](const QString& reason) {
+        qDebug() << "[MAIN] Connection lost, reason:" << reason;
         m_statusDot->setStyleSheet("background-color: #f59e0b; border-radius: 6px;");
         m_statusTitle->setText(QString::fromUtf8("等待手机推流..."));
         exitStreamingState();  // BUG-007: reset streaming UI state
@@ -208,6 +200,32 @@ MainWindow::MainWindow(QWidget* parent)
     // Pipeline stats timer (1 Hz — logs atomic counters + queue sizes)
     connect(m_statsTimer, &QTimer::timeout, this, &MainWindow::onStatsTimer);
     m_statsTimer->start(1000);
+
+    // Frame idle timer for camera switch detection (500ms interval)
+    connect(m_frameIdleTimer, &QTimer::timeout, this, [this]() {
+        if (m_lastFrameTimeMs == 0 || !m_streamEstablished) return;
+        qint64 now = QDateTime::currentMSecsSinceEpoch();
+        qint64 gap = now - m_lastFrameTimeMs;
+
+        if (gap > kStreamPausedThresholdMs) {
+            // >10s: stream paused or camera switch taking too long
+            if (!m_cameraSwitchingDetected) {
+                m_cameraSwitchingDetected = true;
+                m_statusTitle->setText(QString::fromUtf8("WiFi 已连接"));
+                m_statusDetail->setText(QString::fromUtf8("手机端暂停推流或正在切换"));
+                qDebug() << "[IDLE] Frame idle >10s, gap:" << gap << "ms";
+            }
+        } else if (gap > kCameraSwitchThresholdMs) {
+            // 1.5-10s: likely camera switch
+            if (!m_cameraSwitchingDetected) {
+                m_cameraSwitchingDetected = true;
+                m_statusTitle->setText(QString::fromUtf8("摄像头切换中"));
+                m_statusDetail->setText(QString::fromUtf8("等待新画面..."));
+                qDebug() << "[IDLE] Frame idle >1.5s, gap:" << gap << "ms";
+            }
+        }
+    });
+    m_frameIdleTimer->start(500);
 
     // P0-2: Pre-flight check timer (every 3 seconds)
     m_preflightTimer = new QTimer(this);
@@ -540,10 +558,6 @@ void MainWindow::startPipeline() {
     connect(m_decodeWorker, &DecodeWorker::frameDecoded,
             this, &MainWindow::onFrameDecoded, Qt::QueuedConnection);
 
-    // Wire: DecodeWorker → MainWindow (camera switch detection)
-    connect(m_decodeWorker, &DecodeWorker::frameGapDetected,
-            this, &MainWindow::onFrameGapDetected, Qt::QueuedConnection);
-
     m_decodeThread->start();
 }
 
@@ -583,6 +597,13 @@ void MainWindow::onFinalFrameReady(const Nv12Frame& frame) {
     // Primary NV12 path: update preview + write to shared memory
     m_frameCount++;
     m_nv12FrameCount++;
+
+    // Frame idle detection: update last frame time and reset camera switching flag
+    m_lastFrameTimeMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_cameraSwitchingDetected) {
+        m_cameraSwitchingDetected = false;
+        qDebug() << "[IDLE] Frame received, camera switch complete";
+    }
 
     // BUG-007: On first frame, transition UI to streaming state
     if (!m_streamEstablished) {
@@ -1082,20 +1103,6 @@ void MainWindow::enterStreamingState() {
 void MainWindow::exitStreamingState() {
     m_streamEstablished = false;
     if (m_streamLabel) m_streamLabel->setText(QString::fromUtf8("待机"));
-}
-
-void MainWindow::onFrameGapDetected(qint64 gapMs) {
-    // Camera switch detection: socket still connected but no new frames
-    if (gapMs > 10000) {
-        // >10s: stream paused or camera switch taking too long
-        m_statusTitle->setText(QString::fromUtf8("WiFi 已连接"));
-        m_statusDetail->setText(QString::fromUtf8("手机端暂停推流或正在切换"));
-    } else if (gapMs > 1500) {
-        // 1.5-10s: likely camera switch
-        m_statusTitle->setText(QString::fromUtf8("摄像头切换中"));
-        m_statusDetail->setText(QString::fromUtf8("等待新画面..."));
-    }
-    // Don't trigger connection lost or discovery - TCP is still alive
 }
 
 void MainWindow::updatePreflightStatus() {

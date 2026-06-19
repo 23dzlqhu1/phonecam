@@ -63,6 +63,11 @@ class CameraController(
 
     /** "480p" (640x480) / "720p" (1280x720, 默认) / "1080p" (1920x1080) */
     @Volatile private var targetResolutionPref: String = "720p"
+    fun getTargetResolution(): String = targetResolutionPref
+
+    /** "15" / "30" (默认) / "60" — 应用于 CONTROL_AE_TARGET_FPS_RANGE */
+    @Volatile private var targetFpsPref: String = "30"
+    fun getTargetFps(): String = targetFpsPref
 
     // 相机资源（运行时由 open() 赋值，close() 释放）
     private var cameraDevice: CameraDevice? = null
@@ -123,6 +128,14 @@ class CameraController(
     // 批次 3.2.0.2: 标记 setOnImageAvailableListener 在 cameraHandler 还是 null 时被调用
     // → open() 完成后, 如果这个 flag 是 true, 就启动重试 loop
     @Volatile private var pendingListenerRetry: Boolean = false
+
+    // Camera switch callback
+    interface CameraSwitchCallback {
+        fun onCaptureSessionConfigured()
+        fun onFirstFrameAvailable()
+    }
+    @Volatile private var switchCallback: CameraSwitchCallback? = null
+    @Volatile private var waitingForFirstFrame: Boolean = false
 
     // TextureView 监听器：等 surface ready 后才调 open()
     private val surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -198,9 +211,12 @@ class CameraController(
         imageReaderThread = irThread
         imageReaderHandler = Handler(irThread.looper)
 
-        // 批次 3.2.0.2: 如果 setOnImageAvailableListener 之前因 cameraHandler==null 被推迟, 现在启动重试
-        if (pendingListenerRetry && imageListener != null) {
-            Log.d(TAG, "open: pendingListenerRetry detected, starting retry loop now")
+        // 如果已有 imageListener（来自之前的 setOnImageAvailableListener 调用），
+        // close/open 循环后 imageReader 已被销毁，需要重新触发 ImageReader 重建。
+        // 优先检查 pendingListenerRetry（首次 open 时的延迟注册），再检查 imageListener（close/open 循环）。
+        if (imageListener != null) {
+            Log.d(TAG, "open: imageListener already registered, starting ImageReader retry loop")
+            pendingListenerRetry = false
             startListenerRetryLoop(cameraHandler!!)
         }
 
@@ -240,7 +256,6 @@ class CameraController(
             Log.w(TAG, "close imageReader error: ${e.message}")
         }
         imageReader = null
-        imageListener = null
         imageReaderThread?.quitSafely()
         try {
             imageReaderThread?.join(500)
@@ -350,6 +365,11 @@ class CameraController(
             val image = r.acquireLatestImage()
             if (image != null) {
                 try {
+                    // Camera switch: notify first frame available
+                    if (waitingForFirstFrame) {
+                        waitingForFirstFrame = false
+                        switchCallback?.onFirstFrameAvailable()
+                    }
                     listener(image)
                 } finally {
                     image.close()
@@ -386,6 +406,7 @@ class CameraController(
                 addTarget(imageReaderSurface)  // 关键: 把 ImageReader 也加进 request
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, buildFpsRange())
                 // 数字裁切: 裁掉边缘减少前置广角畸变 (G-026)
                 computeCropRegion()?.let {
                     set(CaptureRequest.SCALER_CROP_REGION, it)
@@ -405,6 +426,10 @@ class CameraController(
                         try {
                             session.setRepeatingRequest(requestBuilder.build(), null, handler)
                             InAppLogStore.i(TAG, "preview+imageReader started")
+                            // Camera switch: notify session configured
+                            if (waitingForFirstFrame) {
+                                switchCallback?.onCaptureSessionConfigured()
+                            }
                         } catch (e: CameraAccessException) {
                             Log.e(TAG, "setRepeatingRequest failed: ${e.message}", e)
                         }
@@ -433,6 +458,28 @@ class CameraController(
     }
 
     /**
+     * Camera switch with callback: close → setLensFacing → open → wait for first frame
+     * @param facing "front" or "back"
+     * @param callback notified on main thread when session configured and first frame available
+     */
+    fun switchCameraWithCallback(facing: String, callback: CameraSwitchCallback) {
+        Log.i(TAG, "[CAM-SWITCH] switchCameraWithCallback: $facing")
+        switchCallback = callback
+        waitingForFirstFrame = true
+
+        // Close current camera
+        close()
+
+        // Update lens facing
+        setLensFacing(facing)
+
+        // Reopen camera (on camera thread)
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            open()
+        }
+    }
+
+    /**
      * 设置目标分辨率: "480p" / "720p" (默认) / "1080p"
      * 必须在 close() 状态下调用 (下次 open() 生效)
      */
@@ -445,7 +492,28 @@ class CameraController(
         Log.d(TAG, "setTargetResolution: $targetResolutionPref")
     }
 
+    /**
+     * 设置目标帧率: "15" / "30" / "60"
+     * 必须在 close() 状态下调用 (下次 open() 生效)
+     */
+    fun setTargetFps(fps: String) {
+        targetFpsPref = when (fps) {
+            "15" -> "15"
+            "60" -> "60"
+            else -> "30"
+        }
+        Log.d(TAG, "setTargetFps: $targetFpsPref")
+    }
+
     // ===================== 内部实现 =====================
+
+    /**
+     * 根据 targetFpsPref 构造 CONTROL_AE_TARGET_FPS_RANGE
+     */
+    private fun buildFpsRange(): android.util.Range<Int> {
+        val fps = targetFpsPref.toIntOrNull() ?: 30
+        return android.util.Range(fps, fps)
+    }
 
     /**
      * "权限 + surface 都就绪"时才真正打开相机
@@ -566,6 +634,7 @@ class CameraController(
                 // 简单起见：自动对焦 + 自动曝光，后续批次再加手动控制
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, buildFpsRange())
                 // 数字裁切: 裁掉边缘减少前置广角畸变 (G-026)
                 computeCropRegion()?.let {
                     set(CaptureRequest.SCALER_CROP_REGION, it)

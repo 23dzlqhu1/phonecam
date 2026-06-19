@@ -39,7 +39,6 @@ public slots:
 signals:
     void finalFrameReady(const phonecam::Nv12Frame& frame);
     void frameDecoded(const QImage& image);
-    void frameGapDetected(qint64 gapMs);  // camera switch detection
 
 private:
     HwDecoder* m_decoder;
@@ -50,11 +49,6 @@ private:
     bool m_mirror = false;
     bool m_flip = false;
     int m_manualRotation = 0;
-
-    // Frame gap detection for camera switch
-    qint64 m_lastFrameTimeMs = 0;
-    static constexpr qint64 kCameraSwitchThresholdMs = 1500;  // 1.5s
-    static constexpr qint64 kStreamPausedThresholdMs = 10000; // 10s
 };
 
 class MainWindow : public QMainWindow {
@@ -83,7 +77,6 @@ private slots:
     void onDeviceSelected(int index);
     void onRefreshDevices();
     void onManualConnect();
-    void onFrameGapDetected(qint64 gapMs);  // camera switch detection
 
 
 protected:
@@ -148,6 +141,13 @@ private:
     ConnectionDiagnostics m_lastDiag;
     bool m_useLegacyCompose = false;
     QString m_canonicalDumpPath;
+
+    // Frame idle detection for camera switch
+    qint64 m_lastFrameTimeMs = 0;
+    QTimer* m_frameIdleTimer = nullptr;
+    bool m_cameraSwitchingDetected = false;
+    static constexpr qint64 kCameraSwitchThresholdMs = 1500;
+    static constexpr qint64 kStreamPausedThresholdMs = 10000;
 
     // Window drag
     bool m_dragging = false;

@@ -1,7 +1,7 @@
 #pragma once
 #include <QObject>
-#include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QByteArray>
 #include <atomic>
 #include "core/pcp_protocol.h"
@@ -9,9 +9,10 @@
 
 namespace phonecam {
 
-// PCP protocol receiver with TCP server and partial-read state machine.
-// Listens on a port, accepts one phone connection, parses PCP stream,
+// PCP protocol receiver with TCP client and partial-read state machine.
+// Connects to a phone's TcpStreamServer (via adb forward), parses PCP stream,
 // emits frameReceived() signals for complete frames.
+// Auto-reconnects on disconnect with a 3-second timer.
 class PcpReceiver : public QObject {
     Q_OBJECT
 public:
@@ -19,30 +20,39 @@ public:
     ~PcpReceiver() override;
 
     void start(quint16 port = 9999);
+    void start(const QString& host, quint16 port = 9999);
     void stop();
     bool isRunning() const { return m_running; }
+
+    // Send a reverse-control command to the connected phone (e.g. "PLI" for keyframe request).
+    // The phone's TcpStreamServer reads from its input stream and dispatches commands.
+    void sendCommand(const QByteArray& data);
 
 signals:
     void frameReceived(phonecam::VideoFrame frame);
     void stateChanged(const QString& state);
     void connectionEstablished();
-    void connectionLost();
-    void portInUse(quint16 port);
+    void connectionLost(const QString& reason = "");
+    void connectionRefused();
     void errorOccurred(const QString& error);
 
 private slots:
-    void onNewConnection();
+    void tryConnect();
+    void onConnected();
     void onReadyRead();
     void onDisconnected();
-    void onAcceptError(QAbstractSocket::SocketError error);
+    void onSocketError(QAbstractSocket::SocketError error);
 
 private:
     void processBuffer();
     void resetParser();
+    void cleanupSocket();
 
-    QTcpServer* m_server = nullptr;
     QTcpSocket* m_socket = nullptr;
+    QTimer* m_reconnectTimer = nullptr;
     bool m_running = false;
+    QString m_host = QStringLiteral("127.0.0.1");
+    quint16 m_port = 9999;
 
     // TCP partial read state machine
     enum class ReadState { READING_HEADER, READING_PAYLOAD };

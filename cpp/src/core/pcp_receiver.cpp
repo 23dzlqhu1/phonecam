@@ -104,10 +104,10 @@ void PcpReceiver::onDisconnected() {
     auto* socket = qobject_cast<QTcpSocket*>(sender());
     if (socket && socket != m_socket) return;
 
-    qDebug() << "[PCP] Phone disconnected";
+    qDebug() << "[PCP] Phone disconnected (socket disconnected)";
     cleanupSocket();
     resetParser();
-    emit connectionLost();
+    emit connectionLost("socket_disconnected");
     emit stateChanged("reconnecting");
 
     // Restart reconnect timer if still running
@@ -136,7 +136,7 @@ void PcpReceiver::onSocketError(QAbstractSocket::SocketError error) {
     // For other errors, cleanup and let reconnect timer handle it
     cleanupSocket();
     resetParser();
-    emit connectionLost();
+    emit connectionLost("socket_error: " + errorString);
     emit stateChanged("reconnecting");
 
     if (m_running && !m_reconnectTimer->isActive()) {
@@ -215,7 +215,7 @@ void PcpReceiver::processBuffer() {
                            << "- resetting connection";
                 cleanupSocket();
                 resetParser();
-                emit connectionLost();
+                emit connectionLost("payload_too_large: " + QString::number(m_expectedPayloadLen));
                 emit stateChanged("reconnecting");
                 if (m_running && !m_reconnectTimer->isActive()) {
                     m_reconnectTimer->start();
