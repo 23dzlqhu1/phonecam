@@ -1,10 +1,11 @@
 # PhoneCam 当前状态
 
-> 最后更新：2026-06-19 BUG-012 网关解析修复 + UI 状态同步修复
+> 最后更新：2026-06-19 Camera switch 热修 + LAN proxy bypass
 
 ## 事实来源
 
-- 2026-06-19 BUG-012 网关解析修复：`getAllGateways()` 解析 ipconfig 输出时，使用 `lastIndexOf(':')` 找默认网关的值会找错位置。当网关是 IPv6 地址（如 `fe80::a474:f0ff:feeb:f140%7`）时，IPv6 内部有多个冒号，`lastIndexOf(':')` 会找到 IPv6 内部的冒号而不是 "默认网关" 后面的冒号。修复：使用 `indexOf("Default Gateway")` 找到关键字位置，然后从该位置开始用 `indexOf(':', keywordPos)` 找关键字后的第一个冒号。UI 状态同步修复：`onCandidatesChanged` 中同时检查 `activeId` 和 `prevData` 来恢复下拉框选择。
+- 2026-06-19 Camera switch 热修：WiFi 推流中切换前后置摄像头不再重启 TCP/encoder。Android 端 StreamingService.switchCamera() 暂停帧提交 → close camera → setLensFacing → open camera → 1.5s 后强制 IDR + 恢复帧提交。PC 端 DecodeWorker 增加帧间隔检测（>1.5s 显示"摄像头切换中"，>10s 显示"手机端暂停推流"），不触发 connection lost / discovery。
+- 2026-06-19 BUG-012 网关解析修复 + LAN proxy bypass：`getAllGateways()` 使用 `indexOf` 找关键字后冒号避免 IPv6 干扰；所有 LAN socket 加 `setProxy(QNetworkProxy::NoProxy)` 绕过 Clash/系统代理。
 - 2026-06-19 BUG-007 GUI 状态回归已修复：推流 QLabel 从局部变量改为 m_streamLabel 成员；onFinalFrameReady/onFrameDecoded 首帧触发 enterStreamingState() → confirmStreamActive + 诊断条隐藏 + 设备名回填 + 推流显示"推流中"；connectionLost 调用 exitStreamingState() 恢复"待机"；m_lastFps 解决 preflight 每秒 reset 误判；candidatesChanged 已推流时同步刷新设备名。
 - 2026-06-19 WiFi 多网关发现修复：DeviceDiscovery::getDefaultGateway() → getAllGateways() 解析所有 ipconfig adapter 段（支持 IPv6→IPv4 续行格式）；每个网关独立 probe；保留 HOTSPOT_GATEWAYS fallback 并去重；ProbeDiagnostic 带 interfaceName；ConnectionManager 支持多 WiFi 候选。connectionLost 调用 markStreamLost() + stop() 解除 USB 断开后状态机卡死；markStreamLost() 清空 activeDeviceId 允许自动 fallback 到 WiFi；refreshDevices() 强制重探测不被 streamConfirmed 短路。
 - 用户本机反馈：腾讯会议中可以看到并选择 PhoneCam 摄像头选项。

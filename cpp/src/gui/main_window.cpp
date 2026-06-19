@@ -32,6 +32,16 @@ void DecodeWorker::setTransformState(bool mirror, bool flip, int manualRotation)
 void DecodeWorker::decodeFrame(const VideoFrame& frame) {
     if (!m_decoder || !m_decoder->isInitialized()) return;
 
+    // Frame gap detection for camera switch
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastFrameTimeMs > 0) {
+        qint64 gap = now - m_lastFrameTimeMs;
+        if (gap > kCameraSwitchThresholdMs) {
+            emit frameGapDetected(gap);
+        }
+    }
+    m_lastFrameTimeMs = now;
+
     // Build transform state
     FrameTransform transform;
     transform.mirror = m_mirror;
@@ -529,6 +539,10 @@ void MainWindow::startPipeline() {
     // Wire: DecodeWorker → MainWindow (legacy QImage fallback path)
     connect(m_decodeWorker, &DecodeWorker::frameDecoded,
             this, &MainWindow::onFrameDecoded, Qt::QueuedConnection);
+
+    // Wire: DecodeWorker → MainWindow (camera switch detection)
+    connect(m_decodeWorker, &DecodeWorker::frameGapDetected,
+            this, &MainWindow::onFrameGapDetected, Qt::QueuedConnection);
 
     m_decodeThread->start();
 }
@@ -1068,6 +1082,20 @@ void MainWindow::enterStreamingState() {
 void MainWindow::exitStreamingState() {
     m_streamEstablished = false;
     if (m_streamLabel) m_streamLabel->setText(QString::fromUtf8("待机"));
+}
+
+void MainWindow::onFrameGapDetected(qint64 gapMs) {
+    // Camera switch detection: socket still connected but no new frames
+    if (gapMs > 10000) {
+        // >10s: stream paused or camera switch taking too long
+        m_statusTitle->setText(QString::fromUtf8("WiFi 已连接"));
+        m_statusDetail->setText(QString::fromUtf8("手机端暂停推流或正在切换"));
+    } else if (gapMs > 1500) {
+        // 1.5-10s: likely camera switch
+        m_statusTitle->setText(QString::fromUtf8("摄像头切换中"));
+        m_statusDetail->setText(QString::fromUtf8("等待新画面..."));
+    }
+    // Don't trigger connection lost or discovery - TCP is still alive
 }
 
 void MainWindow::updatePreflightStatus() {

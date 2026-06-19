@@ -39,6 +39,7 @@ public slots:
 signals:
     void finalFrameReady(const phonecam::Nv12Frame& frame);
     void frameDecoded(const QImage& image);
+    void frameGapDetected(qint64 gapMs);  // camera switch detection
 
 private:
     HwDecoder* m_decoder;
@@ -49,6 +50,11 @@ private:
     bool m_mirror = false;
     bool m_flip = false;
     int m_manualRotation = 0;
+
+    // Frame gap detection for camera switch
+    qint64 m_lastFrameTimeMs = 0;
+    static constexpr qint64 kCameraSwitchThresholdMs = 1500;  // 1.5s
+    static constexpr qint64 kStreamPausedThresholdMs = 10000; // 10s
 };
 
 class MainWindow : public QMainWindow {
@@ -77,6 +83,7 @@ private slots:
     void onDeviceSelected(int index);
     void onRefreshDevices();
     void onManualConnect();
+    void onFrameGapDetected(qint64 gapMs);  // camera switch detection
 
 
 protected:
@@ -89,6 +96,9 @@ private:
     void startPipeline();
     void updateDiagnosticsBar();
     void updatePreflightStatus();
+    QString activeDeviceDisplayName() const;  // BUG-007: helper for active candidate name
+    void enterStreamingState();               // BUG-007: transition UI to streaming
+    void exitStreamingState();                // BUG-007: transition UI back to standby
 
     // Core components
     PcpReceiver* m_receiver;
@@ -120,6 +130,7 @@ private:
     QPushButton* m_rotateBtn;
     QPushButton* m_exportLogBtn;
     QPushButton* m_quitBtn;
+    QLabel* m_streamLabel = nullptr;  // BUG-007: 推流 status label (was local in setupUi)
 
     // State
     bool m_mirror = false;
@@ -133,6 +144,7 @@ private:
     QTimer* m_statsTimer;
     QTimer* m_preflightTimer;
     bool m_streamEstablished = false;
+    int m_lastFps = 0;  // BUG-007: last fps value for preflight (avoids reset-window false negative)
     ConnectionDiagnostics m_lastDiag;
     bool m_useLegacyCompose = false;
     QString m_canonicalDumpPath;

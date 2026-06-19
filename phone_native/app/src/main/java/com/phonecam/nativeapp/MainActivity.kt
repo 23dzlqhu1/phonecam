@@ -243,26 +243,42 @@ class MainActivity : AppCompatActivity() {
         val newLens = if (currentLensPref == "back") "front" else "back"
         currentLensPref = newLens
         settings.lens = newLens
-        cameraController?.setLensFacing(newLens)
-
-        Toast.makeText(
-            this,
-            if (newLens == "back") "→ 后置摄像头" else "→ 前置摄像头",
-            Toast.LENGTH_SHORT
-        ).show()
         Log.d(TAG, "toggleLens: $newLens")
 
         val snap = StreamingService.getStateSnapshot()
         if (snap.isActive || snap.isStarting) {
-            StreamingService.stop(this)
-            cameraController?.close()
-            mainHandler.postDelayed({
-                cameraController?.open()
-                StreamingService.start(this)
-            }, 500)
+            // Camera switch without restarting TCP/encoder
+            Toast.makeText(
+                this,
+                if (newLens == "back") "正在切换到后置摄像头..." else "正在切换到前置摄像头...",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            // Disable button during switch
+            btnToggle.isEnabled = false
+
+            StreamingService.switchCamera(newLens, cameraController!!) { success ->
+                btnToggle.isEnabled = true
+                if (success) {
+                    Toast.makeText(
+                        this,
+                        if (newLens == "back") "→ 后置摄像头" else "→ 前置摄像头",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(this, "摄像头切换失败", Toast.LENGTH_SHORT).show()
+                }
+            }
         } else {
+            // Not streaming, just close/reopen camera
             cameraController?.close()
+            cameraController?.setLensFacing(newLens)
             cameraController?.open()
+            Toast.makeText(
+                this,
+                if (newLens == "back") "→ 后置摄像头" else "→ 前置摄像头",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -311,6 +327,12 @@ class MainActivity : AppCompatActivity() {
                 infoResolution.text = "${snap.cameraWidth}×${snap.cameraHeight}"
                 infoFps.text = "${actualFps} fps"
                 infoConnection.text = if (snap.isPcClientConnected) "PC 已连接" else "等待连接…"
+            }
+            StreamingService.Companion.StreamState.SWITCHING_CAMERA -> {
+                statusDot.setBackgroundResource(R.drawable.status_dot_waiting)
+                statusTitle.text = "摄像头切换中"
+                statusDesc.text = "正在切换前后置摄像头..."
+                infoRow.visibility = View.GONE
             }
             StreamingService.Companion.StreamState.PC_CONNECTED -> {
                 statusDot.setBackgroundResource(R.drawable.status_dot_waiting)

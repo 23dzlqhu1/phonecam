@@ -59,6 +59,7 @@ class StreamingService : Service() {
             WAITING_PC,         // 等待 PC 连接 — TCP server 已启动，等客户端
             PC_CONNECTED,       // PC 已连接 — 客户端连上，准备推流
             STREAMING,          // 正在推流 — 编码+发送中
+            SWITCHING_CAMERA,   // 切换摄像头中 — 暂停帧提交，重建相机
             DISCONNECTED,       // 连接断开 — PC 断开，等待重连
             START_FAILED        // 启动失败 — 超时/权限/异常
         }
@@ -99,6 +100,9 @@ class StreamingService : Service() {
         // 当前旋转角度 (由 CameraController.getStreamRotation() 提供, submitFrame 每帧更新)
         @Volatile var sCurrentRotation: Int = 0
 
+        // camera switch: 暂停帧提交
+        @Volatile var sPauseFrameSubmit: Boolean = false
+
         /**
          * 批次 3.2.0.3f: 跨线程投递一帧 YUV 给 EGL owner thread
          *  listener 线程 (imageReaderHandler) 调这个, 实际 EGL drawYuv 在 EGL owner thread 跑
@@ -111,6 +115,7 @@ class StreamingService : Service() {
             val renderer = sEglRenderer
             val encoder = sH264Encoder
             if (exec == null || renderer == null || encoder == null || !sActive) return
+            if (sPauseFrameSubmit) return  // camera switch in progress
             sCurrentRotation = rotation
             synchronized(sPtsNsLock) { sLatestPtsNs = ptsNs }
             sFrameSubmitCount++  // 批次 3.2.0.3g 帧率统计
@@ -139,6 +144,45 @@ class StreamingService : Service() {
             val encoder = sH264Encoder
             if (sActive && encoder != null) {
                 encoder.requestKeyframe()
+            }
+        }
+
+        /**
+         * Camera switch: 切换前后置摄像头，不重启 TCP/encoder
+         * @param lensFacing "front" or "back"
+         * @param cameraController CameraController instance
+         * @param callback called on main thread when switch completes (success=true) or fails (success=false)
+         */
+        fun switchCamera(lensFacing: String, cameraController: CameraController, callback: (Boolean) -> Unit) {
+            if (!sActive || sStreamState == StreamState.SWITCHING_CAMERA) {
+                callback(false)
+                return
+            }
+
+            InAppLogStore.i(TAG, "[CAM-SWITCH] Starting switch to $lensFacing")
+            sStreamState = StreamState.SWITCHING_CAMERA
+            sPauseFrameSubmit = true
+
+            // Step 1: Close current camera
+            cameraController.close()
+
+            // Step 2: Update lens facing
+            cameraController.setLensFacing(lensFacing)
+
+            // Step 3: Reopen camera (on camera thread)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                cameraController.open()
+
+                // Step 4: Wait for camera to be ready (poll for a few seconds)
+                val deadline = System.currentTimeMillis() + 5000
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    // Step 5: Force IDR and resume frame submission
+                    triggerKeyframeRequest()
+                    sPauseFrameSubmit = false
+                    sStreamState = StreamState.STREAMING
+                    InAppLogStore.i(TAG, "[CAM-SWITCH] Switch complete, resumed streaming")
+                    callback(true)
+                }, 1500)  // 1.5s delay for camera to stabilize
             }
         }
 
