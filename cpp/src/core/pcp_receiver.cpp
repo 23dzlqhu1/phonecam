@@ -231,7 +231,7 @@ void PcpReceiver::processBuffer() {
                 frame.is_keyframe = (m_currentHeader.flags & FLAG_KEYFRAME) != 0;
                 frame.rotation = decode_rotation(m_currentHeader.flags);
                 frame.codec = static_cast<int>(m_currentHeader.codec);
-                frame.receive_time = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+                frame.receive_time = static_cast<double>(QDateTime::currentMSecsSinceEpoch());  // ms
                 emit frameReceived(std::move(frame));
                 resetParser();
                 continue;
@@ -263,7 +263,7 @@ void PcpReceiver::processBuffer() {
             frame.is_keyframe = (m_currentHeader.flags & FLAG_KEYFRAME) != 0;
             frame.rotation = decode_rotation(m_currentHeader.flags);
             frame.codec = static_cast<int>(m_currentHeader.codec);
-            frame.receive_time = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+            frame.receive_time = static_cast<double>(QDateTime::currentMSecsSinceEpoch());  // ms
             emit frameReceived(std::move(frame));
 
             // Reset for next frame

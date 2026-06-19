@@ -325,35 +325,60 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
     int srcH = srcFrame->height;
     const AVPixelFormat srcFmt = source.format();
 
-    // ── BUG-013: format-aware fast/fallback path ──
-    // Only NV12 can use the fast NV12 rotation + sws_scale path.
-    // YUV420P/YUVJ420P/P010 etc. have 3 planes (Y, U, V) — the old code
-    // treated data[1] as interleaved UV, losing V and corrupting rotation.
-    //
-    // Decision: NV12 + rotation ∈ {0,90,180,270} → fast NV12 path
-    //           Everything else → safe fallback: sws_scale → RGB24 → QImage → compose()
+    // ── BUG-013 performance: format-aware NV12 fast path ──
+    // For NV12: use frame data directly (no conversion needed)
+    // For yuv420p/yuvj420p/p010 etc.: convert to NV12 via sws_scale, then use fast path
+    // This eliminates the slow RGB24/QImage round-trip for non-NV12 formats.
     static int composeCount = 0;
     composeCount++;
     const bool isNv12 = (srcFmt == AV_PIX_FMT_NV12);
-    const bool canFastNv12 = isNv12 &&
-        (transform.androidRotation == 0 || transform.androidRotation == 90 ||
-         transform.androidRotation == 180 || transform.androidRotation == 270);
 
     if (composeCount <= 10 || composeCount % 300 == 0) {
         qDebug() << "[COMPOSER] composeFromDecodedFrame#" << composeCount
                  << "pix_fmt=" << av_get_pix_fmt_name(srcFmt)
                  << "isNv12=" << isNv12
                  << "rotation=" << transform.androidRotation
-                 << "canFast=" << canFastNv12
                  << "size=" << srcW << "x" << srcH;
     }
 
-    if (!canFastNv12) {
-        // ── Safe fallback: any format → sws_scale → RGB24 → QImage → compose() ──
-        qDebug() << "[COMPOSER] FALLBACK: srcFmt=" << av_get_pix_fmt_name(srcFmt)
-                 << "rotation=" << transform.androidRotation
-                 << "— using QImage compose path";
-        return fallbackToQImageCompose(source, transform, sequence, pts_ns, receive_ms);
+    // Determine effective source planes (either original NV12 or converted NV12)
+    QByteArray nv12ConvertBuf;  // holds converted NV12 data if srcFmt != NV12
+    const uint8_t* srcY  = srcFrame->data[0];
+    int            srcYStride = srcFrame->linesize[0];
+    const uint8_t* srcUV = isNv12 ? srcFrame->data[1] : nullptr;
+    int            srcUVStride = isNv12 ? srcFrame->linesize[1] : 0;
+
+    if (!isNv12) {
+        // ── Convert any pix_fmt → NV12 via sws_scale (direct, no RGB round-trip) ──
+        const int nv12Size = srcW * srcH * 3 / 2;
+        nv12ConvertBuf.resize(nv12Size);
+
+        SwsContext* toNv12 = sws_getContext(
+            srcW, srcH, srcFmt,
+            srcW, srcH, AV_PIX_FMT_NV12,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!toNv12) {
+            qWarning() << "[COMPOSER] sws_getContext for NV12 conversion failed:"
+                       << av_get_pix_fmt_name(srcFmt);
+            // Ultimate fallback: QImage path
+            return fallbackToQImageCompose(source, transform, sequence, pts_ns, receive_ms);
+        }
+
+        uint8_t* nv12Data = reinterpret_cast<uint8_t*>(nv12ConvertBuf.data());
+        uint8_t* dstPlanes[4] = { nv12Data, nv12Data + srcW * srcH, nullptr, nullptr };
+        int dstStrides[4] = { srcW, srcW, 0, 0 };
+        sws_scale(toNv12, srcFrame->data, srcFrame->linesize, 0, srcH, dstPlanes, dstStrides);
+        sws_freeContext(toNv12);
+
+        srcY  = nv12Data;
+        srcYStride = srcW;
+        srcUV = nv12Data + srcW * srcH;
+        srcUVStride = srcW;
+
+        if (composeCount <= 10) {
+            qDebug() << "[COMPOSER] converted" << av_get_pix_fmt_name(srcFmt)
+                     << "→ NV12" << srcW << "x" << srcH;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -363,16 +388,16 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
     // ── Handle androidRotation: rotate NV12 in-place, then scale ──
     // For 90/270, dimensions swap after rotation.
     QByteArray rotatedBuf;
-    const uint8_t* effectiveY  = srcFrame->data[0];
-    int            effectiveYStride = srcFrame->linesize[0];
-    const uint8_t* effectiveUV = srcFrame->data[1];
-    int            effectiveUVStride = srcFrame->linesize[1];
+    const uint8_t* effectiveY  = srcY;
+    int            effectiveYStride = srcYStride;
+    const uint8_t* effectiveUV = srcUV;
+    int            effectiveUVStride = srcUVStride;
     int effectiveW = srcW;
     int effectiveH = srcH;
 
     if (transform.androidRotation != 0) {
-        rotatedBuf = rotateNv12(srcFrame->data[0], srcFrame->linesize[0],
-                                 srcFrame->data[1], srcFrame->linesize[1],
+        rotatedBuf = rotateNv12(srcY, srcYStride,
+                                 srcUV, srcUVStride,
                                  srcW, srcH, transform.androidRotation);
         if (rotatedBuf.isEmpty()) {
             result.data = QByteArray(ySize + uvSize, 0);

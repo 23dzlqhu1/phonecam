@@ -32,6 +32,27 @@ void DecodeWorker::setTransformState(bool mirror, bool flip, int manualRotation)
 void DecodeWorker::decodeFrame(const VideoFrame& frame) {
     if (!m_decoder || !m_decoder->isInitialized()) return;
 
+    // ── Frame age measurement (ms since PC received the packet) ──
+    const double nowMs = QDateTime::currentMSecsSinceEpoch() * 1.0;
+    const double frameAgeMs = nowMs - frame.receive_time;
+
+    // ── Hot fix: drop stale frames to chase real-time ──
+    // If the decode/compose pipeline can't keep up, old frames accumulate in
+    // the Qt::QueuedConnection queue. Dropping them prevents 20s+ latency.
+    static constexpr double kMaxFrameAgeMs = 500.0;
+    if (frameAgeMs > kMaxFrameAgeMs) {
+        static int dropCount = 0;
+        dropCount++;
+        if (dropCount <= 5 || dropCount % 30 == 0) {
+            qDebug() << "[LATENCY] DROP stale frame#" << frame.sequence
+                     << "age=" << frameAgeMs << "ms"
+                     << "dropped=" << dropCount;
+        }
+        // Flush decoder to discard stale reference frames
+        m_decoder->flush();
+        return;
+    }
+
     // Build transform state
     FrameTransform transform;
     transform.mirror = m_mirror;
@@ -70,6 +91,16 @@ void DecodeWorker::decodeFrame(const VideoFrame& frame) {
 
         Nv12Frame nv12 = m_composer->composeFromDecodedFrame(
             decoded, transform, m_sequence++, frame.pts_ns, frame.receive_time);
+
+        // Log frame age at output (every 30 frames)
+        const double composeEndMs = QDateTime::currentMSecsSinceEpoch() * 1.0;
+        const double totalAgeMs = composeEndMs - frame.receive_time;
+        if (m_sequence % 30 == 0) {
+            qDebug() << "[LATENCY] frame#" << m_sequence
+                     << "age=" << totalAgeMs << "ms"
+                     << "decode+compose=" << (composeEndMs - nowMs) << "ms";
+        }
+
         emit finalFrameReady(nv12);
     }
 }
@@ -597,6 +628,10 @@ void MainWindow::onFinalFrameReady(const Nv12Frame& frame) {
     // Primary NV12 path: update preview + write to shared memory
     m_frameCount++;
     m_nv12FrameCount++;
+
+    // Frame age measurement (ms since PC received the packet)
+    const double nowMs = QDateTime::currentMSecsSinceEpoch() * 1.0;
+    const double frameAgeMs = nowMs - frame.receive_ms;
 
     // Frame idle detection: update last frame time and reset camera switching flag
     m_lastFrameTimeMs = QDateTime::currentMSecsSinceEpoch();
