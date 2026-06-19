@@ -15,7 +15,8 @@ struct FrameTransform {
     int androidRotation = 0;  // 0/90/180/270 (device-reported)
 
     // Returns true if manual transforms (mirror/flip/rot) require QImage fallback.
-    // androidRotation is handled natively in the fast YUV path via NV12 rotation.
+    // BUG-013: DEPRECATED — all transforms now handled natively in NV12 fast path.
+    // Only used by legacy QImage compose path (--legacy-qimage-compose).
     bool needsFallback() const {
         return mirror || flip || manualRotation != 0;
     }
@@ -74,6 +75,14 @@ private:
     static QByteArray rotateNv12(const uint8_t* srcY, int srcYStride,
                                   const uint8_t* srcUV, int srcUVStride,
                                   int srcW, int srcH, int rotation);  // 90/180/270
+
+    // BUG-013: NV12 mirror/flip (UV pair-atomic)
+    static QByteArray mirrorNv12(const uint8_t* srcY, int srcYStride,
+                                  const uint8_t* srcUV, int srcUVStride,
+                                  int w, int h);
+    static QByteArray flipNv12(const uint8_t* srcY, int srcYStride,
+                                const uint8_t* srcUV, int srcUVStride,
+                                int w, int h);
 
     // BUG-013: safe fallback for non-NV12 formats — sws_scale → RGB24 → QImage → compose()
     Nv12Frame fallbackToQImageCompose(const DecodedFrame& source, const FrameTransform& transform,

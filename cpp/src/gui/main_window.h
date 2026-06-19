@@ -5,6 +5,7 @@
 #include <QPushButton>
 #include <QTimer>
 #include <QMouseEvent>
+#include <atomic>
 #include <memory>
 
 #include "core/pcp_receiver.h"
@@ -46,9 +47,10 @@ private:
     BoundedQueue<QImage>* m_legacyDisplayQueue;
     uint32_t m_sequence = 0;
     bool m_useLegacyCompose = false;
-    bool m_mirror = false;
-    bool m_flip = false;
-    int m_manualRotation = 0;
+    // BUG-013: atomic for cross-thread safety (GUI writes, decode thread reads)
+    std::atomic<bool> m_mirror{false};
+    std::atomic<bool> m_flip{false};
+    std::atomic<int> m_manualRotation{0};
 };
 
 class MainWindow : public QMainWindow {

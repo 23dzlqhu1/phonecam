@@ -308,17 +308,9 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
         return result;
     }
 
-    // ── Manual transforms → must be handled by caller (QImage fallback) ──
-    if (transform.needsFallback()) {
-        qWarning() << "[COMPOSER] composeFromDecodedFrame called with manual transforms"
-                   << "mirror=" << transform.mirror << "flip=" << transform.flip
-                   << "manualRot=" << transform.manualRotation
-                   << "— caller should have used QImage path. Returning black.";
-        QByteArray black(ySize + uvSize, 0);
-        fillNv12Black(reinterpret_cast<uint8_t*>(black.data()), kOutputWidth, kOutputHeight);
-        result.data = black;
-        return result;
-    }
+    // ── BUG-013: All transforms handled natively in NV12 fast path ──
+    // No more needsFallback() — mirror/flip/manualRotation operate on NV12 planes directly.
+    // Order: pix_fmt→NV12 → androidRotation → mirror → flip → manualRotation → scale/letterbox
 
     const AVFrame* srcFrame = source.frame;
     int srcW = srcFrame->width;
@@ -416,7 +408,57 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
                  << "(fast YUV path)";
     }
 
-    // Calculate scaled dimensions using effective (post-rotation) dimensions
+    // ── Apply mirror (horizontal flip) on NV12 planes ──
+    QByteArray mirroredBuf;
+    if (transform.mirror) {
+        mirroredBuf = mirrorNv12(effectiveY, effectiveYStride,
+                                  effectiveUV, effectiveUVStride,
+                                  effectiveW, effectiveH);
+        effectiveY  = reinterpret_cast<const uint8_t*>(mirroredBuf.constData());
+        effectiveYStride = effectiveW;
+        effectiveUV = effectiveY + effectiveW * effectiveH;
+        effectiveUVStride = effectiveW;
+        if (composeCount <= 10) {
+            qDebug() << "[COMPOSER] NV12 mirrored" << effectiveW << "x" << effectiveH;
+        }
+    }
+
+    // ── Apply flip (vertical flip) on NV12 planes ──
+    QByteArray flippedBuf;
+    if (transform.flip) {
+        flippedBuf = flipNv12(effectiveY, effectiveYStride,
+                               effectiveUV, effectiveUVStride,
+                               effectiveW, effectiveH);
+        effectiveY  = reinterpret_cast<const uint8_t*>(flippedBuf.constData());
+        effectiveYStride = effectiveW;
+        effectiveUV = effectiveY + effectiveW * effectiveH;
+        effectiveUVStride = effectiveW;
+        if (composeCount <= 10) {
+            qDebug() << "[COMPOSER] NV12 flipped" << effectiveW << "x" << effectiveH;
+        }
+    }
+
+    // ── Apply manualRotation on NV12 planes ──
+    QByteArray manualRotBuf;
+    if (transform.manualRotation != 0) {
+        manualRotBuf = rotateNv12(effectiveY, effectiveYStride,
+                                   effectiveUV, effectiveUVStride,
+                                   effectiveW, effectiveH, transform.manualRotation);
+        if (!manualRotBuf.isEmpty()) {
+            const bool swapped = (transform.manualRotation == 90 || transform.manualRotation == 270);
+            effectiveY  = reinterpret_cast<const uint8_t*>(manualRotBuf.constData());
+            effectiveYStride = swapped ? effectiveH : effectiveW;
+            effectiveUV = effectiveY + effectiveYStride * (swapped ? effectiveW : effectiveH);
+            effectiveUVStride = effectiveYStride;
+            if (swapped) { int tmp = effectiveW; effectiveW = effectiveH; effectiveH = tmp; }
+            if (composeCount <= 10) {
+                qDebug() << "[COMPOSER] NV12 manual rotated" << transform.manualRotation
+                         << "deg:" << effectiveW << "x" << effectiveH;
+            }
+        }
+    }
+
+    // Calculate scaled dimensions using effective (post-all-transforms) dimensions
     const double scale = qMin(static_cast<double>(kOutputWidth) / effectiveW,
                               static_cast<double>(kOutputHeight) / effectiveH);
     int scaledW = (static_cast<int>(effectiveW * scale)) & ~1;
@@ -481,6 +523,66 @@ Nv12Frame FinalFrameComposer::composeFromDecodedFrame(const DecodedFrame& source
     av_frame_free(&scaledFrame);
     result.data = outBuf;
     return result;
+}
+
+// ── NV12 mirror (horizontal flip) ──
+// Y: reverse each row byte-by-byte.
+// UV: reverse each row in 2-byte pairs (U,V must stay paired).
+QByteArray FinalFrameComposer::mirrorNv12(const uint8_t* srcY, int srcYStride,
+                                            const uint8_t* srcUV, int srcUVStride,
+                                            int w, int h) {
+    const int ySize = w * h;
+    const int uvSize = ySize / 2;
+    QByteArray out(ySize + uvSize, 0);
+    uint8_t* dstY = reinterpret_cast<uint8_t*>(out.data());
+    uint8_t* dstUV = dstY + ySize;
+
+    // Y plane: reverse each row
+    for (int row = 0; row < h; row++) {
+        const uint8_t* srcRow = srcY + row * srcYStride;
+        uint8_t* dstRow = dstY + row * w;
+        for (int col = 0; col < w; col++) {
+            dstRow[col] = srcRow[w - 1 - col];
+        }
+    }
+
+    // UV plane: reverse each row in 2-byte pairs
+    for (int row = 0; row < h / 2; row++) {
+        const uint8_t* srcRow = srcUV + row * srcUVStride;
+        uint8_t* dstRow = dstUV + row * w;
+        for (int col = 0; col < w; col += 2) {
+            const int dstCol = w - 2 - col;
+            dstRow[dstCol]     = srcRow[col];      // U
+            dstRow[dstCol + 1] = srcRow[col + 1];  // V
+        }
+    }
+
+    return out;
+}
+
+// ── NV12 flip (vertical flip) ──
+// Y: reverse row order.
+// UV: reverse chroma row order (each row is w bytes of interleaved U,V).
+QByteArray FinalFrameComposer::flipNv12(const uint8_t* srcY, int srcYStride,
+                                          const uint8_t* srcUV, int srcUVStride,
+                                          int w, int h) {
+    const int ySize = w * h;
+    const int uvSize = ySize / 2;
+    QByteArray out(ySize + uvSize, 0);
+    uint8_t* dstY = reinterpret_cast<uint8_t*>(out.data());
+    uint8_t* dstUV = dstY + ySize;
+
+    // Y plane: reverse row order
+    for (int row = 0; row < h; row++) {
+        std::memcpy(dstY + row * w, srcY + (h - 1 - row) * srcYStride, w);
+    }
+
+    // UV plane: reverse chroma row order
+    for (int row = 0; row < h / 2; row++) {
+        std::memcpy(dstUV + row * w, srcUV + (h / 2 - 1 - row) * srcUVStride, w);
+    }
+
+    return out;
 }
 
 Nv12Frame FinalFrameComposer::fallbackToQImageCompose(const DecodedFrame& source,

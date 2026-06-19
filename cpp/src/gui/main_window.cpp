@@ -60,7 +60,9 @@ void DecodeWorker::decodeFrame(const VideoFrame& frame) {
     transform.manualRotation = m_manualRotation;
     transform.androidRotation = frame.rotation;
 
-    if (m_useLegacyCompose || transform.needsFallback()) {
+    // BUG-013: Only use legacy QImage path if explicitly requested (--legacy-qimage-compose).
+    // mirror/flip/manualRotation are now handled natively in NV12 fast path.
+    if (m_useLegacyCompose) {
         // Legacy QImage path: decode → QImage → apply transforms
         QImage img;
         {
