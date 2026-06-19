@@ -124,6 +124,7 @@ MainWindow::MainWindow(QWidget* parent)
         m_deviceCombo->clear();
         m_deviceCombo->addItem(QString::fromUtf8("自动选择"), "");
         int restoreIndex = 0;
+        QString activeId = m_connManager->activeDeviceId();
         for (int i = 0; i < candidates.size(); i++) {
             const auto& c = candidates[i];
             QString icon = (c.transport == "usb") ? "🔌" :
@@ -132,17 +133,26 @@ MainWindow::MainWindow(QWidget* parent)
                                  (c.status == "Connecting") ? "⏳" :
                                  (c.status == "Failed") ? "❌" : "⬜";
             // P2-1 Loop 4: Mark active device with ▶
-            QString activePrefix = (c.id == m_connManager->activeDeviceId()) ? "▶ " : "";
+            QString activePrefix = (c.id == activeId) ? "▶ " : "";
             QString label = QString("%1%2 %3 %4 [%5]")
                 .arg(activePrefix, icon, c.displayName, statusIcon, c.status);
             if (!c.lastError.isEmpty() && c.status == "Failed") {
                 label += QString(" — %1").arg(c.lastError);
             }
             m_deviceCombo->addItem(label, c.id);
-            if (c.id == prevData) restoreIndex = i + 1;
+            // BUG-012: Sync UI with ConnectionManager state
+            // If device is active (auto-selected or manual), restore to it
+            if (c.id == activeId || c.id == prevData) {
+                restoreIndex = i + 1;
+            }
         }
         m_deviceCombo->setCurrentIndex(restoreIndex);
         m_deviceCombo->blockSignals(false);
+
+        // BUG-007: Refresh device name in top status when already streaming
+        if (m_streamEstablished) {
+            m_statusDetail->setText(activeDeviceDisplayName());
+        }
     });
 
     // Wire up PcpReceiver
@@ -152,7 +162,9 @@ MainWindow::MainWindow(QWidget* parent)
         QString label = (info.connectionType == "hotspot") ?
             QString::fromUtf8("热点连接") : info.connectionType;
         m_statusTitle->setText(label);
-        m_streamEstablished = true;  // P0-2: track for preflight
+        // BUG-007: Do NOT set m_streamEstablished here — TCP socket ≠ streaming.
+        // Only enterStreamingState() on first decoded frame sets it.
+        m_statusDetail->setText(QString::fromUtf8("等待首帧..."));
         m_receiver->sendCommand(QByteArrayLiteral("PLI\n"));
         if (m_decodeWorker) {
             QMetaObject::invokeMethod(m_decodeWorker, "requestFlush", Qt::QueuedConnection);
@@ -161,7 +173,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_receiver, &PcpReceiver::connectionLost, this, [this]() {
         m_statusDot->setStyleSheet("background-color: #f59e0b; border-radius: 6px;");
         m_statusTitle->setText(QString::fromUtf8("等待手机推流..."));
-        m_streamEstablished = false;  // P0-2: reset for preflight
+        exitStreamingState();  // BUG-007: reset streaming UI state
+        // BUG-012: Notify ConnectionManager so it re-probes WiFi gateways
+        m_connManager->markStreamLost();
+        // Stop PcpReceiver retry loop — let ConnectionManager pick a new endpoint
+        m_receiver->stop();
     });
 
     // Setup decode thread
@@ -299,7 +315,7 @@ void MainWindow::setupUi() {
     m_statusDot->setStyleSheet("background-color: #bdc3c7; border-radius: 3px;");
     QVBoxLayout* adbCol = new QVBoxLayout;
     adbCol->setSpacing(2);
-    QLabel* adbLabel = new QLabel("ADB");
+    QLabel* adbLabel = new QLabel(QString::fromUtf8("连接"));
     adbLabel->setStyleSheet("font: 10px 'Segoe UI'; color: #8b95a5; background: transparent;");
     adbCol->addWidget(adbLabel);
     QHBoxLayout* adbValueLayout = new QHBoxLayout;
@@ -334,9 +350,8 @@ void MainWindow::setupUi() {
     topLayout->addSpacing(24);
 
     // 推流状态
-    QLabel* streamLabel;
-    QVBoxLayout* streamCol = makeStatusCol("推流", streamLabel);
-    streamLabel->setText("待机");
+    QVBoxLayout* streamCol = makeStatusCol("推流", m_streamLabel);
+    m_streamLabel->setText("待机");
     topLayout->addLayout(streamCol);
 
     topLayout->addSpacing(24);
@@ -528,14 +543,15 @@ void MainWindow::onConnectionStateChanged(const ConnectionInfo& info) {
         break;
     case ConnectionState::WaitingForPhone:
         m_statusDot->setStyleSheet("background-color: #e67e22; border-radius: 3px;");
-        m_statusTitle->setText("ADB 就绪");
-        m_statusDetail->setText("等待推流");
+        m_statusTitle->setText(QString::fromUtf8("已发现设备"));
+        m_statusDetail->setText(QString::fromUtf8("等待推流"));
         updateDiagnosticsBar();
         break;
     case ConnectionState::Connected:
         m_statusDot->setStyleSheet("background-color: #27ae60; border-radius: 3px;");
         m_statusTitle->setText("已连接");
-        m_statusDetail->setText(info.connectionType);
+        // BUG-007: Show active candidate displayName, not just connectionType
+        m_statusDetail->setText(activeDeviceDisplayName());
         m_diagLabel->setVisible(false);  // Hide diagnostics when connected
         break;
     case ConnectionState::Disconnected:
@@ -553,6 +569,11 @@ void MainWindow::onFinalFrameReady(const Nv12Frame& frame) {
     // Primary NV12 path: update preview + write to shared memory
     m_frameCount++;
     m_nv12FrameCount++;
+
+    // BUG-007: On first frame, transition UI to streaming state
+    if (!m_streamEstablished) {
+        enterStreamingState();
+    }
 
     // Update NV12 OpenGL preview
     m_preview->updateNv12Frame(frame);
@@ -580,6 +601,11 @@ void MainWindow::onFrameDecoded(const QImage& image) {
     // Only used when mirror/flip/manualRotation active or --legacy-qimage-compose
     m_frameCount++;
     m_legacyFrameCount++;
+
+    // BUG-007: On first frame, transition UI to streaming state
+    if (!m_streamEstablished) {
+        enterStreamingState();
+    }
 
     // Write BGR frame to shared memory for virtual camera DLL
     if (!m_sharedWriter.is_open() || m_last_width != image.width() || m_last_height != image.height()) {
@@ -658,6 +684,7 @@ void MainWindow::mouseReleaseEvent(QMouseEvent* event) {
 
 void MainWindow::onStatsTimer() {
     int fps = m_frameCount;
+    m_lastFps = fps;  // BUG-007: save before reset for preflight check
     m_frameCount = 0;
 
     QStringList parts;
@@ -702,7 +729,7 @@ void MainWindow::toggleFullScreen() {
 
 void MainWindow::onDiagnosticsChanged(const ConnectionDiagnostics& diag) {
     m_lastDiag = diag;
-    // Keep tooltip for detailed probe info
+    // Connection status tooltip
     QStringList lines;
     lines << QString::fromUtf8("ADB: %1").arg(diag.adbStatus);
     for (const auto& p : diag.probeResults) {
@@ -710,7 +737,10 @@ void MainWindow::onDiagnosticsChanged(const ConnectionDiagnostics& diag) {
                        (p.result == ProbeResult::Timeout) ? QString::fromUtf8("\u23F0") :
                        (p.result == ProbeResult::ConnectionRefused) ? QString::fromUtf8("\u274C") :
                        QString::fromUtf8("\u26A0");
-        lines << QString("  %1 %2:%3 — %4").arg(icon, p.host).arg(p.port).arg(p.errorDetail);
+        QString iface = p.interfaceName.isEmpty() ? QString() :
+                        QString(" [%1]").arg(p.interfaceName);
+        lines << QString("  %1 %2:%3%4 — %5").arg(icon, p.host).arg(p.port)
+                     .arg(iface, p.errorDetail);
     }
     m_statusDetail->setToolTip(lines.join("\n"));
     updateDiagnosticsBar();
@@ -718,13 +748,18 @@ void MainWindow::onDiagnosticsChanged(const ConnectionDiagnostics& diag) {
 
 void MainWindow::updateDiagnosticsBar() {
     if (!m_diagLabel) return;
+    // BUG-007 safety: if streaming is established, always hide diagnostics
+    if (m_streamEstablished) {
+        m_diagLabel->setVisible(false);
+        return;
+    }
     if (m_connManager->info().state == ConnectionState::Connected) {
         m_diagLabel->setVisible(false);
         return;
     }
     QStringList msgs;
     const auto& diag = m_lastDiag;
-    // ADB diagnostics
+    // USB/ADB diagnostics
     if (diag.adbStatus == "not found") {
         msgs << QString::fromUtf8("⚠ adb 未安装 — 请安装 Android Platform Tools 或使用 WiFi/热点连接");
     } else if (diag.adbStatus == "no devices") {
@@ -732,9 +767,9 @@ void MainWindow::updateDiagnosticsBar() {
     } else {
         for (const auto& line : diag.adbDevices) {
             if (line.contains("unauthorized")) {
-                msgs << QString::fromUtf8("❌ ADB 设备未授权 — 请在手机上点击「允许 USB 调试」");
+                msgs << QString::fromUtf8("❌ USB 设备未授权 — 请在手机上点击「允许 USB 调试」");
             } else if (line.contains("offline")) {
-                msgs << QString::fromUtf8("❌ ADB 设备离线 — 请拔插 USB 线或重启 USB 调试");
+                msgs << QString::fromUtf8("❌ USB 设备离线 — 请拔插 USB 线或重启 USB 调试");
             }
         }
     }
@@ -749,15 +784,19 @@ void MainWindow::updateDiagnosticsBar() {
         msgs << QString::fromUtf8("⚠ 未发现网络 — 请确认已连接手机热点或同一 WiFi");
     } else {
         for (const auto& p : diag.probeResults) {
+            // Build context label: "WLAN (10.142.34.164)" or just "192.168.43.1"
+            QString ctx = p.interfaceName.isEmpty() ?
+                QString("%1:%2").arg(p.host).arg(p.port) :
+                QString("%1 (%2:%3)").arg(p.interfaceName, p.host).arg(p.port);
             if (p.result == ProbeResult::Timeout) {
-                msgs << QString::fromUtf8("⏰ %1:%2 超时 — 手机未响应，请确认手机端已开始推流")
-                    .arg(p.host).arg(p.port);
+                msgs << QString::fromUtf8("⏰ %1 超时 — 手机未响应，请确认手机端已开始推流")
+                    .arg(ctx);
             } else if (p.result == ProbeResult::ConnectionRefused) {
-                msgs << QString::fromUtf8("❌ %1:%2 拒绝连接 — 手机端未开始推流，请打开 PhoneCam App 并点击开始")
-                    .arg(p.host).arg(p.port);
+                msgs << QString::fromUtf8("❌ %1 拒绝连接 — 手机端未开始推流，请打开 PhoneCam App 并点击开始")
+                    .arg(ctx);
             } else if (p.result == ProbeResult::Unreachable) {
                 msgs << QString::fromUtf8("❌ %1 不可达 — 请确认已连接手机热点或同一 WiFi")
-                    .arg(p.host);
+                    .arg(ctx);
             }
         }
     }
@@ -1001,6 +1040,36 @@ void MainWindow::onExportLogs() {
     }
 }
 
+// ── BUG-007: GUI state sync helpers ──
+
+QString MainWindow::activeDeviceDisplayName() const {
+    QString activeId = m_connManager->activeDeviceId();
+    if (!activeId.isEmpty()) {
+        for (const auto& c : m_connManager->candidates()) {
+            if (c.id == activeId) return c.displayName;
+        }
+    }
+    // Fallback: use connection type or generic label
+    auto info = m_connManager->info();
+    if (!info.connectionType.isEmpty()) return info.connectionType;
+    return QString::fromUtf8("已接收帧");
+}
+
+void MainWindow::enterStreamingState() {
+    if (m_streamEstablished) return;  // already in streaming state
+    m_streamEstablished = true;
+    m_connManager->confirmStreamActive();
+    m_diagLabel->setVisible(false);
+    m_statusTitle->setText(QString::fromUtf8("已连接"));
+    m_statusDetail->setText(activeDeviceDisplayName());
+    if (m_streamLabel) m_streamLabel->setText(QString::fromUtf8("推流中"));
+}
+
+void MainWindow::exitStreamingState() {
+    m_streamEstablished = false;
+    if (m_streamLabel) m_streamLabel->setText(QString::fromUtf8("待机"));
+}
+
 void MainWindow::updatePreflightStatus() {
     if (!m_preflightPanel) return;
     // Item 1: 手机已推流
@@ -1010,8 +1079,8 @@ void MainWindow::updatePreflightStatus() {
     m_preflightLabels[0]->setStyleSheet(phoneStreaming ?
         "font: 12px 'Segoe UI'; color: #27ae60; background: transparent;" :
         "font: 12px 'Segoe UI'; color: #c53030; background: transparent;");
-    // Item 2: PC 已接收帧
-    bool pcReceiving = m_frameCount > 0;
+    // Item 2: PC 已接收帧 (BUG-007: use m_lastFps to avoid reset-window false negative)
+    bool pcReceiving = m_lastFps > 0 || m_frameCount > 0;
     m_preflightLabels[1]->setText(pcReceiving ?
         QString::fromUtf8("✅ PC 接收") : QString::fromUtf8("❌ PC 接收"));
     m_preflightLabels[1]->setStyleSheet(pcReceiving ?

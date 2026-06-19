@@ -1,16 +1,23 @@
 #include "core/pcp_receiver.h"
 #include <QDebug>
 #include <QCoreApplication>
+#include <QNetworkProxy>
 #include <QDateTime>
 #include <chrono>
 
 namespace phonecam {
 
+namespace {
+constexpr uint32_t MAX_PCP_PAYLOAD_LEN = 16 * 1024 * 1024;
+}
+
 PcpReceiver::PcpReceiver(QObject* parent)
     : QObject(parent)
-    , m_server(new QTcpServer(this))
+    , m_reconnectTimer(new QTimer(this))
 {
-    connect(m_server, &QTcpServer::newConnection, this, &PcpReceiver::onNewConnection);
+    m_reconnectTimer->setSingleShot(false);
+    m_reconnectTimer->setInterval(3000);  // retry every 3 seconds
+    connect(m_reconnectTimer, &QTimer::timeout, this, &PcpReceiver::tryConnect);
 }
 
 PcpReceiver::~PcpReceiver() {
@@ -20,55 +27,72 @@ PcpReceiver::~PcpReceiver() {
 void PcpReceiver::start(quint16 port) {
     if (m_running) return;
 
-    if (!m_server->listen(QHostAddress::LocalHost, port)) {
-        if (m_server->serverError() == QAbstractSocket::AddressInUseError) {
-            emit portInUse(port);
-            emit errorOccurred(QString("Port %1 is already in use").arg(port));
-        } else {
-            emit errorOccurred(QString("Failed to listen: %1").arg(m_server->errorString()));
-        }
-        return;
-    }
-
+    m_host = QStringLiteral("127.0.0.1");
+    m_port = port;
     m_running = true;
-    emit stateChanged("listening");
-    qDebug() << "[PCP] Listening on 127.0.0.1:" << port;
+    emit stateChanged("connecting");
+
+    // Attempt immediate connection, then let reconnect timer handle retries
+    tryConnect();
+    m_reconnectTimer->start();
+
+    qDebug() << "[PCP] Client mode started, connecting to" << m_host << ":" << port;
+}
+
+void PcpReceiver::start(const QString& host, quint16 port) {
+    if (m_running) return;
+
+    m_host = host;
+    m_port = port;
+    m_running = true;
+    emit stateChanged("connecting");
+
+    tryConnect();
+    m_reconnectTimer->start();
+
+    qDebug() << "[PCP] Client mode started, connecting to" << m_host << ":" << port;
 }
 
 void PcpReceiver::stop() {
     if (!m_running) return;
     m_running = false;
-    if (m_socket) {
-        m_socket->disconnectFromHost();
-        m_socket = nullptr;
-    }
-    m_server->close();
+    m_reconnectTimer->stop();
+    cleanupSocket();
     resetParser();
     // Don't emit signals if called from destructor (connected objects may be gone)
 }
 
-void PcpReceiver::onNewConnection() {
-    while (m_server->hasPendingConnections()) {
-        QTcpSocket* socket = m_server->nextPendingConnection();
-
-        // Only one connection at a time
-        if (m_socket) {
-            qDebug() << "[PCP] Rejecting extra connection from" << socket->peerAddress();
-            socket->disconnectFromHost();
-            socket->deleteLater();
-            continue;
-        }
-
-        m_socket = socket;
-        m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
-        connect(m_socket, &QTcpSocket::readyRead, this, &PcpReceiver::onReadyRead);
-        connect(m_socket, &QTcpSocket::disconnected, this, &PcpReceiver::onDisconnected);
-
-        resetParser();
-        emit connectionEstablished();
-        emit stateChanged("connected");
-        qDebug() << "[PCP] Phone connected from" << m_socket->peerAddress();
+void PcpReceiver::sendCommand(const QByteArray& data) {
+    if (m_socket && m_socket->isOpen()) {
+        m_socket->write(data);
+        qDebug() << "[PCP] Sent command:" << data.trimmed();
     }
+}
+
+void PcpReceiver::tryConnect() {
+    if (!m_running) return;
+    if (m_socket && m_socket->state() != QAbstractSocket::UnconnectedState) return;
+
+    cleanupSocket();
+
+    m_socket = new QTcpSocket(this);
+    m_socket->setProxy(QNetworkProxy::NoProxy);  // BUG-012: bypass system/Clash proxy for LAN
+    m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+
+    connect(m_socket, &QTcpSocket::connected, this, &PcpReceiver::onConnected);
+    connect(m_socket, &QTcpSocket::readyRead, this, &PcpReceiver::onReadyRead);
+    connect(m_socket, &QTcpSocket::disconnected, this, &PcpReceiver::onDisconnected);
+    connect(m_socket, &QAbstractSocket::errorOccurred, this, &PcpReceiver::onSocketError);
+
+    m_socket->connectToHost(m_host, m_port);
+}
+
+void PcpReceiver::onConnected() {
+    qDebug() << "[PCP] Connected to phone at" << m_host << ":" << m_port;
+    m_reconnectTimer->stop();  // connected, no need to retry
+    resetParser();
+    emit connectionEstablished();
+    emit stateChanged("connected");
 }
 
 void PcpReceiver::onReadyRead() {
@@ -77,20 +101,57 @@ void PcpReceiver::onReadyRead() {
 }
 
 void PcpReceiver::onDisconnected() {
+    auto* socket = qobject_cast<QTcpSocket*>(sender());
+    if (socket && socket != m_socket) return;
+
     qDebug() << "[PCP] Phone disconnected";
-    QTcpSocket* old = m_socket;
-    m_socket = nullptr;
+    cleanupSocket();
     resetParser();
-    if (old) {
-        old->deleteLater();  // Clean up socket to avoid leak on reconnect
-    }
     emit connectionLost();
-    emit stateChanged("listening");
+    emit stateChanged("reconnecting");
+
+    // Restart reconnect timer if still running
+    if (m_running && !m_reconnectTimer->isActive()) {
+        m_reconnectTimer->start();
+    }
 }
 
-void PcpReceiver::onAcceptError(QAbstractSocket::SocketError error) {
-    Q_UNUSED(error)
-    emit errorOccurred(QString("Accept error: %1").arg(m_server->errorString()));
+void PcpReceiver::onSocketError(QAbstractSocket::SocketError error) {
+    auto* socket = qobject_cast<QTcpSocket*>(sender());
+    if (socket && socket != m_socket) return;
+
+    if (error == QAbstractSocket::ConnectionRefusedError) {
+        // Phone app not running yet — this is expected during startup
+        qDebug() << "[PCP] Connection refused, will retry...";
+        emit connectionRefused();
+        cleanupSocket();
+        // Reconnect timer is already running, will retry
+        return;
+    }
+
+    const QString errorString = m_socket ? m_socket->errorString() : QStringLiteral("socket error");
+    qWarning() << "[PCP] Socket error:" << errorString;
+    emit errorOccurred(errorString);
+
+    // For other errors, cleanup and let reconnect timer handle it
+    cleanupSocket();
+    resetParser();
+    emit connectionLost();
+    emit stateChanged("reconnecting");
+
+    if (m_running && !m_reconnectTimer->isActive()) {
+        m_reconnectTimer->start();
+    }
+}
+
+void PcpReceiver::cleanupSocket() {
+    if (m_socket) {
+        QTcpSocket* socket = m_socket;
+        m_socket = nullptr;
+        disconnect(socket, nullptr, this, nullptr);
+        socket->abort();
+        socket->deleteLater();
+    }
 }
 
 void PcpReceiver::resetParser() {
@@ -148,6 +209,19 @@ void PcpReceiver::processBuffer() {
 
             // Transition to payload reading
             m_expectedPayloadLen = m_currentHeader.payload_len;
+            if (m_expectedPayloadLen > MAX_PCP_PAYLOAD_LEN) {
+                qWarning() << "[PCP] Payload too large:" << m_expectedPayloadLen
+                           << "max=" << MAX_PCP_PAYLOAD_LEN
+                           << "- resetting connection";
+                cleanupSocket();
+                resetParser();
+                emit connectionLost();
+                emit stateChanged("reconnecting");
+                if (m_running && !m_reconnectTimer->isActive()) {
+                    m_reconnectTimer->start();
+                }
+                return;
+            }
             if (m_expectedPayloadLen == 0) {
                 // No payload — emit empty frame and reset
                 VideoFrame frame;

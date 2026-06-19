@@ -1,9 +1,12 @@
 # PhoneCam 当前状态
 
-> 最后更新：2026-06-19 M1 已达成，P1 代码完成，GUI smoke 待验收
+> 最后更新：2026-06-19 BUG-012 网关解析修复 + UI 状态同步修复
 
 ## 事实来源
 
+- 2026-06-19 BUG-012 网关解析修复：`getAllGateways()` 解析 ipconfig 输出时，使用 `lastIndexOf(':')` 找默认网关的值会找错位置。当网关是 IPv6 地址（如 `fe80::a474:f0ff:feeb:f140%7`）时，IPv6 内部有多个冒号，`lastIndexOf(':')` 会找到 IPv6 内部的冒号而不是 "默认网关" 后面的冒号。修复：使用 `indexOf("Default Gateway")` 找到关键字位置，然后从该位置开始用 `indexOf(':', keywordPos)` 找关键字后的第一个冒号。UI 状态同步修复：`onCandidatesChanged` 中同时检查 `activeId` 和 `prevData` 来恢复下拉框选择。
+- 2026-06-19 BUG-007 GUI 状态回归已修复：推流 QLabel 从局部变量改为 m_streamLabel 成员；onFinalFrameReady/onFrameDecoded 首帧触发 enterStreamingState() → confirmStreamActive + 诊断条隐藏 + 设备名回填 + 推流显示"推流中"；connectionLost 调用 exitStreamingState() 恢复"待机"；m_lastFps 解决 preflight 每秒 reset 误判；candidatesChanged 已推流时同步刷新设备名。
+- 2026-06-19 WiFi 多网关发现修复：DeviceDiscovery::getDefaultGateway() → getAllGateways() 解析所有 ipconfig adapter 段（支持 IPv6→IPv4 续行格式）；每个网关独立 probe；保留 HOTSPOT_GATEWAYS fallback 并去重；ProbeDiagnostic 带 interfaceName；ConnectionManager 支持多 WiFi 候选。connectionLost 调用 markStreamLost() + stop() 解除 USB 断开后状态机卡死；markStreamLost() 清空 activeDeviceId 允许自动 fallback 到 WiFi；refreshDevices() 强制重探测不被 streamConfirmed 短路。
 - 用户本机反馈：腾讯会议中可以看到并选择 PhoneCam 摄像头选项。
 - 用户本机验证：手机采集 → PC 接收/解码/合成 → 虚拟摄像头 → 腾讯会议显示的产品闭环已跑通。灰色三图/闪烁在 FillBuffer 缓存帧元数据修复后消失。
 - `KI-007` Debug DLL 弹窗已做代码级修复；腾讯会议先加载/PhoneCam 后启动的启动顺序仍需人工验证。
