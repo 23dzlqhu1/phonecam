@@ -20,7 +20,7 @@ android {
 
     // 安全修复：签名信息不再硬编码，改从环境变量读取。
     // 发布 release 包前，请在终端/CI 中设置以下环境变量：
-    //   PHONECAM_STORE_FILE      → keystore 文件绝对路径，例如 C:\Users\xxx\.phonecam\phonecam-release.jks
+    //   PHONECAM_STORE_FILE      → keystore 文件绝对路径，例如 C:\Users\xxx\.android\phonecam-release.jks
     //   PHONECAM_STORE_PASSWORD  → keystore 密码
     //   PHONECAM_KEY_ALIAS       → key alias
     //   PHONECAM_KEY_PASSWORD    → key 密码
