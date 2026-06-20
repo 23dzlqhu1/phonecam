@@ -1,226 +1,55 @@
 # PhoneCam 协议（PCP）
 
-> 📡 **本文档作用**：定义 PhoneCam 自研传输协议 PCP（PhoneCam Protocol）。
+> 最后更新：2026-06-20
 >
-> ⚠️ **注意**：本项目**只用 PCP 一种协议**。之前的 HTTP MJPEG 和 WebSocket 已被废弃，**不要在新代码中使用**。
+> 本文只记录当前仍应参考的协议事实。当前产品状态见 [`current-status.md`](current-status.md)。
 
----
+## 当前使用方式
 
-## 0. 阅读对象
+- 协议：PCP（PhoneCam Protocol）
+- 传输：TCP
+- 默认端口：`9999`
+- 当前媒体：H.264 视频
+- 当前手机端实现：`phone_native/app/src/main/java/com/phonecam/nativeapp/PcpPacketWriter.kt`
+- 当前 PC 端接收实现：`cpp/src/core/pcp_receiver.cpp`
 
-- 🔧 实现电脑端接收器的人：看 [§2 协议格式](#2-协议格式)
-- 📱 实现手机端发送器的人：看 [§2 协议格式](#2-协议格式) + [§4 实现参考](#4-实现参考)
-- 🧪 写 mock 工具的人：看 [§5 协议常量](#5-协议常量)
+## 连接方式
 
-权威参考：[`desktop/receiver.py`](../desktop/receiver.py) 顶部 docstring 有完整字段说明。
+| 模式 | 当前口径 |
+|------|----------|
+| USB | 电脑端设置 `adb forward tcp:9999 tcp:9999`，然后连接 `127.0.0.1:9999` |
+| 热点/WiFi | 电脑端通过网关探测或手动地址连接手机 `:9999` |
 
----
+当前文档不再写 mDNS 作为实际发现机制。
 
-## 1. 设计目标
+## v2 包格式
 
-| 目标 | 说明 |
-|------|------|
-| 简单 | v2 32 字节定长头 + 二进制 payload；v1 24 字节仅历史兼容 |
-| 高效 | 局域网 1080p60 占用 < 8Mbps，TCP 单连接 |
-| 多路复用 | 一个连接同时传 video + audio + 控制 |
-| 可演进 | 协议头带 version，未来可升级 |
+所有多字节字段使用 little-endian。
 
----
+| Offset | Size | 字段 | 说明 |
+|--------|------|------|------|
+| 0 | 4 | magic | 固定 `PHCM` |
+| 4 | 1 | version | 当前主版本 `0x02` |
+| 5 | 1 | type | `0x01=video`；`0x02=audio`、`0x03=control` 仅预留 |
+| 6 | 1 | codec | 当前视频使用 `0x02=h264`；`0x01=raw_rgb` 仅历史/测试兼容；`0x03=aac` 仅预留 |
+| 7 | 1 | flags | bit0=keyframe；bit1-2=rotation (`0/90/180/270`) |
+| 8 | 4 | sequence | u32 帧序号 |
+| 12 | 8 | pts_us | 发送端时间戳，微秒 |
+| 20 | 8 | pts_ns | Camera2 `Image.timestamp`，纳秒 |
+| 28 | 4 | payload_len | payload 字节数 |
+| 32 | N | payload | H.264 Annex-B NALU 字节流 |
 
-## 2. 协议格式
+总头长度：32 字节。
 
-### 2.1 整体结构
+## 兼容口径
 
-```
-┌──────────────────────────────────────────────────┐
-│ Offset  Size  Field        取值范围              │
-├──────────────────────────────────────────────────┤
-│ 0       4     magic        'PHCM'                │  协议魔数
-│ 4       1     version      0x01 / 0x02           │  协议版本
-│ 5       1     type         0x01=video            │  通道类型
-│                   0x02=audio                      │
-│                   0x03=control                    │
-│ 6       1     codec        0x01=raw_rgb          │  编码格式
-│                   0x02=h264                       │
-│                   0x03=aac                        │
-│ 7       1     flags        0x01=keyframe         │  帧标志
-│ 8       4     sequence     u32                    │  序列号
-│ 12      8     pts_us       u64 (微秒)            │  时间戳
-│ 20      8     pts_ns       u64 (纳秒)            │  批次 3.2.0.3g+:
-│                   Camera2 Image.getTimestamp,     │  单调时钟, 算端到端时延
-│                   0x01 版本该字段不存在            │
-│ 28      4     payload_len  u32                    │  负载长度
-├──────────────────────────────────────────────────┤
-│ 32      N     payload      二进制媒体数据          │
-└──────────────────────────────────────────────────┘
-```
+- 当前 C++ 接收端仍兼容 v1 24 字节头。
+- 新代码应发送 v2 32 字节头。
+- H.264 关键帧必须带 SPS/PPS，避免接收端在重连或丢包后无法恢复解码。
 
-> **主协议结构：总头 32 字节（v2），所有字段小端序**。
-> 注：老版本 24 字节头（v1，缺 pts_ns 字段）目前作为历史版本兼容保留，接收端通过 version 自动识别。
+## 不要恢复
 
-### 2.2 字段详解
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| magic | 是 | 固定 `b'PHCM'`，用于识别协议 |
-| version | 是 | v1=0x01 (24 字节头), v2=0x02 (32 字节头, 含 pts_ns) |
-| type | 是 | 见上表。MVP-1 只用 0x01 (video) |
-| codec | 是 | 见上表。MVP-1 只用 0x01 (raw_rgb) |
-| flags | 是 | bit 0 = 关键帧，bit 1-7 预留 |
-| sequence | 是 | 从 0 开始的 u32 帧编号，溢出回卷 |
-| pts_us | 是 | 帧时间戳（微秒），从发送端启动开始算 |
-| pts_ns | v2 必填 | Camera2 Image.getTimestamp() 纳秒（单调时钟）。PC 端用此 + time.monotonic_ns 算端到端时延（首次收到时校准 offset）|
-| payload_len | 是 | 后续 payload 的字节数 |
-
----
-
-## 3. 传输层
-
-| 决策 | 选择 | 理由 |
-|------|------|------|
-| 协议 | **TCP** | 局域网稳定，**先求稳再求快**。UDP 弱信号反而卡 |
-| 端口 | 9999 | 避开常用服务端口 |
-| 端口复用 | 单连接 | 一个手机端同时给一个电脑端推流 |
-| 多客户端 | MVP-4 | 一次只支持一个接收方 |
-
-### 3.1 USB 模式（首选）
-
-```
-[手机]          [USB 数据线]          [电脑]
-TCP 监听 9999 ←─ adb reverse ─→  localhost:9999
-```
-
-- 手机端启动 TCP server，监听 0.0.0.0:9999
-- 电脑端执行 `adb reverse tcp:9999 tcp:9999`
-- 电脑端连接 `127.0.0.1:9999`
-
-### 3.2 WiFi 模式（MVP-4）
-
-```
-[手机]          [WiFi 热点/局域网]     [电脑]
-TCP 监听 9999 ←──── 局域网直连 ────→  192.168.x.x:9999
-```
-
-- 自动发现用 mDNS（`_phonecam._tcp.local.`）
-- 手动配可用 `--connect 192.168.x.x:9999`
-
----
-
-## 4. 实现参考
-
-### 4.1 电脑端（Python）
-
-权威实现：[`desktop/receiver.py`](../desktop/receiver.py) 中的 `PcpReceiver` 类。
-
-关键代码片段：
-
-```python
-import struct
-
-# 32 字节主协议头：magic(4s) + version(B) + type(B) + codec(B) + flags(B) + sequence(I) + pts_us(Q) + pts_ns(Q) + payload_len(I)
-HEADER_STRUCT = struct.Struct('<4sBBBBIQQI')
-
-# 接收
-header_buf = bytearray(32)
-sock.recv_into(header_buf, 32)
-magic, ver, ptype, codec, flags, seq, pts_us, pts_ns, plen = HEADER_STRUCT.unpack(bytes(header_buf))
-payload = sock.recv(plen)
-```
-
-### 4.2 手机端（Kotlin 原生）
-
-当前手机端位于 `phone_native/`，完全由 Kotlin 原生实现。
-MVP-2 使用 `MediaCodec` 硬编码 H.264，并通过 TCP 发送封装好的 PCP 报文。
-核心组包逻辑见 [`PcpPacketWriter.kt`](../phone_native/app/src/main/java/com/phonecam/nativeapp/PcpPacketWriter.kt)。
-
-### 4.3 Mock 端（Python，MVP-1 用）
-
-参考 [`tests/mock_phone/mock_phone_server.py`](../tests/mock_phone/)（MVP-1 待创建）。
-
----
-
-## 5. 协议常量
-
-```python
-MAGIC = b'PHCM'
-HEADER_SIZE = 32
-VERSION = 0x02
-
-HEADER_SIZE_V1 = 24  # 兼容保留
-VERSION_V1 = 0x01    # 兼容保留
-
-TYPE_VIDEO  = 0x01
-TYPE_AUDIO  = 0x02
-TYPE_CTRL   = 0x03
-
-CODEC_RAW_RGB = 0x01  # MVP-1
-CODEC_H264    = 0x02  # MVP-2
-CODEC_AAC     = 0x03  # MVP-3
-
-FLAG_KEYFRAME = 0x01
-```
-
----
-
-## 6. 特殊流传输要求 (Streaming Requirements)
-
-### 6.1 H.264 视频流 (`CODEC_H264`)
-- **带外参数集缓存 (SPS/PPS Caching)**：
-  在使用 H.264 编码时，发送端（手机）必须缓存包含 SPS 和 PPS 序列参数集的数据包（通常带有 `BUFFER_FLAG_CODEC_CONFIG` 标志）。
-  **对于所有发送的关键帧（I 帧，`FLAG_KEYFRAME` 置位），发送端必须强制将缓存的 SPS/PPS 字节流拼接到该关键帧 NALU 的最前面一起作为 payload 发送。**
-  这是为了保证接收端（如 FFmpeg/PyAV）在网络重连或丢包错过了流起始点时，依然能够无缝重组解码器上下文。
-- **Annex-B 格式要求**：所有的 payload 都必须保留原生的 `00 00 00 01` 或 `00 00 01` NALU 起始码。
-
----
-
-## 6. 帧尺寸约定（MVP-1）
-
-| 分辨率 | 像素数 | RGB 字节数 | 备注 |
-|--------|--------|----------|------|
-| 640x480 | 307,200 | 921,600 | 默认（MVP-1 验收用）|
-| 1280x720 | 921,600 | 2,764,800 | 可选 |
-
-> MVP-1 固定 640x480 raw_rgb，不传分辨率字段（双方协商）。
-> MVP-2 改 H.264 后，分辨率从 SPS NAL 解析。
-
----
-
-## 7. 错误处理
-
-| 情况 | 处理 |
-|------|------|
-| magic 不匹配 | 抛 `ValueError`，断开重连 |
-| version 不支持 | 抛 `ValueError`，断开 |
-| payload 长度异常 | 抛 `ValueError` |
-| 连接断开 | 指数退避重连：2s → 3s → 4.5s → ... → 30s |
-| 序列号跳跃 | 记录丢帧数，不影响接收 |
-
----
-
-## 8. 历史与废弃
-
-> 📜 **本节为变更记录**，给考古用。
-
-### v0.4（已废弃）— HTTP MJPEG
-
-- 旧版协议：HTTP MJPEG + multipart/x-mixed-replace
-- 端点：`/video`、`/info`、`/snapshot`
-- 状态：**已废弃**，代码已删除
-- 历史文件：git log 中 `desktop/receiver.py` v0.4 版本
-
-### v0.5（过渡）— WebSocket + H.264
-
-- 旧版协议：WebSocket + 12 字节头 + H.264 NAL
-- 实现：`phone/lib/stream_server.dart` v0.5
-- 状态：**MVP-2 待重写为 TCP + PCP**
-
-### v0.6（当前）— PCP v2
-
-- 32 字节头 + TCP + raw_rgb（MVP-1）/ H.264（MVP-2）/ AAC（MVP-3）
-- 兼容 24 字节头（v1）
-- 实现：`desktop/receiver.py::PcpReceiver`
-- 状态：**MVP-2 完成，MVP-3 完成**（2026-06-11 真机验证通过）
-
----
-
-**最后更新**：2026-06-07
+- 不要恢复 HTTP MJPEG。
+- 不要恢复 WebSocket 视频流。
+- 不要把音频写成当前已可用能力。
+- 不要把 mDNS 写成当前发现方式。

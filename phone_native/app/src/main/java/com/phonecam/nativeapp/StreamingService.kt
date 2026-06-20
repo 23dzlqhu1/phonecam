@@ -31,7 +31,7 @@ import android.widget.Toast
  *
  * 6 步启动顺序 (从 MainActivity 搬来, 完全一致):
  *   1) TcpStreamServer.start(port=9998) — accept 9998
- *   2) 等客户端连上 (30s deadline, 给用户启动 phonecam.py 的时间)
+ *   2) 等客户端连上 (30s deadline, 给用户启动 PC 端 phonecam.exe 的时间)
  *   3) H264Encoder.start(w, h, naluCb) — MediaCodec 编码
  *   4) EglRenderer(inputSurface) — EGL + shader + texture
  *   5) NaluCallback 桥: encoder → PcpPacketWriter.buildPacket → server.sendPacket

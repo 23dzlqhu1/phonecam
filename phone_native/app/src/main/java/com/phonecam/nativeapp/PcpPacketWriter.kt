@@ -8,9 +8,8 @@ import java.nio.ByteOrder
  *
  * 作用: 把 H.264 NALU 字节 + 元数据 (sequence/pts/keyframe/pts_ns) 打成 PCP 协议包
  *       格式: [32 字节头 (小端)][NALU payload]
- *       等同于 desktop/receiver.py 的 HEADER_STRUCT = struct.Struct('<4sBBBBIQQI')
  *
- * 协议格式 (权威见 desktop/receiver.py 顶部 docstring):
+ * 协议格式 (权威见 docs/protocol.md 和 PC 端 cpp/src/core/pcp_protocol.*):
  *   ┌──────────────────────────────────────────────────┐
  *   │ Offset  Size  Field        取值范围              │
  *   ├──────────────────────────────────────────────────┤
@@ -30,15 +29,6 @@ import java.nio.ByteOrder
  *   └──────────────────────────────────────────────────┘
  *   总头 32 字节 (3.2.0.3g 起), 所有字段小端序
  *   3.2.0.3g 之前 24 字节 (无 pts_ns, version=0x01)
- *
- * 范围 (批次 3.2.0.3a):
- *   - 单元自检: 写一个 .pcp 文件 → Python 脚本 unpack 校验字段全等
- *   - 暂不接 TCP 发送 (批次 3.2.0.3b 才做)
- *
- * 不做 (后续批次):
- *   - 3.2.0.3b: TcpStreamServer 把 packet 字节发出去
- *   - 3.2.0.3c: 接 Camera2 持续推流
- *   - 3.2.0.3d: 电脑端 video_frame_to_bgr 加 H.264 分支
  *
  * 关键约束 (G-001 防御):
  *   - HEADER_SIZE 必须 = 32
@@ -71,17 +61,17 @@ object PcpPacketWriter {
     const val VERSION: Byte = 0x02
     const val VERSION_V1: Byte = 0x01
 
-    // 通道类型 (与 desktop/receiver.py TYPE_* 同步)
+    // 通道类型 (与 docs/protocol.md 和 C++ PcpType 同步)
     const val TYPE_VIDEO: Byte = 0x01
     const val TYPE_AUDIO: Byte = 0x02
     const val TYPE_CTRL: Byte = 0x03
 
-    // 编码格式 (与 desktop/receiver.py CODEC_* 同步)
+    // 编码格式 (与 docs/protocol.md 和 C++ PcpCodec 同步)
     const val CODEC_RAW_RGB: Byte = 0x01
     const val CODEC_H264: Byte = 0x02
     const val CODEC_AAC: Byte = 0x03
 
-    // 帧标志 (与 desktop/receiver.py FLAG_* 同步)
+    // 帧标志 (与 docs/protocol.md 和 C++ PcpFlag 同步)
     const val FLAG_KEYFRAME: Byte = 0x01
     // 旋转信息掩码: bits 1-2 (0x06) 编码旋转角度
     //  00 = 0°, 01 = 90°, 10 = 180°, 11 = 270°
@@ -106,7 +96,7 @@ object PcpPacketWriter {
     // ========== 核心 API ==========
 
     /**
-     * 构造 32 字节 PCP 头 (小端序, 与 Python struct.Struct('<4sBBBBIQQI') 字符级一致)
+     * 构造 32 字节 PCP 头 (小端序, 与 C++ PcpHeader 字段顺序一致)
      *
      * @param sequence  帧编号 (u32, 从 0 开始, 溢出回卷)
      * @param ptsUs     帧时间戳 (u64, 微秒, System.nanoTime/1000)

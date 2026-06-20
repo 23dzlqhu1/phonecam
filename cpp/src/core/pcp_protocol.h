@@ -5,7 +5,7 @@
 namespace phonecam {
 
 // PCP (PhoneCam Protocol) constants
-// Protocol spec: see receiver.py module docstring
+// Protocol spec: see docs/protocol.md.
 constexpr uint32_t PCP_MAGIC = 0x4D434850; // 'PHCM' little-endian
 constexpr uint8_t PCP_VERSION_V1 = 0x01;
 constexpr uint8_t PCP_VERSION_V2 = 0x02;

@@ -41,6 +41,7 @@ build_log.txt
 *.zip
 release/
 PhoneCam-v*-*.zip
+cpp/build_release/
 
 # === IDE / 编辑器 ===
 .vscode/
