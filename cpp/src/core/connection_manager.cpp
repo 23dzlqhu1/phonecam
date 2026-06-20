@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QSet>
 #include <QtConcurrent>
 
 namespace phonecam {
@@ -67,12 +68,17 @@ void ConnectionManager::markStreamLost() {
     if (cand) {
         cand->status = "Failed";
         cand->lastError = "Stream lost";
-        emit candidatesChanged(m_candidates);
     }
-    if (m_info.state == ConnectionState::Connected) {
+    // BUG-012: Clear active device so auto-select can pick WiFi/manual fallback
+    qDebug() << "[CONN] markStreamLost: clearing active device" << m_activeDeviceId;
+    m_activeDeviceId.clear();
+    if (m_info.state == ConnectionState::Connected ||
+        m_info.state == ConnectionState::WaitingForPhone) {
         m_info.state = ConnectionState::Searching;
         emit stateChanged(m_info);
     }
+    emit candidatesChanged(m_candidates);
+    // Trigger immediate re-probe on next checkConnection() tick
 }
 
 void ConnectionManager::onConnectionFailed(const QString& error) {
@@ -119,8 +125,14 @@ void ConnectionManager::addManualDevice(const QString& host, quint16 port) {
 }
 
 void ConnectionManager::refreshDevices() {
+    // BUG-012: Force re-probe even if stream was confirmed
+    m_streamConfirmed = false;
     m_adbProbeRunning = false;
     m_hotspotDiscoveryRunning = false;
+    if (m_info.state == ConnectionState::Connected) {
+        m_info.state = ConnectionState::Searching;
+        emit stateChanged(m_info);
+    }
     checkConnection();
 }
 
@@ -194,12 +206,12 @@ void ConnectionManager::checkConnection() {
 
             DiscoveryResult discResult = m_discovery->findPhoneWithDiagnostics(m_port, 2.0);
             QVector<DeviceCandidate> wifiCandidates;
-            if (discResult.found) {
+            for (const auto& dev : discResult.devices) {
                 DeviceCandidate cand;
-                cand.id = "wifi:" + discResult.device.ip;
-                cand.displayName = QString("WiFi - %1").arg(discResult.device.ip);
+                cand.id = "wifi:" + dev.ip;
+                cand.displayName = QString("WiFi - %1").arg(dev.ip);
                 cand.transport = "wifi";
-                cand.url = discResult.device.url;
+                cand.url = dev.url;
                 cand.status = "Found";
                 cand.lastSeen = QDateTime::currentMSecsSinceEpoch();
                 wifiCandidates.append(cand);
@@ -211,7 +223,33 @@ void ConnectionManager::checkConnection() {
                 m_adbProbeRunning = false;
                 m_hotspotDiscoveryRunning = false;
 
+                // ── Logging: discovery results ──
+                qDebug() << "[CONN] === Discovery cycle ===";
+                qDebug() << "[CONN] ADB status:" << adbStatus
+                         << "devices:" << adbDeviceLines.size() - 1;
+                qDebug() << "[CONN] USB candidates this cycle:" << usbCandidates.size();
+                for (const auto& c : usbCandidates) {
+                    qDebug() << "[CONN]   USB:" << c.id << c.displayName
+                             << c.url << c.status;
+                }
+                qDebug() << "[CONN] Gateways found:" << discResult.diagnostics.size()
+                         << "devices found:" << discResult.devices.size();
+                for (const auto& d : discResult.diagnostics) {
+                    qDebug() << "[CONN]   probe:" << d.host << ":" << d.port
+                             << "iface:" << d.interfaceName
+                             << "result:" << static_cast<int>(d.result)
+                             << d.errorDetail;
+                }
+                qDebug() << "[CONN] WiFi candidates this cycle:" << wifiCandidates.size();
+                for (const auto& c : wifiCandidates) {
+                    qDebug() << "[CONN]   WiFi:" << c.id << c.displayName
+                             << c.url << c.status;
+                }
+
+                // ── Merge USB candidates ──
+                QSet<QString> currentUsbIds;
                 for (const auto& cand : usbCandidates) {
+                    currentUsbIds.insert(cand.id);
                     DeviceCandidate* existing = findCandidate(cand.id);
                     if (!existing) m_candidates.append(cand);
                     else {
@@ -223,6 +261,19 @@ void ConnectionManager::checkConnection() {
                         }
                     }
                 }
+                // BUG-012: Mark stale USB candidates (not in this cycle) as Failed
+                for (auto& c : m_candidates) {
+                    if (c.transport == "usb" && !currentUsbIds.contains(c.id)
+                        && c.status != "Connected") {
+                        if (c.status != "Failed" || c.lastError != "Device disconnected") {
+                            qDebug() << "[CONN] Marking stale USB as Failed:" << c.id;
+                        }
+                        c.status = "Failed";
+                        c.lastError = "Device disconnected";
+                    }
+                }
+
+                // ── Merge WiFi candidates ──
                 for (const auto& cand : wifiCandidates) {
                     DeviceCandidate* existing = findCandidate(cand.id);
                     if (!existing) m_candidates.append(cand);
@@ -238,6 +289,7 @@ void ConnectionManager::checkConnection() {
                 m_diagnostics.adbStatus = adbStatus;
                 m_diagnostics.adbDevices = adbDeviceLines;
 
+                // Stale cleanup: remove candidates not seen for 30s
                 qint64 now = QDateTime::currentMSecsSinceEpoch();
                 m_candidates.erase(std::remove_if(m_candidates.begin(), m_candidates.end(),
                     [&](const DeviceCandidate& c) {
@@ -246,6 +298,16 @@ void ConnectionManager::checkConnection() {
 
                 emit candidatesChanged(m_candidates);
                 emit diagnosticsChanged(m_diagnostics);
+
+                // ── Auto-select ──
+                qDebug() << "[CONN] === Candidate table ===";
+                for (const auto& c : m_candidates) {
+                    qDebug() << "[CONN]" << c.id << "transport:" << c.transport
+                             << "status:" << c.status << "url:" << c.url
+                             << "lastError:" << c.lastError;
+                }
+                qDebug() << "[CONN] activeDeviceId:" << m_activeDeviceId
+                         << "manualSelection:" << m_manualSelection;
 
                 if (!m_manualSelection && m_activeDeviceId.isEmpty() && !m_candidates.isEmpty()) {
                     // P2-1 Loop 4: Priority: last connected > USB > WiFi > manual
@@ -279,6 +341,7 @@ void ConnectionManager::checkConnection() {
                             m_activeDeviceId = c.id; connectToCandidate(c.id); return;
                         }
                     }
+                    qDebug() << "[CONN] No auto-select candidate found (all Failed or empty)";
                 }
             }, Qt::QueuedConnection);
         });

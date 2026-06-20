@@ -1,14 +1,19 @@
 #pragma once
 #include <QObject>
 #include <QImage>
+#include <QByteArray>
+#include <QFile>
 #include <mutex>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/frame.h>
 #include <libswscale/swscale.h>
 }
+
+#include "core/decoded_frame.h"
 
 namespace phonecam {
 
@@ -28,10 +33,22 @@ public:
     // Returns null QImage on failure.
     QImage decode(const uint8_t* data, int size);
 
+    // Decode to AVFrame wrapper — skips QImage/RGB conversion.
+    // Returns valid DecodedFrame on success, empty on failure.
+    // Frame is already transferred to CPU if hardware decoder is active.
+    DecodedFrame decodeFrame(const uint8_t* data, int size);
+
     bool isHardware() const { return m_isHw; }
-    bool isInitialized() const { return m_codecCtx != nullptr; }  // Only safe to call from decode thread
+    bool isInitialized() const { return m_codecCtx != nullptr; }
     void flush();
     void close();
+
+    // ── P0 diagnostic controls ──
+    void setForceSoftware(bool force) { m_forceSw = force; }
+    bool isForceSoftware() const { return m_forceSw; }
+    const char* decoderTypeName() const;
+    void enableH264Dump(const QString& filePath);
+    void disableH264Dump();
 
     // Mutex for external thread synchronization
     std::mutex& mutex() { return m_mutex; }
@@ -50,8 +67,16 @@ private:
     int m_lastSwsH = 0;
     AVPixelFormat m_lastSwsFmt = AV_PIX_FMT_NONE;
     enum AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
+    QByteArray m_lastSps;
     bool m_isHw = false;
+    bool m_forceSw = false;
     std::mutex m_mutex;
+
+    // H264 dump state
+    bool m_dumpEnabled = false;
+    QFile m_dumpFile;
+    int m_dumpFrameCount = 0;
+    static constexpr int kDumpMaxFrames = 150; // ~5 seconds at 30fps
 };
 
 } // namespace phonecam

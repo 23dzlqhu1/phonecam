@@ -1,14 +1,11 @@
 # PhoneCam 项目地图
 
-> 最后更新：2026-06-19 产品 MVP P1 代码完成
+> 最后更新：2026-06-20 文档清理完成
 
 ## 目录结构
 
 ```text
 D:/PhoneCam/
-├── .hermes/plans/
-│   ├── video-pipeline-refactor.md    # 视频链路重构执行计划 (Phase 0–5)
-│   └── product-mvp.md                # 产品 MVP 计划 (M1/P1/P2)
 ├── cpp/                          # PC 端 C++ 源码
 │   ├── src/
 │   │   ├── core/
@@ -52,8 +49,7 @@ D:/PhoneCam/
 │   ├── current-architecture.md   # 当前架构
 │   ├── known-issues.md           # 当前有效问题与待验证修复
 │   ├── project-map.md            # 本文件
-│   ├── dev-reference.md          # 开发参考（调试经验、设备陷阱、构建环境）
-│   └── archive/                  # 历史归档
+│   └── dev-reference.md          # 开发参考（调试经验、设备陷阱、构建环境）
 ├── installer/                    # 发布脚本
 │   ├── package.bat               # 从 Release 构建组装发布包
 │   ├── install.bat               # 用户端安装（注册 DLL + 安装 APK）
@@ -81,8 +77,6 @@ D:/PhoneCam/
 | 手机-采集 | `phone_native/.../CameraController.kt` | Camera2 采集 |
 | 手机-编码 | `phone_native/.../H264Encoder.kt` | MediaCodec H.264 编码 |
 | 手机-推流 | `phone_native/.../TcpStreamServer.kt` | TCP Server 推流 |
-| 计划-视频链路 | `.hermes/plans/video-pipeline-refactor.md` | 视频链路重构 Phase 0–5 执行计划 |
-| 计划-产品 MVP | `.hermes/plans/product-mvp.md` | 产品 MVP M1/P1/P2 计划与验收状态 |
 
 ## 数据流（当前）
 

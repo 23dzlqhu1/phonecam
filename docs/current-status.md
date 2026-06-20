@@ -117,7 +117,6 @@ release/PhoneCam/
 
 ## 多阶段重构计划
 
-见 `.hermes/plans/video-pipeline-refactor.md`：
 - Phase 0/0.1 ✅ — 诊断基线
 - Phase 1 ✅ — 统一画面语义 (contain/letterbox, Preview↔VirtualCam 同源)
 - Phase 2 ✅ — 低延迟队列 (rawQ 30+resync@15, displayQ 1, [LATENCY] log)

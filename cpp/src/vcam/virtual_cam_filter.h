@@ -57,17 +57,24 @@ private:
     void fillMediaType_RGB24(CMediaType* pMediaType);
     long getFrameBufferSize();
     void convertBGR24ToNV12(uint8_t* dst, const uint8_t* src, int w, int h);
+    void convertNV12ToBGR24(uint8_t* dst, int dstStride, const uint8_t* src, int w, int h);
     void fillPlaceholderFrame(uint8_t* pData, int width, int height, PixelFormat fmt);
 
     SharedMemoryReader m_reader;
     REFERENCE_TIME m_avgTimePerFrame;
-    int m_width = 1080;
-    int m_height = 1920;
+    int m_width = 1280;
+    int m_height = 720;
     int m_fps = 30;
     LONGLONG m_frame_count = 0;
     std::unique_ptr<uint8_t[]> m_frame_buffer;
     bool m_has_last_frame = false;
     PixelFormat m_outputFormat = PixelFormat::NV12;  // Prefer NV12
+
+    // Cached last-frame metadata (valid only when m_has_last_frame=true)
+    SharedPixelFormat m_lastShmFmt = SharedPixelFormat::BGR24;
+    int m_lastWidth = 0;
+    int m_lastHeight = 0;
+    uint64_t m_lastSequence = 0;
 };
 
 // ── CVCam: Source filter ──

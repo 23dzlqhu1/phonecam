@@ -3,6 +3,7 @@ project(PhoneCam VERSION 2.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network OpenGL OpenGLWidgets Concurrent)
 find_package(FFMPEG REQUIRED)
@@ -16,11 +17,13 @@ pkg_check_modules(libswscale REQUIRED IMPORTED_TARGET libswscale)
 # ═══════════════════════════════════════════════
 qt_add_executable(phonecam WIN32
     src/main.cpp
+    resources/phonecam.qrc
     src/core/pcp_protocol.cpp
     src/core/pcp_receiver.cpp
     src/core/hw_decoder.cpp
     src/core/connection_manager.cpp
     src/core/device_discovery.cpp
+    src/core/final_frame_composer.cpp
     src/output/virtual_cam.cpp
     src/gui/main_window.cpp
     src/gui/preview_widget.cpp
@@ -41,6 +44,7 @@ target_link_libraries(phonecam PRIVATE
 )
 
 if(WIN32)
+    target_sources(phonecam PRIVATE resources/phonecam.rc)
     target_link_libraries(phonecam PRIVATE ws2_32 iphlpapi)
 endif()
 

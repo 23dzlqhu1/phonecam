@@ -35,6 +35,8 @@ bool SharedMemoryWriter::open(int width, int height) {
         m_header->frame_slots[i].sequence = 0;
         m_header->frame_slots[i].timestamp = 0;
         m_header->frame_slots[i].data_size = 0;
+        m_header->frame_slots[i].pixel_format = (int32_t)SharedPixelFormat::BGR24;
+        m_header->frame_slots[i].stride = width * 3;  // BGR24 default stride
     }
     m_sequence = 0;
     return true;
@@ -43,12 +45,17 @@ bool SharedMemoryWriter::open(int width, int height) {
 #endif
 }
 
+// Legacy write — delegates to BGR24 path
 bool SharedMemoryWriter::write(const uint8_t* bgr_data, int width, int height) {
+    return writeBgr24(bgr_data, width, height);
+}
+
+bool SharedMemoryWriter::writeBgr24(const uint8_t* bgr_data, int width, int height) {
 #ifdef _WIN32
     if (!m_header) return false;
     int frame_size = width * height * 3;
     if (frame_size > m_max_frame_size) return false;
-    LONG current = InterlockedCompareExchange((LONG*)&m_header->active_slot, 0, 0);
+    LONG current = *(volatile LONG*)&m_header->active_slot;
     int write_slot = 1 - current;
     uint8_t* dst = m_frame_data + write_slot * m_max_frame_size;
     WaitForSingleObject((HANDLE)m_mutex, INFINITE);
@@ -59,6 +66,34 @@ bool SharedMemoryWriter::write(const uint8_t* bgr_data, int width, int height) {
     InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].sequence, (LONG)m_sequence);
     m_header->frame_slots[write_slot].timestamp = (double)GetTickCount64() / 1000.0;
     InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].data_size, frame_size);
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].pixel_format, (LONG)SharedPixelFormat::BGR24);
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].stride, width * 3);
+    InterlockedExchange((LONG*)&m_header->active_slot, write_slot);
+    ReleaseMutex((HANDLE)m_mutex);
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool SharedMemoryWriter::writeNv12(const uint8_t* nv12_data, int width, int height) {
+#ifdef _WIN32
+    if (!m_header) return false;
+    int frame_size = width * height * 3 / 2;  // NV12 = Y + UV (4:2:0)
+    if (frame_size > m_max_frame_size) return false;
+    LONG current = *(volatile LONG*)&m_header->active_slot;
+    int write_slot = 1 - current;
+    uint8_t* dst = m_frame_data + write_slot * m_max_frame_size;
+    WaitForSingleObject((HANDLE)m_mutex, INFINITE);
+    std::memcpy(dst, nv12_data, frame_size);
+    m_sequence++;
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].width, width);
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].height, height);
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].sequence, (LONG)m_sequence);
+    m_header->frame_slots[write_slot].timestamp = (double)GetTickCount64() / 1000.0;
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].data_size, frame_size);
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].pixel_format, (LONG)SharedPixelFormat::NV12);
+    InterlockedExchange((LONG*)&m_header->frame_slots[write_slot].stride, width);  // NV12 Y stride = width
     InterlockedExchange((LONG*)&m_header->active_slot, write_slot);
     ReleaseMutex((HANDLE)m_mutex);
     return true;
@@ -121,7 +156,15 @@ bool SharedMemoryReader::open() {
 #endif
 }
 
+// Legacy read — returns frame data regardless of format, treats as BGR24
 bool SharedMemoryReader::read(uint8_t* out_buffer, int buffer_size, int& width, int& height, uint64_t& sequence, int timeout_ms) {
+    SharedPixelFormat fmt;
+    return read(out_buffer, buffer_size, width, height, sequence, fmt, timeout_ms);
+}
+
+// New read with format output — allows consumer to take NV12 fast path
+bool SharedMemoryReader::read(uint8_t* out_buffer, int buffer_size, int& width, int& height,
+                               uint64_t& sequence, SharedPixelFormat& format, int timeout_ms) {
 #ifdef _WIN32
     if (!m_header) return false;
 
@@ -144,6 +187,7 @@ bool SharedMemoryReader::read(uint8_t* out_buffer, int buffer_size, int& width, 
         width  = (int)*(volatile LONG*)&m_header->frame_slots[active].width;
         height = (int)*(volatile LONG*)&m_header->frame_slots[active].height;
         int data_size = (int)*(volatile LONG*)&m_header->frame_slots[active].data_size;
+        format = (SharedPixelFormat)*(volatile LONG*)&m_header->frame_slots[active].pixel_format;
         if (data_size <= 0 || data_size > buffer_size) return false;
         const uint8_t* src = m_frame_data + active * MAX_FRAME_SIZE;
         std::memcpy(out_buffer, src, data_size);
@@ -164,6 +208,7 @@ bool SharedMemoryReader::read(uint8_t* out_buffer, int buffer_size, int& width, 
             width  = (int)*(volatile LONG*)&m_header->frame_slots[active].width;
             height = (int)*(volatile LONG*)&m_header->frame_slots[active].height;
             int data_size = (int)*(volatile LONG*)&m_header->frame_slots[active].data_size;
+            format = (SharedPixelFormat)*(volatile LONG*)&m_header->frame_slots[active].pixel_format;
             if (data_size <= 0 || data_size > buffer_size) return false;
             const uint8_t* src = m_frame_data + active * MAX_FRAME_SIZE;
             std::memcpy(out_buffer, src, data_size);

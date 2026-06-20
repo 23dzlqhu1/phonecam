@@ -14,7 +14,7 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 16                          // 批次 3.2.0.3h: 注释 8s auto-test 避免占 9999 阻塞推流
+        versionCode = 17                          // 批次 3.2.0.3h: +setTargetFps fix
         versionName = "0.2.8-mvp2-batch3.2.0.3h-portfix3"
     }
 
@@ -53,4 +53,5 @@ dependencies {
     // 不引入 androidx.core（用 AppCompatActivity 自带的 Activity 基类即可）
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.cardview:cardview:1.0.0")
 }

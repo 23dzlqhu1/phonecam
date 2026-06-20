@@ -30,6 +30,31 @@
     <string name="layer_b_action_settings">设置</string>
     <string name="layer_b_action_toggle">切换</string>
 
+    <!-- ============== MainActivity 首页 UI 层文案 ============== -->
+    <!-- 这些文案只用于 MainActivity 呈现，不影响 Camera2 / MediaCodec / TCP 推流链路 -->
+    <string name="main_status_idle">空闲</string>
+    <string name="main_status_waiting">等待连接</string>
+    <string name="main_status_streaming">推流中</string>
+    <string name="main_status_error">错误</string>
+    <string name="main_action_connect">连接</string>
+    <string name="main_action_debug">调试</string>
+    <string name="main_action_refresh">刷新连接</string>
+    <string name="main_action_connecting">连接中…</string>
+    <string name="main_action_stop">停止推流</string>
+    <string name="main_action_retry">重试</string>
+    <string name="main_card_waiting_title">等待连接</string>
+    <string name="main_card_waiting_desc">请连接 USB，或确保手机和电脑在同一网络。</string>
+    <string name="main_card_waiting_next">打开电脑端 PhoneCam，然后点击连接。</string>
+    <string name="main_card_starting_title">等待电脑端连接</string>
+    <string name="main_card_starting_desc">PhoneCam 正在等待电脑端接入。</string>
+    <string name="main_card_starting_next">保持电脑端 PhoneCam 打开，连接成功后会开始推流。</string>
+    <string name="main_card_streaming_title">正在作为摄像头使用</string>
+    <string name="main_card_streaming_desc">请在腾讯会议、OBS 或其他软件中选择 PhoneCam Camera。</string>
+    <string name="main_card_streaming_next">使用完成后点击停止推流。</string>
+    <string name="main_card_error_title">连接异常</string>
+    <string name="main_card_error_fallback">请检查 USB、网络或电脑端程序是否已启动。</string>
+    <string name="main_card_error_next">处理后点击重试。</string>
+
     <!-- ============== Layer C: 推流按钮 ============== -->
     <string name="layer_c_btn_start">▶  开始推流</string>
     <string name="layer_c_btn_stop">■  停止推流</string>
@@ -96,24 +121,35 @@
     <string name="settings_title_connect">连接 PC</string>
     <string name="settings_title_debugpage">查看调试日志</string>
 
-    <!-- 默认摄像头选项 -->
+    <!-- 默认摄像头选项 (显示值) -->
     <string-array name="settings_opt_lens">
         <item>后置</item>
         <item>前置</item>
     </string-array>
+    <!-- 默认摄像头选项 (存储值，与显示值 1:1 对应) -->
+    <string-array name="settings_val_lens">
+        <item>back</item>
+        <item>front</item>
+    </string-array>
 
-    <!-- 分辨率选项 -->
+    <!-- 分辨率选项 (显示值 = 存储值) -->
     <string-array name="settings_opt_resolution">
         <item>480p</item>
         <item>720p</item>
         <item>1080p</item>
     </string-array>
 
-    <!-- 帧率选项 -->
+    <!-- 帧率选项 (显示值) -->
     <string-array name="settings_opt_fps">
         <item>15 fps</item>
         <item>30 fps</item>
         <item>60 fps</item>
+    </string-array>
+    <!-- 帧率选项 (存储值) -->
+    <string-array name="settings_val_fps">
+        <item>15</item>
+        <item>30</item>
+        <item>60</item>
     </string-array>
 
     <!-- 码率选项 -->
@@ -123,6 +159,12 @@
         <item>4 Mbps</item>
         <item>8 Mbps</item>
     </string-array>
+    <string-array name="settings_val_bitrate">
+        <item>1</item>
+        <item>2</item>
+        <item>4</item>
+        <item>8</item>
+    </string-array>
 
     <!-- 编码选项 -->
     <string-array name="settings_opt_codec">
@@ -131,15 +173,23 @@
         <item>VP9</item>
     </string-array>
 
-    <!-- 传输方式选项 -->
+    <!-- 传输方式选项 (显示值) -->
     <string-array name="settings_opt_transport">
         <item>自动</item>
         <item>WiFi 优先</item>
         <item>USB 优先</item>
     </string-array>
+    <!-- 传输方式选项 (存储值) -->
+    <string-array name="settings_val_transport">
+        <item>auto</item>
+        <item>wifi</item>
+        <item>usb</item>
+    </string-array>
 
     <!-- 未实现项标记 -->
     <string name="settings_placeholder_stream">⏳  推流功能待后续批次</string>
+    <!-- 传输方式说明 -->
+    <string name="settings_placeholder_transport">💡  此为连接偏好。PC 端会自动尝试 USB 和 WiFi/热点两种方式。</string>
 
     <!-- 行点击弹窗标题 -->
     <string name="settings_dialog_title">选择</string>

@@ -6,22 +6,33 @@
 
 namespace phonecam {
 
-// Thread-safe bounded queue with drop-oldest policy.
-// When full, push() discards the oldest item to make room.
-// pop() blocks until an item is available.
+// Queue overflow policy
+enum class QueuePolicy {
+    DropOldest,  // Drop oldest item when full (for decoded image display queue)
+    NoDrop,      // Reject push when full — caller must handle overflow (for raw H264 queue)
+};
+
+// Thread-safe bounded queue with configurable overflow policy.
 template<typename T>
 class BoundedQueue {
 public:
-    explicit BoundedQueue(int maxSize = 3) : m_maxSize(maxSize) {}
+    explicit BoundedQueue(int maxSize = 3, QueuePolicy policy = QueuePolicy::DropOldest)
+        : m_maxSize(maxSize), m_policy(policy) {}
 
-    // Push an item. If queue is full, drop the oldest.
-    void push(T item) {
+    // Push an item.
+    // DropOldest: if full, drop the oldest to make room (always succeeds).
+    // NoDrop: if full, drop the NEW item (reject push). Returns true if accepted.
+    bool push(T item) {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (static_cast<int>(m_queue.size()) >= m_maxSize) {
-            m_queue.pop_front();  // Drop oldest
+            if (m_policy == QueuePolicy::NoDrop) {
+                return false;  // Reject: caller must handle overflow
+            }
+            m_queue.pop_front();  // DropOldest: make room
         }
         m_queue.push_back(std::move(item));
         m_cv.notify_one();
+        return true;
     }
 
     // Blocking pop. Returns std::nullopt only if the queue is shut down.
@@ -62,6 +73,7 @@ public:
 private:
     std::deque<T> m_queue;
     int m_maxSize;
+    QueuePolicy m_policy;
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_shutdown = false;

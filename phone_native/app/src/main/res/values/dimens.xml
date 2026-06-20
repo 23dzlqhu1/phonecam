@@ -44,6 +44,21 @@
     <dimen name="icon_size_action">24dp</dimen>         <!-- Layer B 右上角图标 (⚙ 🔄) -->
     <dimen name="icon_size_error">64dp</dimen>          <!-- 错误占位图标 -->
 
+    <!-- ============== MainActivity 首页 UI 层 ============== -->
+    <!-- 仅用于首页布局呈现，不影响 Camera2 / MediaCodec / TCP 推流链路 -->
+    <dimen name="main_topbar_height">64dp</dimen>
+    <dimen name="main_preview_height">252dp</dimen>
+    <dimen name="main_toolbar_height">72dp</dimen>
+    <dimen name="main_tool_button_height">52dp</dimen>
+    <dimen name="main_status_card_corner">20dp</dimen>
+    <dimen name="main_status_card_padding">18dp</dimen>
+    <dimen name="main_title_text">22sp</dimen>
+    <dimen name="main_status_pill_text">13sp</dimen>
+    <dimen name="main_tool_text">13sp</dimen>
+    <dimen name="main_card_title_text">20sp</dimen>
+    <dimen name="main_card_body_text">14sp</dimen>
+    <dimen name="main_card_next_text">13sp</dimen>
+
     <!-- ============== Settings 页 (Phase Y-1) ============== -->
     <dimen name="settings_row_height">56dp</dimen>     <!-- 单行高度 (含触摸区) -->
     <dimen name="settings_row_padding">16dp</dimen>     <!-- 行左右内边距 -->

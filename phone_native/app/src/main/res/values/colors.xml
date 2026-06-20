@@ -26,4 +26,16 @@
     <color name="led_green">#00E676</color>          <!-- PC 已连接 / 推流成功 -->
     <color name="warn_amber">#FFB300</color>         <!-- 推流中断 / 重连中 / 摄像头占用 -->
     <color name="danger_red">#FF3D5A</color>         <!-- 停止按钮 / 错误 -->
+
+    <!-- MainActivity 首页 UI 层颜色；只影响界面呈现，不影响推流链路 -->
+    <color name="main_card_bg">#F4F7FB</color>
+    <color name="main_card_stroke">#DDE3EA</color>
+    <color name="main_card_text_primary">#111827</color>
+    <color name="main_card_text_secondary">#4B5563</color>
+    <color name="main_card_text_hint">#6B7280</color>
+    <color name="main_action_blue">#2563EB</color>
+    <color name="main_action_blue_pressed">#1D4ED8</color>
+    <color name="main_tool_bg">#151820</color>
+    <color name="main_tool_bg_pressed">#202532</color>
+    <color name="main_preview_stroke">#1F232D</color>
 </resources>
