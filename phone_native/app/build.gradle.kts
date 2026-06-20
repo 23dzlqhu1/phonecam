@@ -18,19 +18,39 @@ android {
         versionName = "0.2.8-mvp2-batch3.2.0.3h-portfix3"
     }
 
+    // 安全修复：签名信息不再硬编码，改从环境变量读取。
+    // 发布 release 包前，请在终端/CI 中设置以下环境变量：
+    //   PHONECAM_STORE_FILE      → keystore 文件绝对路径，例如 C:\Users\xxx\.phonecam\phonecam-release.jks
+    //   PHONECAM_STORE_PASSWORD  → keystore 密码
+    //   PHONECAM_KEY_ALIAS       → key alias
+    //   PHONECAM_KEY_PASSWORD    → key 密码
+    val storeFileEnv = providers.environmentVariable("PHONECAM_STORE_FILE").orNull
+    val storePasswordEnv = providers.environmentVariable("PHONECAM_STORE_PASSWORD").orNull
+    val keyAliasEnv = providers.environmentVariable("PHONECAM_KEY_ALIAS").orNull
+    val keyPasswordEnv = providers.environmentVariable("PHONECAM_KEY_PASSWORD").orNull
+
+    val hasReleaseSigning = storeFileEnv != null &&
+            storePasswordEnv != null &&
+            keyAliasEnv != null &&
+            keyPasswordEnv != null
+
     signingConfigs {
-        create("release") {
-            storeFile = file("../../phonecam-release.jks")
-            storePassword = "phonecam123"
-            keyAlias = "phonecam"
-            keyPassword = "phonecam123"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(storeFileEnv!!)
+                storePassword = storePasswordEnv!!
+                keyAlias = keyAliasEnv!!
+                keyPassword = keyPasswordEnv!!
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isDebuggable = true

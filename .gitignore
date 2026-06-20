@@ -59,6 +59,10 @@ cpp/build_release/
 # === 验证产物（不入仓，保留在本地调试） ===
 tests/output/
 
+# === Android 签名密钥（绝不可入仓）===
+*.jks
+*.keystore
+
 # === 调试和日志产物 ===
 *dump*.xml
 logcat*.txt
