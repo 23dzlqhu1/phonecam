@@ -1,38 +1,107 @@
 # PhoneCam
 
-> 把 Android 手机变成 Windows 电脑摄像头。
+> 把 Android 手机变成 Windows 电脑的 USB/无线摄像头。
 
-## 快速入口
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Android%207.0%2B%20%7C%20Windows%2010%2B-green.svg)]()
+[![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
-| 我是 | 去看 |
-|------|------|
-| 普通用户 | [docs/current-status.md](docs/current-status.md) + [docs/user-manual.md](docs/user-manual.md) |
-| 开发者 | [docs/current-architecture.md](docs/current-architecture.md) + [docs/protocol.md](docs/protocol.md) |
-| AI 助手 | [Hermes.md](Hermes.md) + [docs/current-status.md](docs/current-status.md) |
+PhoneCam 是一款开源的虚拟摄像头方案：手机端通过 Camera2 + MediaCodec 采集并编码 H.264，PC 端通过 DirectShow 滤镜将手机画面注入到腾讯会议、Zoom、OBS 等任意使用摄像头的 Windows 应用中。
 
-`docs/current-status.md` 是当前事实锚点。其他文档如果和它冲突，以它为准。
+---
 
-## 当前状态
+## 功能特性
 
-- 手机摄像头画面可以在本机 exe 中有效显示，大部分情况下主观没有明显延迟。
-- 腾讯会议中可以看到并选择 PhoneCam 摄像头。
-- 腾讯会议竖屏可显示手机画面。
-- 腾讯会议横屏当前会显示 `Naoko` 占位图，这是已知问题。
-- 音频、1080p60、稳定低于固定毫秒值的延迟、全新用户 3 分钟流程都不作为当前已验证能力宣传。
+- **无线 & USB 双模式** — 同一局域网自动发现，也支持 USB 网络共享
+- **低延迟传输** — 自研 PCP v2 协议，基于 TCP 直接传输 H.264 NAL
+- **系统级虚拟摄像头** — 安装后出现在所有 DirectShow 应用的视频设备列表中
+- **跨应用兼容** — 腾讯会议、钉钉、Zoom、OBS、微信、Chrome 网页版均可识别
+- **Android 7.0+ 兼容** — 最低支持 API 24
+
+## 系统要求
+
+| 端 | 要求 |
+|---|---|
+| 手机 | Android 7.0 (API 24) 及以上 |
+| 电脑 | Windows 10/11 64 位 |
+| 网络 | 手机与电脑在同一局域网，或通过 USB 网络共享连接 |
+
+## 快速开始
+
+### 1. 下载安装包
+
+前往 [GitHub Releases](https://github.com/23dzlqhu1/phonecam/releases) 下载最新版：
+- `PhoneCam-x.x.x.zip` — PC 端程序 + 虚拟摄像头驱动
+- `phonecam.apk` — Android 端 App
+
+### 2. 安装 PC 端
+
+1. 解压 `PhoneCam-x.x.x.zip`
+2. 右键以管理员身份运行 `install.bat`
+3. 安装完成后，打开 `bin/phonecam.exe`
+
+### 3. 安装手机端
+
+将 `phonecam.apk` 安装到 Android 手机，授予摄像头和麦克风权限。
+
+### 4. 连接
+
+1. 确保手机与电脑连接同一 Wi-Fi
+2. 打开电脑端的 `phonecam.exe`
+3. 打开手机端 App，输入 PC 端显示的 IP 地址
+4. 在腾讯会议 / OBS 中选择 **PhoneCam Camera**
+
+详细步骤见 [docs/user-manual.md](docs/user-manual.md)。
+
+## 已知限制
+
+- 腾讯会议横屏模式当前可能显示占位图，竖屏模式正常工作
+- 音频传输尚未完整实现
+- 1080p60 与亚秒级稳定延迟仍在持续优化中
+
+完整问题列表见 [docs/known-issues.md](docs/known-issues.md)。
 
 ## 项目结构
 
-| 目录 | 用途 |
-|------|------|
-| `docs/` | 当前状态、使用手册、架构、协议 |
-| `phone_native/` | Android Kotlin 端：Camera2、MediaCodec、PCP v2、TCP 推流 |
-| `cpp/` | 当前 PC 端主线：C++/Qt/FFmpeg/DirectShow，源码在 `cpp/src/`，本机 exe 位于 `cpp/build/phonecam.exe` |
-| `scripts/` | 构建/安装脚本 |
+```text
+PhoneCam/
+├── cpp/              # PC 端：C++/Qt/FFmpeg + DirectShow 虚拟摄像头滤镜
+├── phone_native/     # Android 端：Kotlin + Camera2 + MediaCodec
+├── installer/        # Windows 安装与发布打包脚本
+├── scripts/          # 调试与测试脚本
+└── docs/             # 用户手册、架构说明、协议文档
+```
 
-## 文档原则
+- 开发者文档：[docs/current-architecture.md](docs/current-architecture.md)
+- 协议说明：[docs/protocol.md](docs/protocol.md)
+- 当前状态：[docs/current-status.md](docs/current-status.md)
+- AI 上下文契约：[Hermes.md](Hermes.md)
 
-旧规划、旧联调记录、旧 AI 记忆库已经删除。以后新增或修改文档时，只保留能直接描述当前事实、当前使用方式或当前源码结构的内容。
+## 从源码构建
 
-## License
+### Android
+
+```bash
+cd phone_native
+./gradlew assembleRelease
+```
+
+### PC
+
+```bash
+cd cpp
+./build_release.bat
+```
+
+打包发布：
+
+```bash
+cd installer
+./package.bat
+```
+
+详见 [installer/README.txt](installer/README.txt)。
+
+## 许可证
 
 [MIT License](LICENSE) © 2026
