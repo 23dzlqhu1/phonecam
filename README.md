@@ -221,10 +221,9 @@ PhoneCam/
 ```
 
 - 用户手册：[docs/user-manual.md](docs/user-manual.md)
-- 开发者文档：[docs/current-architecture.md](docs/current-architecture.md)
-- 协议说明：[docs/protocol.md](docs/protocol.md)
-- 当前状态：[docs/current-status.md](docs/current-status.md)
 - 已知问题：[docs/known-issues.md](docs/known-issues.md)
+- 架构说明：[docs/current-architecture.md](docs/current-architecture.md)
+- 协议说明：[docs/protocol.md](docs/protocol.md)
 - AI 上下文契约：[Hermes.md](Hermes.md)
 
 ---

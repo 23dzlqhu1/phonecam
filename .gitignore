@@ -73,3 +73,8 @@ logcat*.txt
 *.err
 *.out
 *.pcp
+
+# === 内部/私人文档（保留在本地，不入仓） ===
+docs/current-status.md
+docs/dev-reference.md
+docs/project-map.md

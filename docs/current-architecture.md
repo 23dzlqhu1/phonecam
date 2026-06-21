@@ -1,52 +1,78 @@
-# PhoneCam 当前架构
+# PhoneCam 架构概述
 
-> 最后更新：2026-06-20
->
-> 当前事实见 [`current-status.md`](current-status.md)。本文只保留今天仍有用的架构口径。
+> 本文面向开发者，简要介绍 PhoneCam 的整体架构。
 
-## 端到端链路
+---
+
+## 整体链路
 
 ```text
-Android phone_native/ (Server, listen 0.0.0.0:9999)
-  Camera2
-  -> YUV_420_888
-  -> MediaCodec H.264
-  -> PCP v2 over TCP :9999
-  -> adb forward (PC:9999 → Phone:9999)
-  -> Windows PcpReceiver (Client, connect 127.0.0.1:9999)
-  -> preview / virtual camera
-  -> Tencent Meeting
+Android 手机端 (Server)
+  Camera2 采集画面
+  -> MediaCodec 编码为 H.264
+  -> PCP v2 协议打包
+  -> TCP 推流（端口 9999）
+
+Windows 电脑端 (Client)
+  -> 通过 USB (adb forward) 或 Wi-Fi 连接手机
+  -> PCP 协议接收 H.264 数据
+  -> FFmpeg 硬解码
+  -> 统一合成 NV12 帧
+  -> 写入虚拟摄像头 (DirectShow)
+  -> 腾讯会议 / Zoom / OBS 等应用读取
 ```
 
-连接方向：PC (Client) 主动连接 Phone (Server)。USB 模式使用 `adb forward tcp:9999 tcp:9999`。
+---
 
 ## 手机端
 
-入仓源码：`phone_native/`
+源码目录：`phone_native/`
 
-当前职责：
+主要模块：
 
-- Camera2 采集手机摄像头画面。
-- MediaCodec 硬编码 H.264。
-- PCP v2 组包。
-- TCP 9999 推流。
+| 文件 | 职责 |
+|------|------|
+| `CameraController.kt` | Camera2 摄像头采集 |
+| `H264Encoder.kt` | MediaCodec 硬编码为 H.264 |
+| `PcpPacketWriter.kt` | PCP v2 协议打包 |
+| `TcpStreamServer.kt` | TCP 推流服务 |
+| `StreamingService.kt` | 前台 Service 保活 |
 
-关键文件：
-
-- `CameraController.kt`
-- `H264Encoder.kt`
-- `PcpPacketWriter.kt`
-- `TcpStreamServer.kt`
-- `StreamingService.kt`
+---
 
 ## 电脑端
 
-当前 PC 端主技术栈是 `cpp/` C++/Qt/FFmpeg/DirectShow。源码在 `cpp/src/`；本机存在 `cpp/build/phonecam.exe` 和 `phonecam-virtualcam.dll`；用户确认 exe 可显示画面，腾讯会议可选择 PhoneCam。
+源码目录：`cpp/`
 
-## 当前已知限制
+技术栈：C++ / Qt6 / FFmpeg / DirectShow
 
-- 腾讯会议竖屏可显示手机画面。
-- 腾讯会议横屏显示 `Naoko` 占位图。
-- 不要把横屏写成已完成。
-- 不要把旧 Python/OBS Virtual Camera 路线写成当前能力；旧 Python 端已删除。
-- 不要再把 `cpp/` 描述成只有本机构建产物；当前仓库已有 C++ 源码。
+主要模块：
+
+| 文件 | 职责 |
+|------|------|
+| `connection_manager.cpp` | 管理 ADB forward 和 Wi-Fi 连接 |
+| `device_discovery.cpp` | 设备发现（USB / Wi-Fi / 手动 IP） |
+| `pcp_receiver.cpp` | PCP 协议接收与解析 |
+| `hw_decoder.cpp` | FFmpeg H.264 硬解码 |
+| `final_frame_composer.cpp` | 统一画面变换、缩放、NV12 合成 |
+| `virtual_cam_filter.cpp` | DirectShow 虚拟摄像头滤镜（DLL） |
+| `main_window.cpp` | Qt 主窗口和 UI 状态 |
+
+---
+
+## 连接方式
+
+### USB 模式
+
+PC 端通过 ADB 建立 `adb forward tcp:9999 tcp:9999`，将手机的 9999 端口映射到电脑本地。PC 端连接 `127.0.0.1:9999`。
+
+### Wi-Fi 模式
+
+PC 端直接连接手机的局域网 IP 和 9999 端口。
+
+---
+
+## 相关文档
+
+- 协议说明：[protocol.md](protocol.md)
+- 用户手册：[user-manual.md](user-manual.md)
