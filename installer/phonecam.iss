@@ -1,6 +1,11 @@
 ; PhoneCam Windows Installer
 ; Build with Inno Setup 6: http://jrsoftware.org/isinfo.php
 ;
+; Usage:
+;   1. Build PhoneCam in Release:  cmake --build cpp/build --config Release
+;   2. Prepare distribution files:  powershell -File installer/prepare-dist.ps1 -BuildType Release
+;   3. Compile this script with ISCC:  iscc installer\phonecam.iss
+;
 ; This script installs the PhoneCam desktop application and optionally
 ; launches the ADB setup wizard to download Android Platform Tools from
 ; the Tsinghua TUNA mirror.
@@ -35,9 +40,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "enableusb"; Description: "启用 USB 数据线连接（将从清华 TUNA 镜像下载 Android Platform Tools / ADB）"; GroupDescription: "连接选项:"; Flags: checked
 
 [Files]
-; 主程序。实际发布前需要先用 windeployqt 补齐 Qt/FFMPEG 依赖 DLL。
-Source: "..\cpp\build\phonecam.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\cpp\build\phonecam-adb-setup.exe"; DestDir: "{app}"; Flags: ignoreversion
+; 递归安装 prepare-dist.ps1 准备好的所有文件（程序、DLL、Qt 插件等）
+Source: "..\dist\staging\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
