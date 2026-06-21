@@ -79,6 +79,7 @@ private slots:
     void onDeviceSelected(int index);
     void onRefreshDevices();
     void onManualConnect();
+    void onInstallAdb();
 
 
 protected:

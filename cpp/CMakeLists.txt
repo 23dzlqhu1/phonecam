@@ -48,8 +48,26 @@ if(WIN32)
     target_link_libraries(phonecam PRIVATE ws2_32 iphlpapi)
 endif()
 
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# ADB Setup Wizard (phonecam-adb-setup.exe)
+# Standalone tool for downloading ADB from a mirror during install
+# or later from the main application's settings.
+# ═══════════════════════════════════════════════════════════════
+qt_add_executable(phonecam-adb-setup WIN32
+    src/adb_setup/main.cpp
+    src/adb_setup/setup_window.cpp
+    src/adb_setup/setup_window.h
+)
+
+target_include_directories(phonecam-adb-setup PRIVATE src)
+
+target_link_libraries(phonecam-adb-setup PRIVATE
+    Qt6::Widgets
+    Qt6::Network
+)
+
+# ═══════════════════════════════════════════════════════════════
 # Virtual Camera DLL (phonecam-virtualcam.dll)
 # Separate target — NO Qt dependency
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 add_subdirectory(src/vcam)

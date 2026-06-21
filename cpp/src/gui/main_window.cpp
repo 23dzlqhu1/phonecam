@@ -462,6 +462,17 @@ void MainWindow::setupUi() {
     manualBtn->setCursor(Qt::PointingHandCursor);
     connect(manualBtn, &QPushButton::clicked, this, &MainWindow::onManualConnect);
     devSelRow->addWidget(manualBtn);
+
+    // ADB 安装向导按钮（当 ADB 未安装时可手动补票）
+    QPushButton* adbSetupBtn = new QPushButton(QString::fromUtf8("安装 ADB"));
+    adbSetupBtn->setStyleSheet(
+        "QPushButton { font: 10px 'Segoe UI'; color: #2b6cb0; background: #e8f0fe; "
+        "border: 1px solid #90b4e0; border-radius: 3px; padding: 2px 8px; }"
+        "QPushButton:hover { background: #d6e6fa; }");
+    adbSetupBtn->setCursor(Qt::PointingHandCursor);
+    connect(adbSetupBtn, &QPushButton::clicked, this, &MainWindow::onInstallAdb);
+    devSelRow->addWidget(adbSetupBtn);
+
     devSelCol->addLayout(devSelRow);
     topLayout->addLayout(devSelCol);
 
@@ -946,6 +957,24 @@ void MainWindow::onManualConnect() {
     // Auto-select the manual device
     QString manualId = QString("manual:%1:%2").arg(host).arg(port);
     m_connManager->selectDevice(manualId);
+}
+
+void MainWindow::onInstallAdb() {
+    // 启动与 phonecam.exe 同目录下的 ADB 安装向导
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString setupPath = QDir(appDir).absoluteFilePath("phonecam-adb-setup.exe");
+
+    if (!QFileInfo::exists(setupPath)) {
+        QMessageBox::warning(this, QString::fromUtf8("未找到安装向导"),
+            QString::fromUtf8("找不到 ADB 安装向导：%1\n请重新安装 PhoneCam。").arg(setupPath));
+        return;
+    }
+
+    bool started = QProcess::startDetached(setupPath, QStringList(), appDir);
+    if (!started) {
+        QMessageBox::critical(this, QString::fromUtf8("启动失败"),
+            QString::fromUtf8("无法启动 ADB 安装向导：%1").arg(setupPath));
+    }
 }
 
 void MainWindow::onExportLogs() {
