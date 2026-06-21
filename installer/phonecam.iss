@@ -32,12 +32,11 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "enableusb"; Description: "启用 USB 数据线连接（将从清华 TUNA 镜像下载 Android Platform Tools / ADB）"; GroupDescription: "连接选项:"; Flags: checked
+Name: "enableusb"; Description: "Enable USB connection (downloads Android Platform Tools / ADB from Tsinghua TUNA mirror)"; GroupDescription: "Connection options:"
 
 [Files]
 ; 递归安装 prepare-dist.ps1 准备好的所有文件（程序、DLL、Qt 插件等）
