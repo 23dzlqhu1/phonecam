@@ -75,9 +75,16 @@ foreach ($dll in $dlls) {
 }
 
 # 复制 Qt 插件目录
+# 优先从 vcpkg 安装目录中的 Qt6/plugins 复制（包含 Release 版插件）
+$vcpkgQtPluginsDir = Join-Path $buildDir "vcpkg_installed\x64-windows\Qt6\plugins"
 $pluginDirs = @("platforms", "styles", "tls", "networkinformation")
 foreach ($dir in $pluginDirs) {
-    $src = Join-Path $buildDir $dir
+    # 先尝试 vcpkg 的 Qt6/plugins
+    $src = Join-Path $vcpkgQtPluginsDir $dir
+    # 回退到 build 根目录（兼容旧构建）
+    if (-not (Test-Path $src)) {
+        $src = Join-Path $buildDir $dir
+    }
     if (-not (Test-Path $src)) {
         continue
     }
@@ -85,6 +92,7 @@ foreach ($dir in $pluginDirs) {
     Copy-Item -Recurse $src $dest
     if ($BuildType -eq "Release") {
         Get-ChildItem -Recurse -Path $dest -Filter "*d.dll" | Remove-Item -Force
+        Get-ChildItem -Recurse -Path $dest -Filter "*.pdb" | Remove-Item -Force
     }
     elseif ($BuildType -eq "Debug") {
         Get-ChildItem -Recurse -Path $dest -Filter "*.dll" | ForEach-Object {
