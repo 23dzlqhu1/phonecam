@@ -1018,11 +1018,16 @@ void MainWindow::onExportLogs() {
             verProc.waitForFinished(3000);
             ts << "Windows: " << verProc.readAllStandardOutput().trimmed() << "\n";
 #endif
-            // ADB version
-            QProcess adbProc;
-            adbProc.start("adb", QStringList() << "version");
-            adbProc.waitForFinished(3000);
-            ts << "ADB: " << adbProc.readAllStandardOutput().trimmed() << "\n";
+            // ADB version（使用 ConnectionManager 找到的 ADB 路径）
+            QString adbPath = m_connManager->adbPath();
+            if (!adbPath.isEmpty()) {
+                QProcess adbProc;
+                adbProc.start(adbPath, QStringList() << "version");
+                adbProc.waitForFinished(3000);
+                ts << "ADB: " << adbProc.readAllStandardOutput().trimmed() << "\n";
+            } else {
+                ts << "ADB: not found\n";
+            }
 
             ts << "Exe path: " << QCoreApplication::applicationFilePath() << "\n";
             ts << "Working dir: " << QDir::currentPath() << "\n";

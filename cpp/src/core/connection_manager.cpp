@@ -8,6 +8,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QtConcurrent>
+#include <QSettings>
+#include <QCoreApplication>
 
 namespace phonecam {
 
@@ -372,25 +374,91 @@ DeviceCandidate* ConnectionManager::findCandidate(const QString& id) {
     return nullptr;
 }
 
-QString ConnectionManager::findAdb() {
-    QString adb = QStandardPaths::findExecutable("adb");
-    if (!adb.isEmpty()) return adb;
-    QFile props("D:/PhoneCam/phone_native/local.properties");
-    if (props.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QTextStream in(&props);
-        QString line;
-        while (in.readLineInto(&line)) {
-            if (line.startsWith("sdk.dir=")) {
-                QString sdkDir = line.mid(8).trimmed().replace("\\:", ":").replace("\\\\", "\\");
-                QString candidate = sdkDir + "/platform-tools/adb.exe";
-                if (QFileInfo::exists(candidate)) return candidate;
-            }
+// 从 local.properties 中解析 sdk.dir（支持 Gradle 的 Windows 路径转义）
+static QString readSdkDirFromLocalProperties(const QString& filePath) {
+    QFile props(filePath);
+    if (!props.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+    QTextStream in(&props);
+    QString line;
+    while (in.readLineInto(&line)) {
+        if (line.startsWith("sdk.dir=")) {
+            return line.mid(8).trimmed()
+                .replace("\\:", ":")
+                .replace("\\\\", "\\");
         }
     }
-    QStringList paths = {"D:/Android/Sdk/platform-tools/adb.exe",
-                         "C:/Android/Sdk/platform-tools/adb.exe",
-                         QDir::homePath() + "/AppData/Local/Android/Sdk/platform-tools/adb.exe"};
-    for (const QString& p : paths) if (QFileInfo::exists(p)) return p;
+    return {};
+}
+
+// 从程序所在目录向上回溯，寻找 phone_native/local.properties
+static QString findProjectLocalProperties() {
+    QString appDir = QCoreApplication::applicationDirPath();
+    QDir dir(appDir);
+    for (int i = 0; i < 6; ++i) {
+        QString candidate = dir.absoluteFilePath("phone_native/local.properties");
+        if (QFileInfo::exists(candidate)) return candidate;
+        if (!dir.cdUp()) break;
+    }
+    return {};
+}
+
+QString ConnectionManager::findAdb() {
+    QSettings settings(QSettings::IniFormat, QSettings::UserScope,
+                       "PhoneCam", "PhoneCam");
+
+    // 1. 环境变量显式覆盖（最高优先级）
+    QString envPath = qEnvironmentVariable("PHONECAM_ADB_PATH");
+    if (!envPath.isEmpty() && QFileInfo::exists(envPath)) {
+        return envPath;
+    }
+
+    // 2. 使用上次缓存的成功路径
+    QString cached = settings.value("adb/path").toString();
+    if (!cached.isEmpty() && QFileInfo::exists(cached)) {
+        return cached;
+    }
+
+    // 3. 在系统 PATH 中查找 adb/adb.exe
+    QString fromPath = QStandardPaths::findExecutable("adb");
+    if (!fromPath.isEmpty()) {
+        settings.setValue("adb/path", fromPath);
+        return fromPath;
+    }
+
+    // 收集所有可能的 Android SDK 根目录
+    QStringList sdkRoots;
+
+    // 4. 从环境变量 ANDROID_SDK_ROOT / ANDROID_HOME 推导
+    for (const char* name : {"ANDROID_SDK_ROOT", "ANDROID_HOME"}) {
+        QString val = qEnvironmentVariable(name);
+        if (!val.isEmpty()) sdkRoots.append(val);
+    }
+
+    // 5. 从项目 local.properties 推导
+    QString localProps = findProjectLocalProperties();
+    if (!localProps.isEmpty()) {
+        QString sdkDir = readSdkDirFromLocalProperties(localProps);
+        if (!sdkDir.isEmpty()) sdkRoots.append(sdkDir);
+    }
+
+    // 6. 常见安装路径
+    sdkRoots << QDir::homePath() + "/AppData/Local/Android/Sdk"
+             << "C:/Android/Sdk"
+             << "D:/Android/Sdk"
+             << QDir::homePath() + "/Android/Sdk";
+
+    // 去重并尝试 platform-tools/adb.exe
+    QSet<QString> seen;
+    for (const QString& root : sdkRoots) {
+        if (root.isEmpty() || seen.contains(root)) continue;
+        seen.insert(root);
+        QString candidate = QDir(root).absoluteFilePath("platform-tools/adb.exe");
+        if (QFileInfo::exists(candidate)) {
+            settings.setValue("adb/path", candidate);
+            return candidate;
+        }
+    }
+
     return {};
 }
 

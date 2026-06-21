@@ -66,6 +66,9 @@ public:
 
     ConnectionInfo info() const { return m_info; }
 
+    // 返回当前使用的 ADB 可执行文件路径（为空表示未找到）
+    QString adbPath() { return findAdb(); }
+
 signals:
     void stateChanged(const phonecam::ConnectionInfo& info);
     void connectionReady(const QString& url);
