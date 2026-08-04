@@ -1,108 +1,246 @@
-# 为 Inno Setup 准备发布文件
+# 为 Inno Setup 准备发布文件，并在发布前验证全部 PE 运行时依赖。
 # 用法：
 #   .\prepare-dist.ps1 -BuildType Release
-#   .\prepare-dist.ps1 -BuildType Debug
+#   .\prepare-dist.ps1 -BuildType Release -VcRedistPath C:\path\to\VC_redist.x64.exe
 
+[CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
-    [string]$BuildType = "Release"
+    [string]$BuildType = "Release",
+
+    [string]$VcRedistPath = "",
+
+    [string]$DumpbinPath = ""
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$triplet = "x64-windows"
 
 if ($BuildType -eq "Debug") {
     $buildDir = Join-Path $repoRoot "cpp\build"
 } else {
     $buildDir = Join-Path $repoRoot "cpp\build_release"
 }
+
 $stagingDir = Join-Path $repoRoot "dist\staging"
+$vcpkgInstalledDir = Join-Path $buildDir "vcpkg_installed\$triplet"
+$vcpkgRuntimeDir = if ($BuildType -eq "Debug") {
+    Join-Path $vcpkgInstalledDir "debug\bin"
+} else {
+    Join-Path $vcpkgInstalledDir "bin"
+}
+
+function Copy-RuntimeDlls {
+    param(
+        [string]$SourceDir,
+        [string]$DestinationDir
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceDir -PathType Container)) {
+        return 0
+    }
+
+    $count = 0
+    Get-ChildItem -LiteralPath $SourceDir -File -Filter "*.dll" |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $DestinationDir -Force
+            $count = $count + 1
+        }
+    return $count
+}
+
+function Remove-OppositeModeQtPlugins {
+    param(
+        [string]$PluginDir,
+        [string]$Mode
+    )
+
+    $dlls = @(Get-ChildItem -LiteralPath $PluginDir -Recurse -File -Filter "*.dll")
+    foreach ($dll in $dlls) {
+        if ($dll.Name.EndsWith("d.dll", [StringComparison]::OrdinalIgnoreCase)) {
+            $releaseName = $dll.Name.Substring(0, $dll.Name.Length - 5) + ".dll"
+            $releasePath = Join-Path $dll.DirectoryName $releaseName
+            if ($Mode -eq "Release" -and (Test-Path -LiteralPath $releasePath -PathType Leaf)) {
+                Remove-Item -LiteralPath $dll.FullName -Force
+            }
+        } elseif ($Mode -eq "Debug") {
+            $debugName = $dll.BaseName + "d.dll"
+            $debugPath = Join-Path $dll.DirectoryName $debugName
+            if (Test-Path -LiteralPath $debugPath -PathType Leaf) {
+                Remove-Item -LiteralPath $dll.FullName -Force
+            }
+        }
+    }
+
+    if ($Mode -eq "Release") {
+        Get-ChildItem -LiteralPath $PluginDir -Recurse -File -Filter "*.pdb" |
+            Remove-Item -Force
+    }
+}
+
+function Find-VisualCppRedistributable {
+    param([string]$RequestedPath)
+
+    if ($RequestedPath) {
+        if (-not (Test-Path -LiteralPath $RequestedPath -PathType Leaf)) {
+            throw "指定的 VC++ 运行库不存在：$RequestedPath"
+        }
+        return (Resolve-Path -LiteralPath $RequestedPath).Path
+    }
+
+    if ($env:VCToolsRedistDir) {
+        $candidate = Join-Path $env:VCToolsRedistDir "vc_redist.x64.exe"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+    $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+        $installationPath = (& $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest `
+            -property installationPath | Select-Object -First 1)
+
+        if ($installationPath) {
+            $redistRoot = Join-Path $installationPath "VC\Redist\MSVC"
+            if (Test-Path -LiteralPath $redistRoot -PathType Container) {
+                $candidate = Get-ChildItem -LiteralPath $redistRoot -Recurse -File `
+                    -Filter "vc_redist.x64.exe" |
+                    Sort-Object FullName -Descending |
+                    Select-Object -First 1
+                if ($candidate) {
+                    return $candidate.FullName
+                }
+            }
+        }
+    }
+
+    return ""
+}
+
+function Assert-MicrosoftSignature {
+    param([string]$Path)
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne "Valid" -or
+        -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.Subject -notmatch "Microsoft Corporation") {
+        throw "VC++ 运行库签名验证失败，拒绝打包：$Path（状态：$($signature.Status)）"
+    }
+}
+
+function Stage-VisualCppRedistributable {
+    param(
+        [string]$RequestedPath,
+        [string]$DestinationDir
+    )
+
+    $sourcePath = Find-VisualCppRedistributable -RequestedPath $RequestedPath
+    if (-not $sourcePath) {
+        $downloadDir = Join-Path $repoRoot "dist\prerequisites"
+        $sourcePath = Join-Path $downloadDir "VC_redist.x64.exe"
+        New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            $downloadUrl = "https://aka.ms/vc14/vc_redist.x64.exe"
+            Write-Host "Downloading Microsoft VC++ Redistributable: $downloadUrl"
+            Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $sourcePath
+        }
+    }
+
+    Assert-MicrosoftSignature -Path $sourcePath
+
+    $redistDestination = Join-Path $DestinationDir "redist"
+    New-Item -ItemType Directory -Path $redistDestination -Force | Out-Null
+    Copy-Item -LiteralPath $sourcePath `
+        -Destination (Join-Path $redistDestination "VC_redist.x64.exe") -Force
+}
 
 Write-Host "Build directory: $buildDir"
 Write-Host "Staging directory: $stagingDir"
 
-if (-not (Test-Path $buildDir)) {
+if (-not (Test-Path -LiteralPath $buildDir -PathType Container)) {
     throw "构建目录不存在：$buildDir，请先运行 cmake --build"
 }
+if (-not (Test-Path -LiteralPath $vcpkgRuntimeDir -PathType Container)) {
+    throw "vcpkg 运行库目录不存在：$vcpkgRuntimeDir"
+}
 
-# 清理并创建 staging 目录
-if (Test-Path $stagingDir) {
-    Remove-Item -Recurse -Force $stagingDir
+if (Test-Path -LiteralPath $stagingDir) {
+    Remove-Item -LiteralPath $stagingDir -Recurse -Force
 }
 New-Item -ItemType Directory -Path $stagingDir | Out-Null
 
 # 主程序和安装向导
-$binaries = @("phonecam.exe", "phonecam-adb-setup.exe")
-foreach ($bin in $binaries) {
-    $src = Join-Path $buildDir $bin
-    if (-not (Test-Path $src)) {
-        throw "找不到文件：$src，请确认已构建 $BuildType 版本"
+foreach ($binaryName in @("phonecam.exe", "phonecam-adb-setup.exe")) {
+    $sourcePath = Join-Path $buildDir $binaryName
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "找不到文件：$sourcePath，请确认已构建 $BuildType 版本"
     }
-    Copy-Item $src $stagingDir
+    Copy-Item -LiteralPath $sourcePath -Destination $stagingDir -Force
 }
 
 # 虚拟摄像头 DLL
-$vcamPath1 = Join-Path $buildDir "phonecam-virtualcam.dll"
-$vcamPath2 = Join-Path $buildDir "src\vcam\phonecam-virtualcam.dll"
-$vcamFound = $false
-if (Test-Path $vcamPath1) {
-    Copy-Item $vcamPath1 $stagingDir
-    $vcamFound = $true
+$virtualCameraCandidates = @(
+    (Join-Path $buildDir "phonecam-virtualcam.dll"),
+    (Join-Path $buildDir "src\vcam\phonecam-virtualcam.dll")
+)
+$virtualCameraPath = $virtualCameraCandidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+if (-not $virtualCameraPath) {
+    throw "找不到 phonecam-virtualcam.dll，请确认已构建 $BuildType 版本"
 }
-elseif (Test-Path $vcamPath2) {
-    Copy-Item $vcamPath2 $stagingDir
-    $vcamFound = $true
-}
-if (-not $vcamFound) {
-    throw "找不到文件：phonecam-virtualcam.dll，请确认已构建 $BuildType 版本"
-}
+Copy-Item -LiteralPath $virtualCameraPath -Destination $stagingDir -Force
 
-# 复制 Qt/FFMPEG 等运行时 DLL（build 目录下 CMake 已自动拷贝）
-$dlls = Get-ChildItem -Path $buildDir -Filter "*.dll" -File
-foreach ($dll in $dlls) {
-    $isDebug = $dll.Name -cmatch "d\.dll$"
-    if ($BuildType -eq "Release" -and $isDebug) {
+# 先复制 vcpkg 对应配置的完整运行库集合，再以构建目录中的 app-local DLL 覆盖。
+# 不再使用“文件名以 d.dll 结尾就是 Debug DLL”的错误判断；zstd.dll 会被该判断误删。
+$vcpkgDllCount = Copy-RuntimeDlls -SourceDir $vcpkgRuntimeDir -DestinationDir $stagingDir
+$buildDllCount = Copy-RuntimeDlls -SourceDir $buildDir -DestinationDir $stagingDir
+Write-Host "Copied runtime DLLs: vcpkg=$vcpkgDllCount, build=$buildDllCount"
+
+# Qt 动态插件不出现在 EXE 的导入表中，必须单独打包。
+$vcpkgQtPluginsDir = Join-Path $vcpkgInstalledDir "Qt6\plugins"
+$pluginDirs = @("platforms", "styles", "tls", "networkinformation", "imageformats")
+foreach ($pluginDirName in $pluginDirs) {
+    $sourceDir = Join-Path $vcpkgQtPluginsDir $pluginDirName
+    if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
+        $sourceDir = Join-Path $buildDir $pluginDirName
+    }
+    if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
+        if ($pluginDirName -eq "platforms") {
+            throw "找不到必需的 Qt platforms 插件目录"
+        }
+        Write-Warning "未找到可选 Qt 插件目录：$pluginDirName"
         continue
     }
-    if ($BuildType -eq "Debug" -and -not $isDebug) {
-        $debugName = $dll.BaseName + "d.dll"
-        if (Test-Path (Join-Path $buildDir $debugName)) {
-            continue
-        }
-    }
-    Copy-Item $dll.FullName $stagingDir
+
+    $destinationDir = Join-Path $stagingDir $pluginDirName
+    Copy-Item -LiteralPath $sourceDir -Destination $destinationDir -Recurse -Force
+    Remove-OppositeModeQtPlugins -PluginDir $destinationDir -Mode $BuildType
 }
 
-# 复制 Qt 插件目录
-# 优先从 vcpkg 安装目录中的 Qt6/plugins 复制（包含 Release 版插件）
-$vcpkgQtPluginsDir = Join-Path $buildDir "vcpkg_installed\x64-windows\Qt6\plugins"
-$pluginDirs = @("platforms", "styles", "tls", "networkinformation")
-foreach ($dir in $pluginDirs) {
-    # 先尝试 vcpkg 的 Qt6/plugins
-    $src = Join-Path $vcpkgQtPluginsDir $dir
-    # 回退到 build 根目录（兼容旧构建）
-    if (-not (Test-Path $src)) {
-        $src = Join-Path $buildDir $dir
-    }
-    if (-not (Test-Path $src)) {
-        continue
-    }
-    $dest = Join-Path $stagingDir $dir
-    Copy-Item -Recurse $src $dest
-    if ($BuildType -eq "Release") {
-        Get-ChildItem -Recurse -Path $dest -Filter "*d.dll" | Remove-Item -Force
-        Get-ChildItem -Recurse -Path $dest -Filter "*.pdb" | Remove-Item -Force
-    }
-    elseif ($BuildType -eq "Debug") {
-        Get-ChildItem -Recurse -Path $dest -Filter "*.dll" | ForEach-Object {
-            $debugName = $_.BaseName + "d.dll"
-            if (Test-Path (Join-Path $_.DirectoryName $debugName)) {
-                Remove-Item $_.FullName -Force
-            }
-        }
-    }
+if ($BuildType -eq "Release") {
+    Stage-VisualCppRedistributable `
+        -RequestedPath $VcRedistPath `
+        -DestinationDir $stagingDir
+} else {
+    Write-Warning "Debug staging 仅用于开发调试，不能作为公开安装包发布。"
 }
 
-Write-Host "已准备好 $BuildType 发布文件到：$stagingDir" -ForegroundColor Green
+# 最终门禁：递归检查每个 EXE/DLL 的导入依赖，任何未打包 DLL 都会使发布失败。
+$verifyScript = Join-Path $PSScriptRoot "verify-runtime-deps.ps1"
+if (-not (Test-Path -LiteralPath $verifyScript -PathType Leaf)) {
+    throw "找不到依赖检查脚本：$verifyScript"
+}
+& $verifyScript `
+    -StagingDir $stagingDir `
+    -BuildType $BuildType `
+    -DumpbinPath $DumpbinPath
+
+Write-Host "已准备好并验证 $BuildType 发布文件：$stagingDir" -ForegroundColor Green
 Write-Host "现在可以用 Inno Setup 编译 installer\phonecam.iss" -ForegroundColor Green
