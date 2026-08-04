@@ -1,8 +1,16 @@
 {
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "phonecam",
-  "version": "2.0.0",
+  "version-string": "2.0.1",
+  "description": "Windows desktop client for PhoneCam",
+  "license": "MIT",
+  "supports": "windows & x64",
   "dependencies": [
-    "qtbase",
-    "ffmpeg"
+    "ffmpeg",
+    {
+      "name": "pkgconf",
+      "host": true
+    },
+    "qtbase"
   ]
 }
