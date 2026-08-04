@@ -7,7 +7,7 @@
 ;   3. Compile this script:        iscc installer\phonecam.iss
 
 #define MyAppName "PhoneCam"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "PhoneCam"
 #define MyAppExeName "phonecam.exe"
 #define MyAppAdbSetupExeName "phonecam-adb-setup.exe"
