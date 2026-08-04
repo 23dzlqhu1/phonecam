@@ -8,7 +8,7 @@
 
 ### 1. Windows 安装时提示“无法验证发布者”
 
-**现象**：双击 `PhoneCam-2.0.0-Setup.exe` 时，Windows 显示“Windows 已保护你的电脑”或“无法验证发布者”。
+**现象**：双击 `PhoneCam-2.0.1-Setup.exe` 时，Windows 显示“Windows 已保护你的电脑”或“无法验证发布者”。
 
 **原因**：我们目前使用的是自签名证书，还没有购买商业代码签名证书。
 
@@ -71,7 +71,7 @@
 
 ## 反馈新问题
 
-如果你遇到了上面没有列出的问题，欢迎提交 [Issue](https://github.com/23dzlqhu1/phonecam/issues)，并附上：
+如果你遇到了上面没有列出的问题，欢迎提交 [Issue](https://github.com/Naokoisme/phonecam/issues)，并附上：
 
 1. 手机品牌和 Android 版本
 2. Windows 版本

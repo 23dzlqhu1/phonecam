@@ -4,7 +4,7 @@
 
 PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，就能把 Android 手机变成 Windows 电脑的网络摄像头，支持 **Wi-Fi 无线连接** 和 **USB 数据线连接** 两种方式。兼容腾讯会议、Zoom、OBS、钉钉、微信等所有使用摄像头的 Windows 应用。
 
-[![GitHub Release](https://img.shields.io/github/v/release/23dzlqhu1/phonecam?style=flat-square)](https://github.com/23dzlqhu1/phonecam/releases/latest)
+[![GitHub Release](https://img.shields.io/github/v/release/Naokoisme/phonecam?style=flat-square)](https://github.com/Naokoisme/phonecam/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%207.0%2B%20%7C%20Windows%2010%2B-green.svg?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-beta-orange.svg?style=flat-square)]()
@@ -44,11 +44,11 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 ## 下载：我该下哪个文件？
 
-前往 [GitHub Releases](https://github.com/23dzlqhu1/phonecam/releases/latest) 下载最新版本：
+前往 [GitHub Releases](https://github.com/Naokoisme/phonecam/releases/latest) 下载最新版本：
 
 | 平台 | 下载文件 | 大小 | 说明 |
 |------|---------|------|------|
-| **Windows 电脑** | `PhoneCam-2.0.0-Setup.exe` | 约 25 MB | 双击安装，自动配置虚拟摄像头驱动 |
+| **Windows 电脑** | `PhoneCam-2.0.1-Setup.exe` | 约 25 MB | 双击安装，自动配置虚拟摄像头驱动 |
 | **Android 手机** | `PhoneCam-Android-v0.2.8.apk` | 约 3 MB | 下载到手机安装，需允许“安装未知来源应用” |
 
 > 💡 **提示**：Windows 安装过程中如果勾选“启用 USB 连接”，安装向导会自动从清华 TUNA 镜像下载并配置 ADB。
@@ -59,7 +59,7 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 ### Windows 端
 
-1. 下载 `PhoneCam-2.0.0-Setup.exe`
+1. 下载 `PhoneCam-2.0.1-Setup.exe`
 2. 双击运行，点击“下一步”
 3. 建议勾选“**启用 USB 连接**”（会自动配置 ADB）
 4. 安装完成后，桌面上会出现 **PhoneCam** 图标
@@ -152,7 +152,7 @@ PhoneCam 支持两种方式。如果你是第一次用，**推荐先用 USB 模�
 
 ![PhoneCam 图标预览](docs/phonecam-icon-preview.png)
 
-> 📸 更多实际使用截图和演示视频将陆续补充。如果你想看某个特定场景的截图，欢迎提 [Issue](https://github.com/23dzlqhu1/phonecam/issues)。
+> 📸 更多实际使用截图和演示视频将陆续补充。如果你想看某个特定场景的截图，欢迎提 [Issue](https://github.com/Naokoisme/phonecam/issues)。
 
 ---
 
