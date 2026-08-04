@@ -1,6 +1,13 @@
 name: Build and publish Windows installer
 
 on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/windows-release.yml
+      - cpp/**
+      - installer/**
   push:
     branches:
       - release/v2.0.1
@@ -30,7 +37,7 @@ jobs:
   windows-installer:
     name: Windows x64 installer
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Check out source
