@@ -29,18 +29,18 @@ PhoneCam 可以把你的 Android 手机变成 Windows 电脑的摄像头。安�
 
 ## 第一步：下载安装包
 
-前往 [GitHub Releases](https://github.com/23dzlqhu1/phonecam/releases/latest) 下载：
+前往 [GitHub Releases](https://github.com/Naokoisme/phonecam/releases/latest) 下载：
 
 | 平台 | 文件 | 说明 |
 |------|------|------|
-| Windows | `PhoneCam-2.0.0-Setup.exe` | 电脑端安装程序 |
+| Windows | `PhoneCam-2.0.1-Setup.exe` | 电脑端安装程序 |
 | Android | `PhoneCam-Android-v0.2.8.apk` | 手机端 App |
 
 ---
 
 ## 第二步：安装 Windows 端
 
-1. 双击 `PhoneCam-2.0.0-Setup.exe`
+1. 双击 `PhoneCam-2.0.1-Setup.exe`
 2. 按向导提示点击“下一步”
 3. 在选择附加任务时，建议勾选 **“启用 USB 连接”**
    - 这会触发 ADB 下载向导，自动从清华 TUNA 镜像下载 ADB 工具
@@ -165,7 +165,7 @@ PhoneCam 可以把你的 Android 手机变成 Windows 电脑的摄像头。安�
 
 ## 如果还是不行
 
-请收集以下信息，然后提 [Issue](https://github.com/23dzlqhu1/phonecam/issues)：
+请收集以下信息，然后提 [Issue](https://github.com/Naokoisme/phonecam/issues)：
 
 1. 手机品牌和 Android 版本
 2. Windows 版本
