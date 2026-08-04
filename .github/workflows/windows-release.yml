@@ -1,0 +1,134 @@
+name: Build and publish Windows installer
+
+on:
+  push:
+    branches:
+      - release/v2.0.1
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish or replace the assets in GitHub Release v2.0.1
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-v2.0.1-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_VERSION: 2.0.1
+  VCPKG_TAG: 2026.07.29
+  VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+  VCPKG_DOWNLOADS: ${{ github.workspace }}\.vcpkg-downloads
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-bincache
+
+jobs:
+  windows-installer:
+    name: Windows x64 installer
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Initialize vcpkg cache directories
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DOWNLOADS | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+      - name: Restore vcpkg caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.VCPKG_DOWNLOADS }}
+            ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: windows-2022-vcpkg-${{ env.VCPKG_TAG }}-${{ hashFiles('cpp/vcpkg.json') }}
+          restore-keys: |
+            windows-2022-vcpkg-${{ env.VCPKG_TAG }}-
+
+      - name: Install pinned vcpkg
+        shell: pwsh
+        run: |
+          git clone --branch $env:VCPKG_TAG --depth 1 https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          if ($LASTEXITCODE -ne 0) { throw "Failed to clone vcpkg $env:VCPKG_TAG." }
+
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw "Failed to bootstrap vcpkg." }
+
+      - name: Build PhoneCam Release
+        shell: pwsh
+        run: |
+          & .\cpp\build_release.bat
+          if ($LASTEXITCODE -ne 0) { throw "Windows Release build failed." }
+
+      - name: Stage and verify runtime dependencies
+        shell: pwsh
+        run: |
+          & .\installer\prepare-dist.ps1 -BuildType Release
+          if ($LASTEXITCODE -ne 0) { throw "Dependency staging or verification failed." }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.7.1 --allow-downgrade --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install Inno Setup 6.7.1." }
+
+      - name: Compile installer and checksum
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            throw "Inno Setup compiler was not found at $iscc."
+          }
+
+          & $iscc ".\installer\phonecam.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+
+          $installer = Join-Path $PWD "dist\PhoneCam-$env:APP_VERSION-Setup.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Expected installer was not created: $installer"
+          }
+
+          $checksum = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksumPath = "$installer.sha256"
+          "$checksum *$(Split-Path -Leaf $installer)" |
+            Set-Content -LiteralPath $checksumPath -Encoding ascii -NoNewline
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: PhoneCam-${{ env.APP_VERSION }}-Windows-x64
+          path: |
+            dist/PhoneCam-${{ env.APP_VERSION }}-Setup.exe
+            dist/PhoneCam-${{ env.APP_VERSION }}-Setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release v2.0.1
+        if: ${{ github.event_name == 'push' || inputs.publish_release == true }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:APP_VERSION"
+          $installer = "dist\PhoneCam-$env:APP_VERSION-Setup.exe"
+          $checksum = "$installer.sha256"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer $checksum --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag $installer $checksum `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title "PhoneCam $tag" `
+              --generate-notes
+          }
+
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish GitHub Release $tag." }
