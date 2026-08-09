@@ -59,7 +59,7 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 ### Windows 端
 
-1. 下载 `PhoneCam-2.0.1-Setup.exe`
+1. 下载 `PhoneCam-2.0.2-Setup.exe`
 2. 双击运行，点击“下一步”
 3. 建议勾选“**启用 USB 连接**”（会自动配置 ADB）
 4. 安装完成后，桌面上会出现 **PhoneCam** 图标
