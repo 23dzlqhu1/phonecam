@@ -26,8 +26,8 @@ struct ConnectionInfo {
 
 // Device candidate model
 struct DeviceCandidate {
-    QString id;           // "usb:<serial>" | "wifi:<ip>" | "manual:<host>:<port>"
-    QString displayName;  // "USB - vivo V2243A" | "WiFi - 192.168.43.1"
+    QString id;           // "usb:<serial>" | "wifi:<deviceId>" | "manual:<host>:<port>"
+    QString displayName;  // "USB - vivo V2243A" | "WiFi - OPPO PLC110 (10.72.201.83)"
     QString transport;    // "usb", "wifi", "manual"
     QString url;          // "host:port"
     QString adbSerial;    // ADB serial for USB (empty otherwise)
@@ -38,9 +38,9 @@ struct DeviceCandidate {
 
 // Aggregated connection diagnostics
 struct ConnectionDiagnostics {
-    QString gatewayIp;
-    QStringList localNics;
-    QVector<ProbeDiagnostic> probeResults;
+    QStringList localNics;          // 本地有效 IPv4 地址
+    QStringList discoveryInterfaces;  // 参与 UDP discovery 广播的接口 (name + ip)
+    QString discoveryStatus;          // "ok-found" / "ok-no-devices" / "no-interfaces" / "send-failed"
     QString adbStatus;
     QStringList adbDevices;
 };

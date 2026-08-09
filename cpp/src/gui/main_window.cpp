@@ -815,15 +815,14 @@ void MainWindow::onDiagnosticsChanged(const ConnectionDiagnostics& diag) {
     // Connection status tooltip
     QStringList lines;
     lines << QString::fromUtf8("ADB: %1").arg(diag.adbStatus);
-    for (const auto& p : diag.probeResults) {
-        QString icon = (p.result == ProbeResult::Success) ? QString::fromUtf8("\u2705") :
-                       (p.result == ProbeResult::Timeout) ? QString::fromUtf8("\u23F0") :
-                       (p.result == ProbeResult::ConnectionRefused) ? QString::fromUtf8("\u274C") :
-                       QString::fromUtf8("\u26A0");
-        QString iface = p.interfaceName.isEmpty() ? QString() :
-                        QString(" [%1]").arg(p.interfaceName);
-        lines << QString("  %1 %2:%3%4 — %5").arg(icon, p.host).arg(p.port)
-                     .arg(iface, p.errorDetail);
+    if (diag.discoveryStatus == "no-interfaces" || diag.discoveryStatus == "send-failed") {
+        lines << QString::fromUtf8("UDP discovery: 未发现可用于 PhoneCam 自动发现的局域网接口");
+    } else {
+        lines << QString::fromUtf8("UDP discovery: %1 (%2 个接口)")
+            .arg(diag.discoveryStatus, QString::number(diag.discoveryInterfaces.size()));
+        for (const auto& i : diag.discoveryInterfaces) {
+            lines << QString("  %1").arg(i);
+        }
     }
     m_statusDetail->setToolTip(lines.join("\n"));
     updateDiagnosticsBar();
@@ -862,27 +861,13 @@ void MainWindow::updateDiagnosticsBar() {
             msgs << QString::fromUtf8("❌ USB 转发失败: %1").arg(c.lastError);
         }
     }
-    // WiFi/Hotspot diagnostics
-    if (diag.gatewayIp.isEmpty() && diag.localNics.isEmpty()) {
-        msgs << QString::fromUtf8("⚠ 未发现网络 — 请确认已连接手机热点或同一 WiFi");
-    } else {
-        for (const auto& p : diag.probeResults) {
-            // Build context label: "WLAN (10.142.34.164)" or just "192.168.43.1"
-            QString ctx = p.interfaceName.isEmpty() ?
-                QString("%1:%2").arg(p.host).arg(p.port) :
-                QString("%1 (%2:%3)").arg(p.interfaceName, p.host).arg(p.port);
-            if (p.result == ProbeResult::Timeout) {
-                msgs << QString::fromUtf8("⏰ %1 超时 — 手机未响应，请确认手机端已开始推流")
-                    .arg(ctx);
-            } else if (p.result == ProbeResult::ConnectionRefused) {
-                msgs << QString::fromUtf8("❌ %1 拒绝连接 — 手机端未开始推流，请打开 PhoneCam App 并点击开始")
-                    .arg(ctx);
-            } else if (p.result == ProbeResult::Unreachable) {
-                msgs << QString::fromUtf8("❌ %1 不可达 — 请确认已连接手机热点或同一 WiFi")
-                    .arg(ctx);
-            }
-        }
+    // WiFi/Hotspot diagnostics (UDP PhoneCam Discovery V1)
+    if (diag.discoveryStatus == "no-interfaces" || diag.discoveryStatus == "send-failed") {
+        msgs << QString::fromUtf8("⚠ 未发现可用于 PhoneCam 自动发现的局域网接口");
+    } else if (diag.discoveryStatus == "ok-no-devices") {
+        msgs << QString::fromUtf8("⚠ 未发现 PhoneCam — 请确认手机端已点击开始推流，并确保电脑已连接手机热点或与手机处于同一局域网；仍无法发现时可使用 USB 或手动连接");
     }
+    // "ok-found": 下拉框中已有真实 PhoneCam, 无需额外提示
     // P2-1 Loop 3: Manual device failure diagnostics
     for (const auto& c : m_connManager->candidates()) {
         if (c.transport == "manual" && c.status == "Failed") {
@@ -1073,21 +1058,15 @@ void MainWindow::onExportLogs() {
             QTextStream ts(&f);
             ts << "=== Connection Diagnostics ===\n";
             ts << "ADB status: " << m_lastDiag.adbStatus << "\n";
-            ts << "Gateway IP: " << m_lastDiag.gatewayIp << "\n";
             ts << "Local NICs: " << m_lastDiag.localNics.join(", ") << "\n";
+            ts << "Discovery status: " << m_lastDiag.discoveryStatus << "\n";
+            ts << "Discovery interfaces:\n";
+            for (const auto& i : m_lastDiag.discoveryInterfaces) {
+                ts << "  " << i << "\n";
+            }
             ts << "ADB devices:\n";
             for (const auto& d : m_lastDiag.adbDevices) {
                 ts << "  " << d << "\n";
-            }
-            ts << "Probe results:\n";
-            for (const auto& p : m_lastDiag.probeResults) {
-                QString resStr = (p.result == ProbeResult::Success) ? "OK" :
-                                 (p.result == ProbeResult::Timeout) ? "Timeout" :
-                                 (p.result == ProbeResult::ConnectionRefused) ? "Refused" :
-                                 (p.result == ProbeResult::Unreachable) ? "Unreachable" : "Unknown";
-                ts << "  " << p.host << ":" << p.port << " -> " << resStr;
-                if (!p.errorDetail.isEmpty()) ts << " (" << p.errorDetail << ")";
-                ts << "\n";
             }
             ts << "\nCandidates:\n";
             for (const auto& c : m_connManager->candidates()) {

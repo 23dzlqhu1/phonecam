@@ -44,6 +44,9 @@ import android.widget.Toast
  */
 class StreamingService : Service() {
 
+    // 8月9日修复: UDP PhoneCam Discovery V1 应答端, 生命周期绑定到推流
+    private var discoveryResponder: DiscoveryResponder? = null
+
     companion object {
         private const val TAG = "StreamingService"
         const val ACTION_START = "com.phonecam.START_STREAM"
@@ -622,6 +625,11 @@ class StreamingService : Service() {
                 server.start()
                 sTcpServer = server
 
+                // 8月9日修复: UDP DiscoveryResponder :9997 与 TCP :9999 同时可用
+                val responder = DiscoveryResponder(this, discoveryPort = 9997, tcpPort = 9999)
+                responder.start()
+                discoveryResponder = responder
+
                 // 2) 等客户端连上 (G-024: 30s → 120s, 给 PcpReceiver 重连留足裕量)
                 val deadline = System.currentTimeMillis() + 120_000
                 var waitCount = 0
@@ -709,6 +717,9 @@ class StreamingService : Service() {
         sEglRenderer = null
         try { sTcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop: ${e.message}") }
         sTcpServer = null
+        // 8月9日修复: 停止 DiscoveryResponder, 释放 9997 端口并退出 discovery 线程
+        try { discoveryResponder?.stop() } catch (e: Exception) { Log.w(TAG, "discoveryResponder.stop: ${e.message}") }
+        discoveryResponder = null
         InAppLogStore.i(TAG, "[BUG-013] 推流已完全停止 (gen=${sStreamGeneration})")
     }
 

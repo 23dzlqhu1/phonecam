@@ -206,12 +206,13 @@ void ConnectionManager::checkConnection() {
                 }
             }
 
-            DiscoveryResult discResult = m_discovery->findPhoneWithDiagnostics(m_port, 2.0);
+            // UDP PhoneCam Discovery V1: 只有通过验证的 PHONECAM_HERE 响应才成为 candidate
+            DiscoveryResult discResult = m_discovery->discover(9997, 1000);
             QVector<DeviceCandidate> wifiCandidates;
             for (const auto& dev : discResult.devices) {
                 DeviceCandidate cand;
-                cand.id = "wifi:" + dev.ip;
-                cand.displayName = QString("WiFi - %1").arg(dev.ip);
+                cand.id = "wifi:" + dev.deviceId;
+                cand.displayName = QString("WiFi - %1 (%2)").arg(dev.name, dev.ip);
                 cand.transport = "wifi";
                 cand.url = dev.url;
                 cand.status = "Found";
@@ -234,13 +235,12 @@ void ConnectionManager::checkConnection() {
                     qDebug() << "[CONN]   USB:" << c.id << c.displayName
                              << c.url << c.status;
                 }
-                qDebug() << "[CONN] Gateways found:" << discResult.diagnostics.size()
+                qDebug() << "[CONN] Discovery interfaces:" << discResult.discoveryInterfaces.size()
+                         << "status:" << discResult.discoveryStatus
+                         << "broadcastSent:" << discResult.broadcastSent
                          << "devices found:" << discResult.devices.size();
-                for (const auto& d : discResult.diagnostics) {
-                    qDebug() << "[CONN]   probe:" << d.host << ":" << d.port
-                             << "iface:" << d.interfaceName
-                             << "result:" << static_cast<int>(d.result)
-                             << d.errorDetail;
+                for (const auto& i : discResult.discoveryInterfaces) {
+                    qDebug() << "[CONN]   iface:" << i;
                 }
                 qDebug() << "[CONN] WiFi candidates this cycle:" << wifiCandidates.size();
                 for (const auto& c : wifiCandidates) {
@@ -285,9 +285,9 @@ void ConnectionManager::checkConnection() {
                     }
                 }
 
-                m_diagnostics.gatewayIp = discResult.gatewayIp;
                 m_diagnostics.localNics = discResult.networkAdapters;
-                m_diagnostics.probeResults = discResult.diagnostics;
+                m_diagnostics.discoveryInterfaces = discResult.discoveryInterfaces;
+                m_diagnostics.discoveryStatus = discResult.discoveryStatus;
                 m_diagnostics.adbStatus = adbStatus;
                 m_diagnostics.adbDevices = adbDeviceLines;
 
