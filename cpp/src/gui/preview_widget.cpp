@@ -202,8 +202,19 @@ void PreviewWidget::paintGL() {
 void PreviewWidget::renderNv12GL(const phonecam::Nv12Frame& frame) {
     const int fw = frame.width;   // 1280
     const int fh = frame.height;  // 720
-    const int widgetW = width();
-    const int widgetH = height();
+
+    // QWidget::width()/height() 返回逻辑像素（device-independent），
+    // 而 glViewport() 操作的是 OpenGL 物理 framebuffer。Windows 开启
+    // DPI 缩放（如 150%）时，逻辑 800x450 对应物理 1200x675 framebuffer；
+    // 若直接用逻辑像素设置 viewport，画面只会出现在 framebuffer 左下角。
+    // 通过 devicePixelRatioF() 在每次渲染时读取 DPR 并转换为物理像素。
+    const qreal dpr = devicePixelRatioF();
+    const int widgetW = static_cast<int>(std::lround(width() * dpr));
+    const int widgetH = static_cast<int>(std::lround(height() * dpr));
+
+    if (widgetW <= 0 || widgetH <= 0 || fw <= 0 || fh <= 0) {
+        return;
+    }
 
     // Calculate 16:9 viewport centered in widget
     const double frameAspect = static_cast<double>(fw) / fh;  // 16/9 = 1.778
@@ -214,13 +225,13 @@ void PreviewWidget::renderNv12GL(const phonecam::Nv12Frame& frame) {
         // Widget is wider — letterbox left/right (black bars on sides)
         // Actually for 16:9 source, if widget is wider than 16:9, we get pillarbox
         vpH = widgetH;
-        vpW = static_cast<int>(widgetH * frameAspect);
+        vpW = static_cast<int>(std::lround(widgetH * frameAspect));
         vpX = (widgetW - vpW) / 2;
         vpY = 0;
     } else {
         // Widget is taller — letterbox top/bottom (black bars)
         vpW = widgetW;
-        vpH = static_cast<int>(widgetW / frameAspect);
+        vpH = static_cast<int>(std::lround(widgetW / frameAspect));
         vpX = 0;
         vpY = (widgetH - vpH) / 2;
     }
