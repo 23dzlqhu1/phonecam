@@ -48,8 +48,8 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 | 平台 | 下载文件 | 大小 | 说明 |
 |------|---------|------|------|
-| **Windows 电脑** | `PhoneCam-2.0.1-Setup.exe` | 约 25 MB | 双击安装，自动配置虚拟摄像头驱动 |
-| **Android 手机** | `PhoneCam-Android-v0.2.8.apk` | 约 3 MB | 下载到手机安装，需允许“安装未知来源应用” |
+| **Windows 电脑** | `PhoneCam-2.0.2-Setup.exe` | 约 25 MB | 双击安装，自动配置虚拟摄像头驱动 |
+| **Android 手机** | `PhoneCam-Android-v0.2.9.apk` | 约 3 MB | 下载到手机安装，需允许“安装未知来源应用” |
 
 > 💡 **提示**：Windows 安装过程中如果勾选“启用 USB 连接”，安装向导会自动从清华 TUNA 镜像下载并配置 ADB。
 
@@ -68,7 +68,7 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 ### Android 端
 
-1. 下载 `PhoneCam-Android-v0.2.8.apk` 到手机
+1. 下载 `PhoneCam-Android-v0.2.9.apk` 到手机
 2. 点击安装，如果提示“未知来源应用”，请点击“允许”
 3. 打开 PhoneCam App，授予**摄像头**和**麦克风**权限
 

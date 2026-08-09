@@ -1,6 +1,17 @@
-name: Build and publish Windows installer
+name: Build and publish release
+
+# tag-based 复用 workflow:
+#   push tag v* (如 v2.0.2 / v2.1.0 / v3.0.0) 时自动构建 Windows 安装包并发布 Release。
+#   APP_VERSION 从 tag 名解析 (v2.0.2 → 2.0.2), 未来发新版本无需修改本文件。
+#   workflow_dispatch 保留用于手工验证/发布。
+#
+# Android APK: 仓库未配置 signing secrets, 不在此 workflow 内构建;
+#   由本机 Agent 使用现有 keystore 构建后通过 gh release upload 上传到同一个 Release。
 
 on:
+  push:
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - master
@@ -8,13 +19,15 @@ on:
       - .github/workflows/windows-release.yml
       - cpp/**
       - installer/**
-  push:
-    branches:
-      - release/v2.0.1
   workflow_dispatch:
     inputs:
+      version:
+        description: '要发布的版本号 (不含 v 前缀), 例如 2.0.2'
+        required: true
+        default: '2.0.2'
+        type: string
       publish_release:
-        description: Publish or replace the assets in GitHub Release v2.0.1
+        description: Publish or replace the assets in GitHub Release
         required: true
         default: false
         type: boolean
@@ -23,11 +36,10 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-v2.0.1-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  APP_VERSION: 2.0.1
   VCPKG_TAG: 2026.07.29
   VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
   VCPKG_DOWNLOADS: ${{ github.workspace }}\.vcpkg-downloads
@@ -40,6 +52,24 @@ jobs:
     timeout-minutes: 180
 
     steps:
+      - name: Resolve APP_VERSION
+        id: version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # tag push: v2.0.2 → 2.0.2; workflow_dispatch: 使用输入; 其他 (PR): 默认 2.0.2
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = $env:GITHUB_REF_NAME.TrimStart('v')
+          } elseif ($env:INPUT_VERSION) {
+            $v = $env:INPUT_VERSION.TrimStart('v')
+          } else {
+            $v = '2.0.2'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "APP_VERSION=$v"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "app_version=$v"
+          Write-Host "APP_VERSION resolved to $v"
+
       - name: Check out source
         uses: actions/checkout@v6
 
@@ -94,7 +124,8 @@ jobs:
             throw "Inno Setup compiler was not found at $iscc."
           }
 
-          & $iscc ".\installer\phonecam.iss"
+          # 版本由 APP_VERSION 注入, 不依赖 phonecam.iss 内的硬编码默认值
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" ".\installer\phonecam.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
 
           $installer = Join-Path $PWD "dist\PhoneCam-$env:APP_VERSION-Setup.exe"
@@ -110,14 +141,14 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: PhoneCam-${{ env.APP_VERSION }}-Windows-x64
+          name: PhoneCam-${{ steps.version.outputs.app_version }}-Windows-x64
           path: |
-            dist/PhoneCam-${{ env.APP_VERSION }}-Setup.exe
-            dist/PhoneCam-${{ env.APP_VERSION }}-Setup.exe.sha256
+            dist/PhoneCam-${{ steps.version.outputs.app_version }}-Setup.exe
+            dist/PhoneCam-${{ steps.version.outputs.app_version }}-Setup.exe.sha256
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub Release v2.0.1
+      - name: Publish GitHub Release
         if: ${{ github.event_name == 'push' || inputs.publish_release == true }}
         shell: pwsh
         env:
@@ -129,6 +160,7 @@ jobs:
 
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
+            # Release 已存在 (例如本机 Agent 已创建并附带 Android APK) → 只更新 Windows 资产
             gh release upload $tag $installer $checksum --clobber --repo $env:GITHUB_REPOSITORY
           } else {
             gh release create $tag $installer $checksum `

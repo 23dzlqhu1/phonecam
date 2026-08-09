@@ -14,8 +14,8 @@ android {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备
         targetSdk = 34                            // Android 14
-        versionCode = 17                          // 批次 3.2.0.3h: +setTargetFps fix
-        versionName = "0.2.8-mvp2-batch3.2.0.3h-portfix3"
+        versionCode = 18                          // v2.0.2 release: +UDP discovery responder
+        versionName = "0.2.9"
     }
 
     // 安全修复：签名信息不再硬编码，改从环境变量读取。
