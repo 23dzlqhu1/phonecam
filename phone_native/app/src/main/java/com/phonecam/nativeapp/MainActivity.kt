@@ -10,7 +10,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.TextureView
 import android.view.View
 import android.widget.Button
 import android.widget.ImageView
@@ -49,23 +48,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnLockOrient: Button
     private lateinit var btnConnect: Button
     private lateinit var btnSettings: ImageView
-    private lateinit var textureView: TextureView
 
     // --- 业务引用 ---
-    private var cameraController: CameraController? = null
+    // 8月9日后台保活: 推流 Camera/Frame ownership 已完全迁移到 StreamingService,
+    // MainActivity 不再持有 CameraController / framePool / frame 状态。
 
     // --- 设置 ---
     private lateinit var settings: SettingsStore
     private var currentLensPref: String = "back"
 
-    // --- 摄像头帧状态 ---
-    @Volatile private var cameraW: Int = 0
-    @Volatile private var cameraH: Int = 0
-    @Volatile private var cameraFrameCount: Int = 0
-
-    // --- 画幅锁定 ---
-    @Volatile private var orientationLockEnabled: Boolean = false
-    @Volatile private var lockedStreamRotation: Int = 0
+    // --- 画幅锁定 (状态由 StreamingService 持有, 这里只读用于 UI) ---
 
     // --- 广播接收器（需手动 unregister） ---
     private var streamReceiver: BroadcastReceiver? = null
@@ -82,20 +74,16 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
         setupSettingsButton()
 
-        // 实例化 CameraController
-        cameraController = CameraController(this, textureView)
-
-        // 读取设置
+        // 读取设置 (8月9日后台保活: 推流 Camera 由 StreamingService 读取同一 SettingsStore)
         settings = SettingsStore(this)
         applySettingsToController()
 
         // 启动 1Hz 定时器更新状态
         startStatusTicker()
 
-        // 申请 CAMERA 权限
+        // 申请 CAMERA 权限 (推流时由 StreamingService 校验, 这里负责授权入口)
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "CAMERA permission already granted")
-            onCameraPermissionGranted()
         } else {
             Log.i(TAG, "CAMERA permission not granted, requesting...")
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
@@ -119,16 +107,7 @@ class MainActivity : AppCompatActivity() {
         btnLockOrient = findViewById(R.id.btnLockOrient)
         btnConnect = findViewById(R.id.btnConnect)
         btnSettings = findViewById(R.id.btnSettings)
-
-        // TextureView: CameraController 需要，不可删除
-        // alpha=0 保证不可见；尺寸必须足够大以触发 SurfaceTexture 分配（1x1 在某些设备上不够）
-        textureView = TextureView(this).apply {
-            alpha = 0f
-            visibility = View.VISIBLE
-        }
-        val rootLayout = findViewById<android.widget.LinearLayout>(R.id.rootLayout)
-        val lp = android.widget.LinearLayout.LayoutParams(64, 64)  // 64x64 px，保证 surface 创建
-        rootLayout.addView(textureView, 0, lp)
+        // 8月9日后台保活: 不再需要隐藏 TextureView 作为 Camera 预览载体 (headless 模式)
     }
 
     private fun setupButtons() {
@@ -149,12 +128,9 @@ class MainActivity : AppCompatActivity() {
                     StreamingService.stop(this)
                 }
                 else -> {
-                    // 空闲或失败，允许启动
+                    // 空闲或失败，允许启动 (8月9日后台保活: 尺寸/fps 由 Service 从 SettingsStore 读取)
                     btnPush.isEnabled = false
                     btnPush.text = "启动中…"
-                    StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
-                    StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
-                    StreamingService.sCameraFps = settings.fps.toIntOrNull() ?: 30
                     StreamingService.start(this)
                 }
             }
@@ -191,9 +167,6 @@ class MainActivity : AppCompatActivity() {
                     "com.phonecam.START_STREAMING" -> {
                         InAppLogStore.i(TAG, "[BROADCAST] START_STREAMING")
                         if (!StreamingService.getStateSnapshot().isActive) {
-                            StreamingService.sCameraW = if (cameraW > 0) cameraW else 1280
-                            StreamingService.sCameraH = if (cameraH > 0) cameraH else 720
-                            StreamingService.sCameraFps = settings.fps.toIntOrNull() ?: 30
                             StreamingService.start(ctx)
                         }
                     }
@@ -216,22 +189,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleOrientationLock() {
-        if (orientationLockEnabled) {
-            orientationLockEnabled = false
-            lockedStreamRotation = 0
-            btnLockOrient.text = "锁定方向"
-            Log.i(TAG, "orientation lock OFF")
-        } else {
-            lockedStreamRotation = 0  // Lock to current rotation (0°)
-            orientationLockEnabled = true
-            btnLockOrient.text = "解锁方向"
-            Log.i(TAG, "orientation lock ON")
-        }
+        // 8月9日后台保活: 方向锁定状态由 StreamingService 持有, 这里只发命令并刷新 UI
+        val locked = StreamingService.toggleOrientationLock()
+        btnLockOrient.text = if (locked) "解锁方向" else "锁定方向"
+        Log.i(TAG, "orientation lock ${if (locked) "ON" else "OFF"}")
         updateLockStatus()
     }
 
     private fun updateLockStatus() {
-        if (orientationLockEnabled) {
+        if (StreamingService.sOrientationLockEnabled) {
             lockStatusText.text = "方向已锁定（旋转手机不会改变画面）"
             lockStatusText.visibility = View.VISIBLE
         } else {
@@ -247,7 +213,7 @@ class MainActivity : AppCompatActivity() {
 
         val snap = StreamingService.getStateSnapshot()
         if (snap.isActive || snap.isStarting) {
-            // Camera switch without restarting TCP/encoder
+            // 推流中: 切换由 Service 操作自己的 headless Camera, 不重启 TCP/encoder
             Toast.makeText(
                 this,
                 if (newLens == "back") "正在切换到后置摄像头..." else "正在切换到前置摄像头...",
@@ -257,7 +223,7 @@ class MainActivity : AppCompatActivity() {
             // Disable button during switch
             btnToggle.isEnabled = false
 
-            StreamingService.switchCamera(newLens, cameraController!!) { success ->
+            StreamingService.switchCamera(newLens) { success ->
                 btnToggle.isEnabled = true
                 if (success) {
                     Toast.makeText(
@@ -270,10 +236,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } else {
-            // Not streaming, just close/reopen camera
-            cameraController?.close()
-            cameraController?.setLensFacing(newLens)
-            cameraController?.open()
+            // 未推流: 无预览 Camera, 只保存设置 (下次推流时 Service 读取)
             Toast.makeText(
                 this,
                 if (newLens == "back") "→ 后置摄像头" else "→ 前置摄像头",
@@ -283,10 +246,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySettingsToController() {
+        // 8月9日后台保活: 推流 Camera 配置由 StreamingService 启动时从 SettingsStore 读取,
+        // 这里只同步 UI 用到的当前镜头偏好
         currentLensPref = settings.lens
-        cameraController?.setLensFacing(settings.lens)
-        cameraController?.setTargetResolution(settings.resolution)
-        cameraController?.setTargetFps(settings.fps)
         InAppLogStore.d(TAG, "applySettings: lens=${settings.lens} res=${settings.resolution} fps=${settings.fps}")
     }
 
@@ -399,95 +361,22 @@ class MainActivity : AppCompatActivity() {
         updateLockStatus()
     }
 
-    private fun onCameraPermissionGranted() {
-        cameraController?.onPermissionGranted()
-        setupCameraImageCallback()
-    }
-
-    private fun setupCameraImageCallback() {
-        // OOM fix: 预分配 YuvFramePool 和 scratch buffer
-        val framePool = YuvFramePool(1280, 720)  // 初始尺寸，会自动适配实际分辨率
-        val scratchBuffer = ByteArray(1920 * 2)  // 足够 1080p 的行缓冲
-
-        // 诊断：每秒打印 pool 状态（前 10 秒）
-        val diagHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        var diagCount = 0
-        val diagRunnable = object : Runnable {
-            override fun run() {
-                if (diagCount < 10) {
-                    Log.i(TAG, "[POOL-DIAG] ${framePool.getDiagnostics()}")
-                    diagCount++
-                    diagHandler.postDelayed(this, 1000L)
-                }
-            }
-        }
-        diagHandler.post(diagRunnable)
-
-        cameraController?.setOnImageAvailableListener { image ->
-            var frameBuffer: YuvFramePool.YuvFrameBuffer? = null
-            try {
-                // 在 close 前读取所有需要的属性
-                val w = image.width
-                val h = image.height
-                val ptsNs = image.timestamp  // 必须在 close 前读取
-                cameraW = w
-                cameraH = h
-                cameraFrameCount++
-
-                // 从池中获取 buffer，失败则丢帧
-                frameBuffer = framePool.acquire(w, h)
-                if (frameBuffer == null) {
-                    // 无可用 buffer，丢帧（CameraController finally 会 close image）
-                    return@setOnImageAvailableListener
-                }
-
-                // 填充 YUV 数据到池 buffer
-                val success = Yuv420Extractor.imageToI420(image, frameBuffer.data, scratchBuffer)
-                // 注意：不要在这里 close image，CameraController 的 finally 会统一 close
-
-                if (!success) {
-                    frameBuffer.release()
-                    frameBuffer = null
-                    return@setOnImageAvailableListener
-                }
-
-                val snap = StreamingService.getStateSnapshot()
-                if (snap.isActive) {
-                    val rotation = if (orientationLockEnabled) {
-                        lockedStreamRotation
-                    } else {
-                        cameraController?.getStreamRotation() ?: 0
-                    }
-                    frameBuffer.ptsNs = ptsNs
-                    frameBuffer.rotation = rotation
-                    StreamingService.submitFrameWithOwnership(frameBuffer)
-                    frameBuffer = null  // ownership 已转移
-                } else {
-                    frameBuffer.release()
-                    frameBuffer = null
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "[OOM-fix] 提取帧异常: ${e.message}", e)
-                // 关键：异常时必须 release 已 acquire 的 frameBuffer
-                frameBuffer?.release()
-                frameBuffer = null
-            }
-            // 不要在这里 close image — CameraController 的 finally 会统一 close
-        }
-    }
+    // 8月9日后台保活: Frame callback / YuvFramePool / Yuv420Extractor 已整体迁移到
+    // StreamingService.startCameraHeadless(), MainActivity 不再有 setupCameraImageCallback。
 
     override fun onResume() {
         super.onResume()
+        // 8月9日后台保活: 只做 UI attach (同步设置 + 启动状态刷新),
+        // 绝不重新 open Camera / 重启 stream
         if (::settings.isInitialized) {
             applySettingsToController()
         }
-        cameraController?.open()
         startStatusTicker()
     }
 
     override fun onPause() {
         super.onPause()
-        cameraController?.close()
+        // 8月9日后台保活: 只停 UI ticker, 绝不对推流 Camera 做 close (Camera 属于 Service)
         stopStatusTicker()
     }
 
@@ -498,6 +387,7 @@ class MainActivity : AppCompatActivity() {
             try { unregisterReceiver(it) } catch (_: Exception) {}
             streamReceiver = null
         }
+        // 8月9日后台保活: onDestroy 不停止 StreamingService, 除非用户明确点击停止推流
     }
 
     @Deprecated("Deprecated in Java")
@@ -520,10 +410,10 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CAMERA) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.i(TAG, "user granted CAMERA permission")
-                onCameraPermissionGranted()
+                // 8月9日后台保活: Camera 由 Service 启动时自检权限, 这里只负责授权入口
             } else {
                 Log.w(TAG, "user denied CAMERA permission")
-                cameraController?.onPermissionDenied()
+                Toast.makeText(this, "没有摄像头权限，无法推流", Toast.LENGTH_LONG).show()
             }
         }
     }

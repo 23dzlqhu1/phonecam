@@ -24,7 +24,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * CameraController —— phone_native/ 批次 3 后置摄像头控制器
  *
  * 作用：封装 Android Camera2 API 的"打开 → 创建预览会话 → 启动 repeating 预览"全流程，
- *       把细节从 MainActivity 隔离出去，让 Activity 只管"权限 + 布局 + 生命周期"。
+ *       把细节从 MainActivity 隔离出去。
+ *
+ * 8月9日后台保活: 支持 headless 模式 (textureView = null)。
+ *   - 推流 Camera 由 StreamingService 以 headless 方式持有 (无 Activity 预览)
+ *   - headless 模式: CaptureSession outputs = [imageReader.surface]，不依赖 TextureView
+ *   - 有 TextureView 时保持原行为: outputs = [previewSurface, imageReader.surface]
  *
  * 设计要点：
  *  - 使用 Android Framework 自带 Camera2（android.hardware.camera2.*），不引入 androidx.camera
@@ -35,11 +40,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *      2) 否则选最接近 640x480 的尺寸
  *      3) 再不行就选第一个可用尺寸
  *    （避免硬编码导致 createCaptureSession 在某些设备上失败）
- *  - 不做 MediaCodec、不做 H.264、不出帧 —— 这次只做"眼睛能看到画面"
  */
 class CameraController(
     private val context: Context,
-    private val textureView: TextureView
+    private val textureView: TextureView? = null
 ) {
     companion object {
         private const val TAG = "CameraController"
@@ -54,6 +58,9 @@ class CameraController(
         private const val TARGET_1080_WIDTH = 1920
         private const val TARGET_1080_HEIGHT = 1080
     }
+
+    // headless 模式: 无 Activity 预览, Camera 输出只走 ImageReader
+    private val isHeadless: Boolean get() = textureView == null
 
     // ======================== 设置 (Phase Y-1 加) ========================
     // 由 MainActivity 在 open() 之前调 setter 注入, 避免构造器参数膨胀
@@ -166,8 +173,8 @@ class CameraController(
     }
 
     init {
-        // 挂监听器，等 surface 真正可用
-        textureView.surfaceTextureListener = surfaceTextureListener
+        // 有预览（非 headless）时才挂 TextureView 监听器等 surface 就绪
+        textureView?.surfaceTextureListener = surfaceTextureListener
     }
 
     /**
@@ -321,8 +328,9 @@ class CameraController(
                 if (released || imageReader != null) return
                 val ps = currentPreviewSize
                 val cs = captureSession
-                Log.d(TAG, "setOnImageAvailableListener retry #$tries ps=$ps cs=${if (cs != null) "READY" else "NULL"}")
-                if (ps != null && cs != null) {
+                Log.d(TAG, "setOnImageAvailableListener retry #$tries ps=$ps cs=${if (cs != null) "READY" else "NULL"} headless=$isHeadless")
+                // headless: session 尚未创建, 只需预览尺寸就绪即可由 setupImageReaderInternal 自行建 session
+                if (ps != null && (cs != null || isHeadless)) {
                     setupImageReaderInternal()
                     return
                 }
@@ -344,10 +352,6 @@ class CameraController(
         val listener = imageListener ?: return
         val previewSize = currentPreviewSize ?: run {
             Log.w(TAG, "setupImageReaderInternal: currentPreviewSize is null, 相机还没 ready")
-            return
-        }
-        val session = captureSession ?: run {
-            Log.w(TAG, "setupImageReaderInternal: captureSession is null, 相机还没 ready")
             return
         }
         // 已经创建过就不重复
@@ -384,13 +388,15 @@ class CameraController(
         imageReader = reader
         InAppLogStore.i(TAG, "imageReader created: ${previewSize.width}x${previewSize.height} YUV_420_888")
 
-        // 关键: 重建 CaptureSession, 把 imageReader.surface 加进 outputs
-        // 重建会触发 preview 短暂黑屏 (~100-200ms), 用户能看到
+        // 关键: 重建 CaptureSession (非 headless) / 创建 CaptureSession (headless)，
+        // 把 imageReader.surface 加进 outputs
         recreateSessionWithImageReaderInternal(reader.surface, previewSize)
     }
 
     /**
-     * 重建 CaptureSession: outputs = [previewSurface (TextureView), imageReaderSurface]
+     * 创建/重建 CaptureSession。
+     * headless:      outputs = [imageReaderSurface]
+     * 有预览:        outputs = [previewSurface (TextureView), imageReaderSurface]
      */
     private fun recreateSessionWithImageReaderInternal(
         imageReaderSurface: android.view.Surface,
@@ -399,16 +405,20 @@ class CameraController(
         if (released) return
         val camera = cameraDevice ?: return
         val handler = cameraHandler ?: return
-        val texture = textureView.surfaceTexture ?: return
-        texture.setDefaultBufferSize(previewSize.width, previewSize.height)
-        val previewSurface = android.view.Surface(texture)
+
+        val outputs = if (isHeadless) {
+            listOf(imageReaderSurface)
+        } else {
+            val texture = textureView?.surfaceTexture ?: return
+            texture.setDefaultBufferSize(previewSize.width, previewSize.height)
+            listOf(android.view.Surface(texture), imageReaderSurface)
+        }
 
         try {
             captureSession?.close()
 
             val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(previewSurface)
-                addTarget(imageReaderSurface)  // 关键: 把 ImageReader 也加进 request
+                outputs.forEach { addTarget(it) }
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, buildFpsRange())
@@ -420,7 +430,7 @@ class CameraController(
             }
 
             camera.createCaptureSession(
-                listOf(previewSurface, imageReaderSurface),
+                outputs,
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
                         if (released) {
@@ -430,7 +440,7 @@ class CameraController(
                         captureSession = session
                         try {
                             session.setRepeatingRequest(requestBuilder.build(), null, handler)
-                            InAppLogStore.i(TAG, "preview+imageReader started")
+                            InAppLogStore.i(TAG, "preview+imageReader started (headless=$isHeadless)")
                             // Camera switch: notify session configured
                             if (waitingForFirstFrame) {
                                 switchCallback?.onCaptureSessionConfigured()
@@ -521,14 +531,15 @@ class CameraController(
     }
 
     /**
-     * "权限 + surface 都就绪"时才真正打开相机
+     * "权限 + surface 都就绪"时才真正打开相机。
+     * headless 模式没有 surface 依赖，只需权限 + camera thread。
      */
     private fun tryOpenIfReady() {
         if (!hasPermission) {
             Log.d(TAG, "tryOpenIfReady: waiting for permission")
             return
         }
-        if (!surfaceAvailable.get()) {
+        if (!isHeadless && !surfaceAvailable.get()) {
             Log.d(TAG, "tryOpenIfReady: waiting for surface")
             return
         }
@@ -559,12 +570,7 @@ class CameraController(
         }
         backCameraId = targetId
 
-        // 2. 选预览尺寸（动态从 StreamConfigurationMap 读取）
-        val texture = textureView.surfaceTexture
-        if (texture == null) {
-            Log.e(TAG, "open failed: surfaceTexture is null")
-            return
-        }
+        // 2. 选预览尺寸（动态从 StreamConfigurationMap 读取，headless 与预览共用）
         val previewSize = choosePreviewSize(cm, targetId)
         currentPreviewSize = previewSize
         Log.d(TAG, "selected preview size: ${previewSize.width}x${previewSize.height}")
@@ -575,20 +581,29 @@ class CameraController(
         sensorActiveRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         Log.d(TAG, "sensorOrientation=$sensorOrientation for camera $targetId")
         Log.d(TAG, "sensorActiveRect=$sensorActiveRect")
-        texture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
-        // 3. 算 letterbox transform（防止 16:9 预览被拉伸到 9:19.5 屏幕）
-        val viewW = textureView.width
-        val viewH = textureView.height
-        if (viewW > 0 && viewH > 0) {
-            applyTransform(previewSize.width, previewSize.height, viewW, viewH)
+        // 非 headless: 需要 TextureView surface 构建预览输出
+        val previewSurface: Surface? = if (isHeadless) {
+            null  // headless: 只输出到 ImageReader
+        } else {
+            val texture = textureView?.surfaceTexture
+            if (texture == null) {
+                Log.e(TAG, "open failed: surfaceTexture is null")
+                return
+            }
+            texture.setDefaultBufferSize(previewSize.width, previewSize.height)
+            // 算 letterbox transform（防止 16:9 预览被拉伸到 9:19.5 屏幕）
+            val viewW = textureView!!.width
+            val viewH = textureView!!.height
+            if (viewW > 0 && viewH > 0) {
+                applyTransform(previewSize.width, previewSize.height, viewW, viewH)
+            }
+            Surface(texture)
         }
-
-        val previewSurface = Surface(texture)
 
         try {
             // 4. 打开 camera
-            InAppLogStore.i(TAG, "camera opened: id=$targetId")
+            InAppLogStore.i(TAG, "camera opened: id=$targetId (headless=$isHeadless)")
             cm.openCamera(targetId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     // 如果在 openCamera 异步过程中用户已 close 释放，这里就不再把 camera 存起来
@@ -621,11 +636,12 @@ class CameraController(
     }
 
     /**
-     * 创建 CaptureSession 并启动 repeating 预览
+     * 创建 CaptureSession 并启动 repeating 预览。
+     * headless 模式: 不建 preview session, 直接等 imageListener 就绪后建 ImageReader session。
      */
     private fun startPreviewInternal(
         camera: CameraDevice,
-        previewSurface: Surface,
+        previewSurface: Surface?,
         handler: Handler
     ) {
         if (released) {
@@ -633,9 +649,19 @@ class CameraController(
             camera.close()
             return
         }
+        if (isHeadless) {
+            // headless: outputs 只含 ImageReader surface。listener 未注册时等 open() 完成后的 retry loop
+            if (imageListener == null) {
+                Log.d(TAG, "headless: imageListener 未注册, 等待重试")
+                pendingListenerRetry = true
+                return
+            }
+            handler.post { setupImageReaderInternal() }
+            return
+        }
         try {
             val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(previewSurface)
+                addTarget(previewSurface!!)
                 // 简单起见：自动对焦 + 自动曝光，后续批次再加手动控制
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
@@ -710,6 +736,7 @@ class CameraController(
      * 无论是被 onSurfaceTextureAvailable（UI 线程）还是 openInternal（相机线程）调用，都安全。
      */
     private fun applyTransform(previewW: Int, previewH: Int, viewW: Int, viewH: Int) {
+        val tv = textureView ?: return  // headless 无预览, 不需要 transform
         if (previewW <= 0 || previewH <= 0 || viewW <= 0 || viewH <= 0) return
         val scale = minOf(viewW.toFloat() / previewW.toFloat(), viewH.toFloat() / previewH.toFloat())
         val dx = (viewW - previewW * scale) / 2f
@@ -719,7 +746,7 @@ class CameraController(
             postTranslate(dx, dy)
         }
         Log.d(TAG, "applyTransform (FIT, top): preview=${previewW}x${previewH} view=${viewW}x${viewH} scale=$scale dx=$dx dy=$dy")
-        textureView.post { textureView.setTransform(matrix) }
+        tv.post { tv.setTransform(matrix) }
     }
 
     /**
@@ -753,7 +780,12 @@ class CameraController(
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?: return Size(TARGET_WIDTH, TARGET_HEIGHT) // 极端兜底
 
-        val supported: Array<Size> = map.getOutputSizes(SurfaceTexture::class.java) ?: emptyArray()
+        // headless 模式输出目标只走 ImageReader (YUV_420_888)，用它支持的尺寸列表
+        val supported: Array<Size> = if (isHeadless) {
+            map.getOutputSizes(android.graphics.ImageFormat.YUV_420_888) ?: emptyArray()
+        } else {
+            map.getOutputSizes(SurfaceTexture::class.java) ?: emptyArray()
+        }
         if (supported.isEmpty()) {
             return Size(TARGET_WIDTH, TARGET_HEIGHT)
         }

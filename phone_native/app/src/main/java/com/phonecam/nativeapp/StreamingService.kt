@@ -1,5 +1,6 @@
 package com.phonecam.nativeapp
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -80,6 +82,13 @@ class StreamingService : Service() {
         @Volatile var sH264Encoder: H264Encoder? = null
         @Volatile var sEglRenderer: EglRenderer? = null
         @Volatile var sTcpServer: TcpStreamServer? = null
+        // 8月9日后台保活: Camera/Frame ownership 完全属于 Service (headless), MainActivity 不持有
+        @Volatile var sCameraController: CameraController? = null
+        @Volatile var sFramePool: YuvFramePool? = null
+        @Volatile var sScratchBuffer: ByteArray? = null
+        // 方向锁定状态: 影响输出 rotation, 必须由 Service 持有 (Activity 销毁后仍正确)
+        @Volatile var sOrientationLockEnabled: Boolean = false
+        @Volatile var sLockedStreamRotation: Int = 0
         @Volatile var sCameraW: Int = 1280
         @Volatile var sCameraH: Int = 720
         @Volatile var sCameraFps: Int = 30    // 从 SettingsStore 读取, 写入 MediaCodec KEY_FRAME_RATE
@@ -399,13 +408,14 @@ class StreamingService : Service() {
         }
 
         /**
-         * Camera switch: 切换前后置摄像头，不重启 TCP/encoder
+         * Camera switch: 切换前后置摄像头，不重启 TCP/encoder。
+         * 8月9日后台保活: Service 操作自己的 sCameraController，不再接收 Activity 传入的 controller。
          * @param lensFacing "front" or "back"
-         * @param cameraController CameraController instance
          * @param callback called on main thread when switch completes (success=true) or fails (success=false)
          */
-        fun switchCamera(lensFacing: String, cameraController: CameraController, callback: (Boolean) -> Unit) {
-            if (!sActive || sStreamState == StreamState.SWITCHING_CAMERA) {
+        fun switchCamera(lensFacing: String, callback: (Boolean) -> Unit) {
+            val cam = sCameraController
+            if (!sActive || sStreamState == StreamState.SWITCHING_CAMERA || cam == null) {
                 callback(false)
                 return
             }
@@ -414,7 +424,7 @@ class StreamingService : Service() {
             sStreamState = StreamState.SWITCHING_CAMERA
             sPauseFrameSubmit = true
 
-            cameraController.switchCameraWithCallback(lensFacing, object : CameraController.CameraSwitchCallback {
+            cam.switchCameraWithCallback(lensFacing, object : CameraController.CameraSwitchCallback {
                 override fun onCaptureSessionConfigured() {
                     InAppLogStore.i(TAG, "[CAM-SWITCH] Capture session configured")
                 }
@@ -432,6 +442,24 @@ class StreamingService : Service() {
                     callback(true)
                 }
             })
+        }
+
+        /**
+         * 8月9日后台保活: 方向锁定状态属于 Service。
+         * 切换方向锁定 (保留现有语义: 锁定时 lockedStreamRotation=0°)。
+         * @return 切换后的锁定状态 (true=已锁定)
+         */
+        fun toggleOrientationLock(): Boolean {
+            if (sOrientationLockEnabled) {
+                sOrientationLockEnabled = false
+                sLockedStreamRotation = 0
+                InAppLogStore.i(TAG, "[ORIENT] orientation lock OFF")
+            } else {
+                sLockedStreamRotation = 0  // 保持现有语义: 锁定到当前 rotation (0°)
+                sOrientationLockEnabled = true
+                InAppLogStore.i(TAG, "[ORIENT] orientation lock ON")
+            }
+            return sOrientationLockEnabled
         }
 
         // PCP 包统计
@@ -657,6 +685,21 @@ class StreamingService : Service() {
                 // P1-3: PC 已连接
                 sStreamState = StreamState.PC_CONNECTED
 
+                // ── 8月9日后台保活: Camera/Frame ownership 迁移到 Service ──
+                // 1) 防御性检查 CAMERA 权限 (不弹 dialog, 失败则 START_FAILED)
+                if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    InAppLogStore.e(TAG, "[BG] 没有摄像头权限")
+                    sStreamState = StreamState.START_FAILED
+                    sStartFailedReason = "没有摄像头权限，请返回 PhoneCam 并允许相机权限"
+                    sStarting = false
+                    stopStreamingInternal()
+                    return@Thread
+                }
+                // 2) 启动 headless Camera + frame pipeline (Service 持有, Activity 后台也持续)
+                if (!startCameraHeadless()) {
+                    return@Thread  // 失败已在内部设置 START_FAILED 并清理
+                }
+
                 // BUG-013: encoder/EGL 延迟到首帧到达后创建
                 // submitFrameWithOwnership() 会检测首帧并调用 initializeEncoderAndEgl()
 
@@ -693,6 +736,96 @@ class StreamingService : Service() {
     }
 
     /**
+     * 8月9日后台保活: 以 headless 模式启动推流 Camera。
+     * 必须在 worker 线程调用。Camera/Frame 资源全部由 Service 持有，不依赖 MainActivity。
+     * 权限已在上层确认，这里只启动；异常时转入 START_FAILED 并清理。
+     * @return true=启动成功(异步 open 已发起), false=失败(已设置 START_FAILED 并清理)
+     */
+    private fun startCameraHeadless(): Boolean {
+        try {
+            // 读取设置 (Service 直接读 SettingsStore, 不依赖 Activity 传递)
+            val settings = SettingsStore(this)
+            sCameraFps = settings.fps.toIntOrNull() ?: 30
+
+            // OOM fix: 预分配 YuvFramePool 和 scratch buffer (从 MainActivity 迁移)
+            val pool = YuvFramePool(1280, 720)  // 初始尺寸，会自动适配实际分辨率
+            val scratch = ByteArray(1920 * 2)   // 足够 1080p 的行缓冲
+            sFramePool = pool
+            sScratchBuffer = scratch
+
+            // headless CameraController: 无 Activity 预览, 输出只走 ImageReader
+            val controller = CameraController(applicationContext)
+            controller.setLensFacing(settings.lens)
+            controller.setTargetResolution(settings.resolution)
+            controller.setTargetFps(settings.fps)
+            sCameraController = controller
+
+            // Frame callback (从 MainActivity.setupCameraImageCallback 迁移, ownership contract 不变:
+            // acquire 成功后, 要么转交 submitFrameWithOwnership, 要么 release)
+            controller.setOnImageAvailableListener { image ->
+                var frameBuffer: YuvFramePool.YuvFrameBuffer? = null
+                try {
+                    // 在 close 前读取所有需要的属性
+                    val w = image.width
+                    val h = image.height
+                    val ptsNs = image.timestamp  // 必须在 close 前读取
+                    // 注意: 不在此更新 sCameraW/sCameraH, 尺寸变化检测基准由
+                    // initializeEncoderAndEgl() 首帧时设置 (BUG-013)
+
+                    // 从池中获取 buffer，失败则丢帧 (CameraController finally 会 close image)
+                    frameBuffer = pool.acquire(w, h)
+                    if (frameBuffer == null) return@setOnImageAvailableListener
+
+                    // 填充 YUV 数据到池 buffer
+                    val success = Yuv420Extractor.imageToI420(image, frameBuffer.data, scratch)
+                    if (!success) {
+                        frameBuffer.release()
+                        frameBuffer = null
+                        return@setOnImageAvailableListener
+                    }
+
+                    if (sActive) {
+                        val rotation = if (sOrientationLockEnabled) {
+                            sLockedStreamRotation
+                        } else {
+                            controller.getStreamRotation()
+                        }
+                        frameBuffer.ptsNs = ptsNs
+                        frameBuffer.rotation = rotation
+                        submitFrameWithOwnership(frameBuffer)
+                        frameBuffer = null  // ownership 已转移, caller 不再 release
+                    } else {
+                        frameBuffer.release()
+                        frameBuffer = null
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "[BG] 提取帧异常: ${e.message}", e)
+                    // 关键：异常时必须 release 已 acquire 的 frameBuffer
+                    frameBuffer?.release()
+                    frameBuffer = null
+                }
+                // 不要 close image — CameraController 的 finally 会统一 close
+            }
+
+            // 打开 Camera (内部异步: openCamera → session → repeating)
+            controller.onPermissionGranted()  // Service 已确认权限
+            controller.open()
+            InAppLogStore.i(
+                TAG,
+                "[BG] headless Camera 已启动 (lens=${settings.lens} res=${settings.resolution} fps=${settings.fps})"
+            )
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "[BG] startCameraHeadless 异常", e)
+            sStreamState = StreamState.START_FAILED
+            sStartFailedReason = "摄像头启动失败: ${e.message}"
+            sStarting = false
+            stopStreamingInternal()
+            return false
+        }
+    }
+
+    /**
      * 内部停止 (按推流按钮触发 或 启动失败时调)
      * 注意: streaming flag 是 sActive, 不是 MainActivity.streaming
      */
@@ -707,6 +840,11 @@ class StreamingService : Service() {
         // BUG-013: 递增 generation，使所有旧 task 失效
         StreamingService.sStreamGeneration++
         stopStatsTimer()
+        // 8月9日后台保活: 先停 Camera (不再产生新帧), 再排空/停止下游
+        try { sCameraController?.close() } catch (e: Exception) { Log.w(TAG, "cameraController.close: ${e.message}") }
+        sCameraController = null
+        sFramePool = null
+        sScratchBuffer = null
         Thread.sleep(200)  // 让 listener 看到 sActive=false 后再释放
         try { sEglExecutor?.shutdownNow() } catch (e: Exception) { Log.w(TAG, "eglExecutor shutdown: ${e.message}") }
         try { sEglExecutor?.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
