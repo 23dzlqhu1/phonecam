@@ -22,6 +22,7 @@ qt_add_executable(phonecam WIN32
     src/core/pcp_receiver.cpp
     src/core/hw_decoder.cpp
     src/core/connection_manager.cpp
+    src/core/adb_locator.cpp
     src/core/device_discovery.cpp
     src/core/final_frame_composer.cpp
     src/output/virtual_cam.cpp
@@ -57,6 +58,7 @@ qt_add_executable(phonecam-adb-setup WIN32
     src/adb_setup/main.cpp
     src/adb_setup/setup_window.cpp
     src/adb_setup/setup_window.h
+    src/core/adb_locator.cpp
 )
 
 target_include_directories(phonecam-adb-setup PRIVATE src)

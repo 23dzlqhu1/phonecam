@@ -43,7 +43,7 @@ english.VCRedistInstallFailed=Microsoft Visual C++ Runtime installation failed w
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "enableusb"; Description: "Enable USB connection (downloads Android Platform Tools / ADB from Tsinghua TUNA mirror)"; GroupDescription: "Connection options:"
+Name: "enableusb"; Description: "Enable USB connection (downloads official Android Platform Tools / ADB)"; GroupDescription: "Connection options:"
 
 [Files]
 ; prepare-dist.ps1 已递归验证程序、DLL 和 Qt 插件依赖。
