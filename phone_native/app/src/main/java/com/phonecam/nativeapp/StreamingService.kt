@@ -592,15 +592,16 @@ class StreamingService : Service() {
                     InAppLogStore.w(TAG, "[3.2.0.3f] 已在推流或启动中, 忽略重复 START")
                     return START_NOT_STICKY
                 }
+                // 8月9日修复 B: 新一轮启动前清理旧的失败状态 (B6)
+                sStartFailedReason = ""
                 sStarting = true
                 startForeground(NOTIF_ID, buildNotification("推流中…"))
                 startStreamingInWorker()
             }
             ACTION_STOP -> {
                 InAppLogStore.i(TAG, "[3.2.0.3f] 收到 STOP, 停推流")
-                stopStreamingInternal()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                // 8月9日修复 B: 用户主动停止 → 状态 IDLE + 清理资源 + 结束前台 Service
+                stopStreamingByUser()
             }
             else -> {
                 InAppLogStore.w(TAG, "[3.2.0.3f] onStartCommand 无 action: $intent")
@@ -614,7 +615,8 @@ class StreamingService : Service() {
 
     override fun onDestroy() {
         InAppLogStore.i(TAG, "[3.2.0.3f] Service onDestroy")
-        stopStreamingInternal()
+        // 8月9日修复 B: onDestroy 只安全释放剩余资源, 不覆盖失败状态 (B11)
+        cleanupStreamingResources()
         super.onDestroy()
     }
 
@@ -678,7 +680,7 @@ class StreamingService : Service() {
                         Toast.makeText(this, "推流启动失败: 120s 内未收到 PC 端连接", Toast.LENGTH_LONG).show()
                     }
                     sStarting = false
-                    stopStreamingInternal()
+                    failStreamingCleanup()  // 8月9日修复 B: 保留 START_FAILED + reason
                     return@Thread
                 }
 
@@ -692,7 +694,7 @@ class StreamingService : Service() {
                     sStreamState = StreamState.START_FAILED
                     sStartFailedReason = "没有摄像头权限，请返回 PhoneCam 并允许相机权限"
                     sStarting = false
-                    stopStreamingInternal()
+                    failStreamingCleanup()  // 8月9日修复 B: 保留 START_FAILED + reason
                     return@Thread
                 }
                 // 2) 启动 headless Camera + frame pipeline (Service 持有, Activity 后台也持续)
@@ -730,7 +732,7 @@ class StreamingService : Service() {
                 sStartFailedReason = "启动异常: ${e.message}"  // P1-3
                 Toast.makeText(this, "推流启动异常: ${e.message}", Toast.LENGTH_LONG).show()
                 sStarting = false
-                stopStreamingInternal()
+                failStreamingCleanup()  // 8月9日修复 B: 保留 START_FAILED + reason
             }
         }, WORKER_THREAD_NAME).start()
     }
@@ -820,27 +822,26 @@ class StreamingService : Service() {
             sStreamState = StreamState.START_FAILED
             sStartFailedReason = "摄像头启动失败: ${e.message}"
             sStarting = false
-            stopStreamingInternal()
+            failStreamingCleanup()  // 8月9日修复 B: 保留 START_FAILED + reason
             return false
         }
     }
 
     /**
-     * 内部停止 (按推流按钮触发 或 启动失败时调)
-     * 注意: streaming flag 是 sActive, 不是 MainActivity.streaming
+     * 8月9日修复 B: 纯资源清理 —— 只释放推流资源, 不修改 sStreamState / sStartFailedReason。
+     * 资源释放 ≠ 用户状态修改。由调用方决定最终状态 (IDLE 或保留 START_FAILED)。
+     * 幂等: 可安全重复调用 (onDestroy 二次清理不 crash)。
      */
-    private fun stopStreamingInternal() {
+    private fun cleanupStreamingResources() {
         sActive = false
         sStarting = false
         sEncoderReady = false
         sPauseFrameSubmit = true  // 立即停止帧提交
-        sStreamState = StreamState.IDLE
-        sStartFailedReason = ""
         sClientDisconnected = false
         // BUG-013: 递增 generation，使所有旧 task 失效
         StreamingService.sStreamGeneration++
         stopStatsTimer()
-        // 8月9日后台保活: 先停 Camera (不再产生新帧), 再排空/停止下游
+        // 先停 Camera (不再产生新帧), 再排空/停止下游
         try { sCameraController?.close() } catch (e: Exception) { Log.w(TAG, "cameraController.close: ${e.message}") }
         sCameraController = null
         sFramePool = null
@@ -855,10 +856,32 @@ class StreamingService : Service() {
         sEglRenderer = null
         try { sTcpServer?.stop() } catch (e: Exception) { Log.w(TAG, "tcpServer.stop: ${e.message}") }
         sTcpServer = null
-        // 8月9日修复: 停止 DiscoveryResponder, 释放 9997 端口并退出 discovery 线程
+        // 停止 DiscoveryResponder, 释放 9997 端口并退出 discovery 线程
         try { discoveryResponder?.stop() } catch (e: Exception) { Log.w(TAG, "discoveryResponder.stop: ${e.message}") }
         discoveryResponder = null
-        InAppLogStore.i(TAG, "[BUG-013] 推流已完全停止 (gen=${sStreamGeneration})")
+        InAppLogStore.i(TAG, "[BUG-013] 推流资源已清理 (gen=${sStreamGeneration})")
+    }
+
+    /**
+     * 8月9日修复 B: 用户主动停止推流 —— 状态 → IDLE + reason 清空 + 清理资源 + 结束前台 Service。
+     */
+    private fun stopStreamingByUser() {
+        sStreamState = StreamState.IDLE
+        sStartFailedReason = ""
+        cleanupStreamingResources()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    /**
+     * 8月9日修复 B: 启动失败路径 —— 仅清理资源并结束前台 Service,
+     * 保留 START_FAILED + sStartFailedReason, 让 MainActivity 仍能读到真实失败原因
+     * (直到用户再次点击开始推流, ACTION_START 会清空旧错误)。
+     */
+    private fun failStreamingCleanup() {
+        cleanupStreamingResources()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     // 批次 3.2.0.3g 帧率统计 timer (主线程 Handler, 5s 一次)
