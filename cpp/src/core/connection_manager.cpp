@@ -102,6 +102,32 @@ void ConnectionManager::selectDevice(const QString& deviceId) {
         checkConnection();
         return;
     }
+    // 8月9日修复 A: 协议不兼容的设备不发起 TCP, 只展示版本不兼容 (A13)
+    DeviceCandidate* cand = findCandidate(deviceId);
+    if (cand && !cand->compatible) {
+        m_manualSelection = true;
+        m_activeDeviceId.clear();
+        m_info.state = ConnectionState::Disconnected;
+        // 完整版本不兼容提示: 手机端版本/协议 + 电脑端版本/支持协议
+        const QString phoneApp = cand->appVersion.isEmpty()
+            ? QString::fromUtf8("未知")
+            : QString("PhoneCam Android %1").arg(cand->appVersion);
+        const QString phonePcp = cand->pcpVersion > 0
+            ? QString("PCP v%1").arg(cand->pcpVersion)
+            : QString::fromUtf8("未知");
+        const QString pcVersion = QCoreApplication::applicationVersion();
+        m_info.error = QString::fromUtf8(
+            "版本不兼容：手机端 %1（手机协议 %2），电脑端 PhoneCam %3 仅支持 PCP v%4。"
+            "请升级 PhoneCam 手机端或电脑端，确保两端协议版本兼容。")
+            .arg(phoneApp, phonePcp, pcVersion)
+            .arg(kSupportedPcpVersion);
+        m_info.url = cand->url;
+        m_info.connectionType = cand->transport;
+        qDebug() << "[CONN] Incompatible device selected, not connecting:" << cand->displayName
+                 << cand->compatibilityError;
+        emit stateChanged(m_info);
+        return;
+    }
     m_manualSelection = true;
     m_activeDeviceId = deviceId;
     connectToCandidate(deviceId);
@@ -215,8 +241,27 @@ void ConnectionManager::checkConnection() {
                 cand.displayName = QString("WiFi - %1 (%2)").arg(dev.name, dev.ip);
                 cand.transport = "wifi";
                 cand.url = dev.url;
-                cand.status = "Found";
                 cand.lastSeen = QDateTime::currentMSecsSinceEpoch();
+                // 8月9日修复 A: 版本 metadata + 协议兼容性判断 (只判断 pcpVersion)
+                cand.appVersion = dev.appVersion;
+                cand.appVersionCode = dev.appVersionCode;
+                cand.discoveryVersion = dev.discoveryVersion;
+                cand.pcpVersion = dev.pcpVersion;
+                if (dev.pcpVersion == kSupportedPcpVersion) {
+                    cand.compatible = true;
+                    cand.status = "Found";
+                } else if (dev.pcpVersion > 0) {
+                    cand.compatible = false;
+                    cand.status = "Incompatible";
+                    cand.compatibilityError =
+                        QString::fromUtf8("手机协议为 PCP v%1，当前电脑端仅支持 PCP v%2")
+                            .arg(dev.pcpVersion).arg(kSupportedPcpVersion);
+                } else {
+                    cand.compatible = false;
+                    cand.status = "Incompatible";
+                    cand.compatibilityError =
+                        QString::fromUtf8("手机未报告有效的 PCP 协议版本");
+                }
                 wifiCandidates.append(cand);
             }
 
@@ -329,9 +374,9 @@ void ConnectionManager::checkConnection() {
                             m_activeDeviceId = c.id; connectToCandidate(c.id); return;
                         }
                     }
-                    // 3. WiFi
+                    // 3. WiFi (8月9日修复 A: 只自动连接 compatible 的已验证 PhoneCam)
                     for (const auto& c : m_candidates) {
-                        if (c.transport == "wifi" && c.status == "Found") {
+                        if (c.transport == "wifi" && c.status == "Found" && c.compatible) {
                             qDebug() << "[CONN] Auto-selecting WiFi device:" << c.displayName << c.url;
                             m_activeDeviceId = c.id; connectToCandidate(c.id); return;
                         }

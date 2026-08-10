@@ -31,9 +31,16 @@ struct DeviceCandidate {
     QString transport;    // "usb", "wifi", "manual"
     QString url;          // "host:port"
     QString adbSerial;    // ADB serial for USB (empty otherwise)
-    QString status;       // "Found", "Connecting", "Connected", "Failed"
+    QString status;       // "Found", "Connecting", "Connected", "Failed", "Incompatible"
     QString lastError;
     qint64 lastSeen = 0;
+    // 8月9日修复 A: 版本 metadata 与协议兼容性 (WiFi/UDP Discovery 来源才有完整值)
+    QString appVersion;           // Android App versionName (未知时为空)
+    int appVersionCode = 0;       // Android versionCode
+    int discoveryVersion = 0;     // Discovery protocol version
+    int pcpVersion = 0;           // PCP protocol version (0 = 未报告)
+    bool compatible = true;       // 协议是否兼容
+    QString compatibilityError;   // 不兼容时的用户可读原因
 };
 
 // Aggregated connection diagnostics

@@ -8,6 +8,10 @@
 
 namespace phonecam {
 
+// 协议版本常量 (8月9日修复 A): 避免 magic number 散落
+constexpr int kSupportedDiscoveryVersion = 1;  // Discovery Protocol V1
+constexpr int kSupportedPcpVersion = 2;        // PCP Protocol V2
+
 // 通过 PhoneCam Discovery V1 验证后发现的真实 PhoneCam 设备
 struct DiscoveredDevice {
     QString deviceId;          // Android ANDROID_ID (稳定设备身份)
@@ -17,6 +21,9 @@ struct DiscoveredDevice {
     QString url;               // "ip:port"
     int discoveryVersion = 0;  // PHONECAM_HERE.version
     int pcpVersion = 0;        // 手机报告的 pcpVersion
+    // 8月9日修复 A: Android App 版本 (仅展示/日志用, 不用于协议兼容判断; 旧版手机可能缺失)
+    QString appVersion;        // e.g. "0.2.9"
+    int appVersionCode = 0;    // e.g. 18
     QString interfaceName;     // 收到响应的本地接口 (diagnostics 用)
 };
 

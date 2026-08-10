@@ -154,13 +154,23 @@ DiscoveryResult DeviceDiscovery::discover(quint16 discoveryPort, int windowMs) {
                 dev.url = QString("%1:%2").arg(dev.ip).arg(dev.port);
                 dev.discoveryVersion = obj.value("version").toInt();
                 dev.pcpVersion = obj.value("pcpVersion").toInt(0);
+                // 8月9日修复 A: App 版本 metadata (旧版手机可能缺失, 非强制字段)
+                dev.appVersion = obj.value("appVersion").toString();
+                dev.appVersionCode = obj.value("appVersionCode").toInt(0);
                 dev.interfaceName = se.interfaceName;
 
                 result.devices.append(dev);
                 result.found = true;
-                qDebug() << "[DISC] 收到 PHONECAM_HERE:" << dev.name
-                         << dev.ip << ":" << dev.port << "iface:" << dev.interfaceName
-                         << "pcp:" << dev.pcpVersion;
+                // 8月9日修复 A: 日志含完整版本信息 (用于诊断, 不扩大 UI 展示)
+                const QString appVer = dev.appVersion.isEmpty()
+                    ? QString::fromUtf8("unknown")
+                    : QString("%1(%2)").arg(dev.appVersion).arg(dev.appVersionCode);
+                qDebug().noquote() << "[DISC] device=" << dev.name
+                                   << "android=" << appVer
+                                   << "discovery=v" << dev.discoveryVersion
+                                   << "pcp=v" << dev.pcpVersion
+                                   << "ip=" << dev.url
+                                   << "iface=" << dev.interfaceName;
                 emit deviceFound(dev);
             }
         }

@@ -10,6 +10,11 @@ android {
     namespace = "com.phonecam.nativeapp"          // R 类包名（与 applicationId 区分）
     compileSdk = 34                               // Android 14 API
 
+    // 8月9日修复 A: 生成 BuildConfig (VERSION_NAME/VERSION_CODE), 供 DiscoveryResponder 报告 App 版本
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "com.phonecam.nativeapp"  // 装机后包名（与旧 phone/ 的 com.phonecam.phone 区分）
         minSdk = 24                               // Android 7.0+ 覆盖 99% 设备

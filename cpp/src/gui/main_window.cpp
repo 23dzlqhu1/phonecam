@@ -165,11 +165,16 @@ MainWindow::MainWindow(QWidget* parent)
                            (c.transport == "wifi") ? "📶" : "🔗";
             QString statusIcon = (c.status == "Connected") ? "✅" :
                                  (c.status == "Connecting") ? "⏳" :
+                                 (c.status == "Incompatible") ? "⚠" :   // 8月9日修复 A: 版本不兼容
                                  (c.status == "Failed") ? "❌" : "⬜";
             // P2-1 Loop 4: Mark active device with ▶
             QString activePrefix = (c.id == activeId) ? "▶ " : "";
+            // 8月9日修复 A: Incompatible 用"版本不兼容"而非英文状态
+            QString statusText = (c.status == "Incompatible")
+                ? QString::fromUtf8("版本不兼容")
+                : c.status;
             QString label = QString("%1%2 %3 %4 [%5]")
-                .arg(activePrefix, icon, c.displayName, statusIcon, c.status);
+                .arg(activePrefix, icon, c.displayName, statusIcon, statusText);
             if (!c.lastError.isEmpty() && c.status == "Failed") {
                 label += QString(" — %1").arg(c.lastError);
             }
@@ -629,7 +634,10 @@ void MainWindow::onConnectionStateChanged(const ConnectionInfo& info) {
     case ConnectionState::Disconnected:
         m_statusDot->setStyleSheet("background-color: #c53030; border-radius: 3px;");
         m_statusTitle->setText("断开");
-        m_statusDetail->setText("重连中");
+        // 8月9日修复 A: 选择不兼容设备时显示版本不兼容原因 (而非"重连中")
+        m_statusDetail->setText(info.error.isEmpty()
+            ? QString::fromUtf8("重连中")
+            : info.error);
         updateDiagnosticsBar();
         break;
     default:

@@ -126,6 +126,9 @@ class DiscoveryResponder(
             response.put("nonce", nonce)             // 原样返回 request nonce
             response.put("deviceId", getDeviceId())
             response.put("deviceName", getDeviceName())
+            // 8月9日修复 A: 报告 App 版本 (BuildConfig 自动跟随 Gradle 版本, 禁止硬编码)
+            response.put("appVersion", BuildConfig.VERSION_NAME)
+            response.put("appVersionCode", BuildConfig.VERSION_CODE)
             response.put("tcpPort", tcpPort)
             response.put("pcpVersion", PCP_VERSION)
 
