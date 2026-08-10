@@ -1,14 +1,10 @@
 #include "core/connection_manager.h"
 #include <QProcess>
-#include <QStandardPaths>
-#include <QFileInfo>
 #include <QDebug>
-#include <QDir>
 #include <QDateTime>
 #include <QRegularExpression>
 #include <QSet>
 #include <QtConcurrent>
-#include <QSettings>
 #include <QCoreApplication>
 
 namespace phonecam {
@@ -188,47 +184,102 @@ void ConnectionManager::checkConnection() {
         int basePort = m_nextLocalPort;
         m_nextLocalPort += 16;
 
-        QtConcurrent::run([this, basePort]() {
+        // 第7节：把 adb version 缓存快照传给 worker，避免跨线程直接访问成员；
+        // worker 只在解析到的 ADB 路径与缓存不一致时补一次 version 探测
+        const QString cachedAdbPath = m_adbCachedPath;
+        const QString cachedAdbVersion = m_adbVersionText;
+
+        QtConcurrent::run([this, basePort, cachedAdbPath, cachedAdbVersion]() {
             // ── Worker thread: all blocking I/O ──
-            QString adb = findAdb();
+            QString adb = adbPath();  // 共享 AdbLocator：进程内缓存，日常不重复执行 adb version
             QStringList adbDeviceLines;
-            QString adbStatus = "not found";
+            QString adbStatus = "unavailable";
+            QString deviceState = "unavailable";  // AdbUnavailable：adb 路径为空或启动失败
+            QString deviceModel;
+            QString adbVersionText = cachedAdbVersion;
+            QVector<AdbDeviceState> deviceStates;
 
             QVector<DeviceCandidate> usbCandidates;
-            if (!adb.isEmpty()) {
+            if (adb.isEmpty()) {
+                // 找不到有效 ADB → AdbUnavailable（第30节：与"没插手机"是不同故障层）
+                deviceState = "unavailable";
+            } else {
                 QProcess proc;
                 proc.start(adb, {"devices", "-l"});
                 proc.waitForFinished(5000);
                 QString output = proc.readAllStandardOutput();
                 adbDeviceLines = output.split('\n');
-                adbStatus = adbDeviceLines.size() > 1 ? "ok" : "no devices";
 
-                int portIndex = 0;
-                for (int i = 1; i < adbDeviceLines.size(); ++i) {
-                    QString line = adbDeviceLines[i].trimmed();
-                    if (line.isEmpty()) continue;
-                    QStringList parts = line.split(QRegularExpression("\\s+"));
-                    if (parts.size() < 2 || parts[1] != "device") continue;
+                // 只有启动 adb devices 明确失败时才报告 ADB 不可用（第7节）
+                if (proc.exitCode() != 0 || output.trimmed().isEmpty()) {
+                    adbStatus = "unavailable";
+                    deviceState = "unavailable";
+                } else {
+                    adbStatus = "ready";
+                    // 路径首次发现/变化时补一次 adb version 并缓存（第7节：日常不重复执行）
+                    if (adb.compare(cachedAdbPath, Qt::CaseInsensitive) != 0) {
+                        const AdbValidation v = AdbLocator::validateAdb(adb);
+                        if (v.valid) adbVersionText = v.versionText;
+                    }
 
-                    QString serial = parts[0];
-                    QString model = serial;
-                    QRegularExpression re("model:(\\S+)");
-                    auto match = re.match(line);
-                    if (match.hasMatch()) model = match.captured(1);
+                    // ── adb devices -l 四态解析（第25-29节）──
+                    bool anyDevice = false;
+                    bool anyUnauthorized = false;
+                    bool anyOffline = false;
+                    int portIndex = 0;
+                    for (int i = 1; i < adbDeviceLines.size(); ++i) {
+                        QString line = adbDeviceLines[i].trimmed();
+                        if (line.isEmpty()) continue;
+                        if (line.startsWith("List of devices")) continue;  // 防御输出顺序异常
+                        QStringList parts = line.split(QRegularExpression("\\s+"));
+                        if (parts.size() < 2) continue;
 
-                    int localPort = basePort + (portIndex++);
-                    bool fwdOk = setupAdbForwardForDevice(serial, localPort);
+                        const QString serial = parts[0];
+                        const QString state = parts[1];
 
-                    DeviceCandidate cand;
-                    cand.id = "usb:" + serial;
-                    cand.displayName = QString("USB - %1").arg(model);
-                    cand.transport = "usb";
-                    cand.url = QString("127.0.0.1:%1").arg(localPort);
-                    cand.adbSerial = serial;
-                    cand.status = fwdOk ? "Found" : "Failed";
-                    cand.lastError = fwdOk ? "" : "adb forward failed";
-                    cand.lastSeen = QDateTime::currentMSecsSinceEpoch();
-                    usbCandidates.append(cand);
+                        AdbDeviceState ds;
+                        ds.serial = serial;
+                        ds.state = state;
+
+                        if (state == "device") {
+                            // DeviceReady：提取 model:（如 model:OPPO_xxx）
+                            QRegularExpression re("model:(\\S+)");
+                            auto match = re.match(line);
+                            if (match.hasMatch()) ds.model = match.captured(1);
+                            if (deviceModel.isEmpty() && !ds.model.isEmpty()) {
+                                deviceModel = ds.model;
+                            }
+
+                            // 只有 DeviceReady 设备才做 adb forward 并生成 USB candidate（协议不变）
+                            int localPort = basePort + (portIndex++);
+                            bool fwdOk = setupAdbForwardForDevice(serial, localPort);
+
+                            DeviceCandidate cand;
+                            cand.id = "usb:" + serial;
+                            cand.displayName = QString("USB - %1")
+                                .arg(ds.model.isEmpty() ? serial : ds.model);
+                            cand.transport = "usb";
+                            cand.url = QString("127.0.0.1:%1").arg(localPort);
+                            cand.adbSerial = serial;
+                            cand.status = fwdOk ? "Found" : "Failed";
+                            cand.lastError = fwdOk ? "" : "adb forward failed";
+                            cand.lastSeen = QDateTime::currentMSecsSinceEpoch();
+                            usbCandidates.append(cand);
+                            anyDevice = true;
+                        } else if (state == "unauthorized") {
+                            anyUnauthorized = true;
+                        } else if (state == "offline") {
+                            anyOffline = true;
+                        }
+                        // 其他未知状态（sideload/no permissions 等）只保留在设备列表，不参与聚合
+                        deviceStates.append(ds);
+                    }
+
+                    // 聚合四态：unauthorized > offline > device > no-devices（只要存在更严重状态就优先提示）
+                    if (anyUnauthorized) deviceState = "unauthorized";
+                    else if (anyOffline) deviceState = "offline";
+                    else if (anyDevice) deviceState = "device";
+                    else deviceState = "no-devices";
                 }
             }
 
@@ -267,14 +318,18 @@ void ConnectionManager::checkConnection() {
 
             // ── Merge back on main thread ──
             QMetaObject::invokeMethod(this, [this, usbCandidates, wifiCandidates,
-                discResult, adbStatus, adbDeviceLines]() {
+                discResult, adbStatus, adbDeviceLines, adb, deviceState,
+                deviceModel, deviceStates, adbVersionText]() {
                 m_adbProbeRunning = false;
                 m_hotspotDiscoveryRunning = false;
 
                 // ── Logging: discovery results ──
                 qDebug() << "[CONN] === Discovery cycle ===";
                 qDebug() << "[CONN] ADB status:" << adbStatus
-                         << "devices:" << adbDeviceLines.size() - 1;
+                         << "path:" << (adb.isEmpty() ? QStringLiteral("(none)") : adb)
+                         << "device state:" << deviceState
+                         << "model:" << (deviceModel.isEmpty() ? QStringLiteral("(none)") : deviceModel)
+                         << "raw lines:" << adbDeviceLines.size() - 1;
                 qDebug() << "[CONN] USB candidates this cycle:" << usbCandidates.size();
                 for (const auto& c : usbCandidates) {
                     qDebug() << "[CONN]   USB:" << c.id << c.displayName
@@ -335,6 +390,15 @@ void ConnectionManager::checkConnection() {
                 m_diagnostics.discoveryStatus = discResult.discoveryStatus;
                 m_diagnostics.adbStatus = adbStatus;
                 m_diagnostics.adbDevices = adbDeviceLines;
+                m_diagnostics.adbPath = adb;
+                m_diagnostics.adbVersion = adbVersionText;
+                m_diagnostics.deviceState = deviceState;
+                m_diagnostics.deviceModel = deviceModel;
+                m_diagnostics.adbDeviceStates = deviceStates;
+
+                // 更新 adb version 进程内缓存（第7节：路径不变则日常不再重复探测）
+                m_adbCachedPath = adb;
+                m_adbVersionText = adbVersionText;
 
                 // Stale cleanup: remove candidates not seen for 30s
                 qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -398,7 +462,7 @@ void ConnectionManager::checkConnection() {
 // ── ADB helpers ──
 
 bool ConnectionManager::setupAdbForwardForDevice(const QString& serial, quint16 localPort) {
-    QString adb = findAdb();
+    QString adb = adbPath();
     if (adb.isEmpty()) return false;
     QString localTcp = QString("tcp:%1").arg(localPort);
     QString remoteTcp = QString("tcp:%1").arg(m_port);
@@ -419,92 +483,10 @@ DeviceCandidate* ConnectionManager::findCandidate(const QString& id) {
     return nullptr;
 }
 
-// 从 local.properties 中解析 sdk.dir（支持 Gradle 的 Windows 路径转义）
-static QString readSdkDirFromLocalProperties(const QString& filePath) {
-    QFile props(filePath);
-    if (!props.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
-    QTextStream in(&props);
-    QString line;
-    while (in.readLineInto(&line)) {
-        if (line.startsWith("sdk.dir=")) {
-            return line.mid(8).trimmed()
-                .replace("\\:", ":")
-                .replace("\\\\", "\\");
-        }
-    }
-    return {};
-}
-
-// 从程序所在目录向上回溯，寻找 phone_native/local.properties
-static QString findProjectLocalProperties() {
-    QString appDir = QCoreApplication::applicationDirPath();
-    QDir dir(appDir);
-    for (int i = 0; i < 6; ++i) {
-        QString candidate = dir.absoluteFilePath("phone_native/local.properties");
-        if (QFileInfo::exists(candidate)) return candidate;
-        if (!dir.cdUp()) break;
-    }
-    return {};
-}
-
-QString ConnectionManager::findAdb() {
-    QSettings settings(QSettings::IniFormat, QSettings::UserScope,
-                       "PhoneCam", "PhoneCam");
-
-    // 1. 环境变量显式覆盖（最高优先级）
-    QString envPath = qEnvironmentVariable("PHONECAM_ADB_PATH");
-    if (!envPath.isEmpty() && QFileInfo::exists(envPath)) {
-        return envPath;
-    }
-
-    // 2. 使用上次缓存的成功路径
-    QString cached = settings.value("adb/path").toString();
-    if (!cached.isEmpty() && QFileInfo::exists(cached)) {
-        return cached;
-    }
-
-    // 3. 在系统 PATH 中查找 adb/adb.exe
-    QString fromPath = QStandardPaths::findExecutable("adb");
-    if (!fromPath.isEmpty()) {
-        settings.setValue("adb/path", fromPath);
-        return fromPath;
-    }
-
-    // 收集所有可能的 Android SDK 根目录
-    QStringList sdkRoots;
-
-    // 4. 从环境变量 ANDROID_SDK_ROOT / ANDROID_HOME 推导
-    for (const char* name : {"ANDROID_SDK_ROOT", "ANDROID_HOME"}) {
-        QString val = qEnvironmentVariable(name);
-        if (!val.isEmpty()) sdkRoots.append(val);
-    }
-
-    // 5. 从项目 local.properties 推导
-    QString localProps = findProjectLocalProperties();
-    if (!localProps.isEmpty()) {
-        QString sdkDir = readSdkDirFromLocalProperties(localProps);
-        if (!sdkDir.isEmpty()) sdkRoots.append(sdkDir);
-    }
-
-    // 6. 常见安装路径
-    sdkRoots << QDir::homePath() + "/AppData/Local/Android/Sdk"
-             << "C:/Android/Sdk"
-             << "D:/Android/Sdk"
-             << QDir::homePath() + "/Android/Sdk";
-
-    // 去重并尝试 platform-tools/adb.exe
-    QSet<QString> seen;
-    for (const QString& root : sdkRoots) {
-        if (root.isEmpty() || seen.contains(root)) continue;
-        seen.insert(root);
-        QString candidate = QDir(root).absoluteFilePath("platform-tools/adb.exe");
-        if (QFileInfo::exists(candidate)) {
-            settings.setValue("adb/path", candidate);
-            return candidate;
-        }
-    }
-
-    return {};
-}
+// ── ADB 定位已统一交给共享 AdbLocator（core/adb_locator.h）──
+// 旧的 findAdb() / findProjectLocalProperties() / readSdkDirFromLocalProperties()
+// 实现已删除：搜索顺序、QSettings 缓存、local.properties 推导等逻辑全部收敛到
+// AdbLocator（与 phonecam-adb-setup 共用同一套规则）。日常检测调用 adbPath()
+// 即 AdbLocator::resolveAdb()，进程内缓存已验证路径，避免重复执行 adb version（第7节）。
 
 } // namespace phonecam

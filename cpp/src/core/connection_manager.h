@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <memory>
 #include "core/device_discovery.h"
+#include "core/adb_locator.h"
 
 namespace phonecam {
 
@@ -43,13 +44,25 @@ struct DeviceCandidate {
     QString compatibilityError;   // 不兼容时的用户可读原因
 };
 
+// 单个 ADB 设备状态（多设备时每条记录一个；state 为 adb devices 第二列原始值）
+struct AdbDeviceState {
+    QString serial;
+    QString state;    // "device" / "unauthorized" / "offline" 等
+    QString model;    // 解析自 model:xxx（仅 DeviceReady 设备可能有，可为空）
+};
+
 // Aggregated connection diagnostics
 struct ConnectionDiagnostics {
     QStringList localNics;          // 本地有效 IPv4 地址
     QStringList discoveryInterfaces;  // 参与 UDP discovery 广播的接口 (name + ip)
     QString discoveryStatus;          // "ok-found" / "ok-no-devices" / "no-interfaces" / "send-failed"
-    QString adbStatus;
-    QStringList adbDevices;
+    QString adbStatus;                // "ready" / "unavailable"（不再输出 ok / no devices 等含糊值）
+    QStringList adbDevices;           // adb devices -l 原始输出行（供日志）
+    QString adbPath;                  // 当前使用的 adb 路径（为空 = 未找到）
+    QString adbVersion;               // adb version 版本文本（已知时；遵循第7节不重复探测）
+    QString deviceState;              // "no-devices" / "unauthorized" / "offline" / "device" / "unavailable"
+    QString deviceModel;              // 首个 DeviceReady 设备的 model（未知为空）
+    QVector<AdbDeviceState> adbDeviceStates;  // 每个设备的状态（多设备支持）
 };
 
 class ConnectionManager : public QObject {
@@ -73,8 +86,8 @@ public:
 
     ConnectionInfo info() const { return m_info; }
 
-    // 返回当前使用的 ADB 可执行文件路径（为空表示未找到）
-    QString adbPath() { return findAdb(); }
+    // 返回当前使用的 ADB 可执行文件路径（为空表示未找到）；内部复用共享 AdbLocator（进程内缓存）
+    QString adbPath() { return AdbLocator::resolveAdb(); }
 
 signals:
     void stateChanged(const phonecam::ConnectionInfo& info);
@@ -87,7 +100,6 @@ private slots:
 
 private:
     bool setupAdbForwardForDevice(const QString& serial, quint16 localPort);
-    QString findAdb();
     DeviceCandidate* findCandidate(const QString& id);
     void connectToCandidate(const QString& id);
 
@@ -107,6 +119,10 @@ private:
     bool m_adbProbeRunning = false;
     bool m_hotspotDiscoveryRunning = false;
     bool m_streamConfirmed = false;
+
+    // 第7节：adb version 进程内缓存（只在路径首次发现/变化时探测一次，日常不重复执行）
+    QString m_adbCachedPath;    // 已取得版本信息的 adb 路径
+    QString m_adbVersionText;   // 对应的 adb version 版本文本
 };
 
 } // namespace phonecam

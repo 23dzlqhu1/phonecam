@@ -490,8 +490,9 @@ void MainWindow::setupUi() {
     connect(manualBtn, &QPushButton::clicked, this, &MainWindow::onManualConnect);
     devSelRow->addWidget(manualBtn);
 
-    // ADB 安装向导按钮（当 ADB 未安装时可手动补票）
-    QPushButton* adbSetupBtn = new QPushButton(QString::fromUtf8("安装 ADB"));
+    // USB 连接设置按钮（第8节：不再叫"安装 ADB"；点击仍启动 phonecam-adb-setup.exe）
+    QPushButton* adbSetupBtn = new QPushButton(QString::fromUtf8("USB 连接设置"));
+    adbSetupBtn->setToolTip(QString::fromUtf8("打开 USB 连接设置窗口"));
     adbSetupBtn->setStyleSheet(
         "QPushButton { font: 10px 'Segoe UI'; color: #2b6cb0; background: #e8f0fe; "
         "border: 1px solid #90b4e0; border-radius: 3px; padding: 2px 8px; }"
@@ -842,9 +843,13 @@ void MainWindow::toggleFullScreen() {
 
 void MainWindow::onDiagnosticsChanged(const ConnectionDiagnostics& diag) {
     m_lastDiag = diag;
-    // Connection status tooltip
+    // Connection status tooltip（用户友好文案，不放技术字符串；技术细节见日志）
     QStringList lines;
     lines << QString::fromUtf8("ADB: %1").arg(diag.adbStatus);
+    lines << QString::fromUtf8("USB 设备: %1").arg(diag.deviceState);
+    if (!diag.deviceModel.isEmpty()) {
+        lines << QString::fromUtf8("手机型号: %1").arg(diag.deviceModel);
+    }
     if (diag.discoveryStatus == "no-interfaces" || diag.discoveryStatus == "send-failed") {
         lines << QString::fromUtf8("UDP discovery: 未发现可用于 PhoneCam 自动发现的局域网接口");
     } else {
@@ -871,24 +876,29 @@ void MainWindow::updateDiagnosticsBar() {
     }
     QStringList msgs;
     const auto& diag = m_lastDiag;
-    // USB/ADB diagnostics
-    if (diag.adbStatus == "not found") {
-        msgs << QString::fromUtf8("⚠ adb 未安装 — 请安装 Android Platform Tools 或使用 WiFi/热点连接");
-    } else if (diag.adbStatus == "no devices") {
-        msgs << QString::fromUtf8("⚠ 未检测到 USB 设备 — 请连接手机并开启 USB 调试");
-    } else {
-        for (const auto& line : diag.adbDevices) {
-            if (line.contains("unauthorized")) {
-                msgs << QString::fromUtf8("❌ USB 设备未授权 — 请在手机上点击「允许 USB 调试」");
-            } else if (line.contains("offline")) {
-                msgs << QString::fromUtf8("❌ USB 设备离线 — 请拔插 USB 线或重启 USB 调试");
-            }
+    // USB/ADB 诊断（第26-31节：普通用户可理解的文案，不暴露 ADB_STATUS/exitCode 等技术字符串）
+    if (diag.adbStatus == "unavailable") {
+        // AdbUnavailable：与"没插手机"是不同故障层（第30节）
+        msgs << QString::fromUtf8("❌ USB 连接组件不可用 — 请打开「USB 连接设置」");
+    } else if (diag.deviceState == "no-devices") {
+        msgs << QString::fromUtf8("⚠ 手机未连接 — 请使用支持数据传输的 USB 线连接手机，并开启「开发者选项」和「USB 调试」，完成操作后点击「刷新」");
+    } else if (diag.deviceState == "unauthorized") {
+        msgs << QString::fromUtf8("⚠ 等待手机授权 — 请查看手机屏幕上的「允许 USB 调试吗？」，点击允许（建议勾选始终允许），完成操作后点击「刷新」");
+    } else if (diag.deviceState == "offline") {
+        msgs << QString::fromUtf8("⚠ USB 状态异常 — 请拔插 USB 数据线、解锁手机，或关闭再开启 USB 调试，完成后点击「刷新」");
+    } else if (diag.deviceState == "device") {
+        // DeviceReady：能读到 model 时显示具体型号（第29节）
+        if (diag.deviceModel.isEmpty()) {
+            msgs << QString::fromUtf8("✅ USB 手机已连接");
+        } else {
+            msgs << QString::fromUtf8("✅ %1 已通过 USB 连接").arg(diag.deviceModel);
         }
     }
-    // USB forward diagnostics
+    // USB forward diagnostics（不暴露 adb forward tcp:... / exitCode 等技术字符串）
     for (const auto& c : m_connManager->candidates()) {
         if (c.transport == "usb" && c.status == "Failed") {
-            msgs << QString::fromUtf8("❌ USB 转发失败: %1").arg(c.lastError);
+            msgs << QString::fromUtf8("❌ USB 转发失败 — 请拔插 USB 数据线后点击「刷新」");
+            break;
         }
     }
     // WiFi/Hotspot diagnostics (UDP PhoneCam Discovery V1)
@@ -975,20 +985,20 @@ void MainWindow::onManualConnect() {
 }
 
 void MainWindow::onInstallAdb() {
-    // 启动与 phonecam.exe 同目录下的 ADB 安装向导
+    // 启动与 phonecam.exe 同目录下的 USB 连接设置工具（phonecam-adb-setup.exe）
     QString appDir = QCoreApplication::applicationDirPath();
     QString setupPath = QDir(appDir).absoluteFilePath("phonecam-adb-setup.exe");
 
     if (!QFileInfo::exists(setupPath)) {
-        QMessageBox::warning(this, QString::fromUtf8("未找到安装向导"),
-            QString::fromUtf8("找不到 ADB 安装向导：%1\n请重新安装 PhoneCam。").arg(setupPath));
+        QMessageBox::warning(this, QString::fromUtf8("未找到设置工具"),
+            QString::fromUtf8("找不到 USB 连接设置工具：%1\n请重新安装 PhoneCam。").arg(setupPath));
         return;
     }
 
     bool started = QProcess::startDetached(setupPath, QStringList(), appDir);
     if (!started) {
         QMessageBox::critical(this, QString::fromUtf8("启动失败"),
-            QString::fromUtf8("无法启动 ADB 安装向导：%1").arg(setupPath));
+            QString::fromUtf8("无法启动 USB 连接设置工具：%1").arg(setupPath));
     }
 }
 
@@ -1098,6 +1108,21 @@ void MainWindow::onExportLogs() {
             for (const auto& d : m_lastDiag.adbDevices) {
                 ts << "  " << d << "\n";
             }
+
+            // 第51节：USB / ADB 诊断段（用户/支持可读，不含敏感目录外信息）
+            ts << "\n=== USB / ADB ===\n";
+            ts << "ADB status: " << m_lastDiag.adbStatus << "\n";
+            ts << "ADB path: "
+               << (m_lastDiag.adbPath.isEmpty() ? QStringLiteral("(none)") : m_lastDiag.adbPath)
+               << "\n";
+            ts << "ADB version: "
+               << (m_lastDiag.adbVersion.isEmpty() ? QStringLiteral("(unknown)") : m_lastDiag.adbVersion)
+               << "\n";
+            ts << "Device state: " << m_lastDiag.deviceState << "\n";
+            ts << "Device model: "
+               << (m_lastDiag.deviceModel.isEmpty() ? QStringLiteral("(unknown)") : m_lastDiag.deviceModel)
+               << "\n";
+
             ts << "\nCandidates:\n";
             for (const auto& c : m_connManager->candidates()) {
                 ts << "  " << c.transport << " - " << c.displayName
