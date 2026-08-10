@@ -89,6 +89,13 @@ class StreamingService : Service() {
         // 方向锁定状态: 影响输出 rotation, 必须由 Service 持有 (Activity 销毁后仍正确)
         @Volatile var sOrientationLockEnabled: Boolean = false
         @Volatile var sLockedStreamRotation: Int = 0
+        // 8月9日修复 B 补充: fatal failure 统一 cleanup
+        // Service instance 引用: 仅 StreamingService 内部使用, 生命周期受控, 不持有 Activity/UI
+        @Volatile private var sServiceInstance: StreamingService? = null
+        // fatal cleanup 请求只真正调度一次 (防止多个 fatal 事件重复 cleanup / 覆盖首因)
+        @Volatile private var sFatalCleanupRequested: Boolean = false
+        // 保护 sFatalCleanupRequested 的"检查-设置"原子性 (多线程 fatal 并发时保证首因唯一)
+        private val sFatalCleanupLock = Any()
         @Volatile var sCameraW: Int = 1280
         @Volatile var sCameraH: Int = 720
         @Volatile var sCameraFps: Int = 30    // 从 SettingsStore 读取, 写入 MediaCodec KEY_FRAME_RATE
@@ -192,9 +199,8 @@ class StreamingService : Service() {
                     "[BUG-013] 帧尺寸变化! encoder=${sCameraW}x${sCameraH} " +
                     "→ frame=${frame.width}x${frame.height}，需重启推流")
                 frame.release()
-                sStartFailedReason = "相机分辨率变化(${sCameraW}x${sCameraH}→${frame.width}x${frame.height})，请重新推流"
-                sStreamState = StreamState.START_FAILED
-                sActive = false
+                // 8月9日修复 B 补充: fatal 统一 cleanup (保留 START_FAILED + reason)
+                requestFatalFailure("相机分辨率变化(${sCameraW}x${sCameraH}→${frame.width}x${frame.height})，请重新推流")
                 return
             }
 
@@ -343,18 +349,14 @@ class StreamingService : Service() {
                 }
                 if (!rendererLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
                     InAppLogStore.e(TAG, "[BUG-013] 5s 内 EglRenderer 未构造完")
-                    sStartFailedReason = "EGL 初始化超时"
-                    sStreamState = StreamState.START_FAILED
-                    sActive = false
-                    sPauseFrameSubmit = false
+                    // 8月9日修复 B 补充: fatal 统一 cleanup (保留 START_FAILED + reason)
+                    requestFatalFailure("EGL 初始化超时")
                     return
                 }
                 sEglRenderer = rendererHolder[0] ?: run {
                     InAppLogStore.e(TAG, "[BUG-013] EglRenderer 为 null")
-                    sStartFailedReason = "EGL 初始化失败"
-                    sStreamState = StreamState.START_FAILED
-                    sActive = false
-                    sPauseFrameSubmit = false
+                    // 8月9日修复 B 补充: fatal 统一 cleanup (保留 START_FAILED + reason)
+                    requestFatalFailure("EGL 初始化失败")
                     return
                 }
 
@@ -383,11 +385,8 @@ class StreamingService : Service() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "[BUG-013] encoder/EGL 初始化异常", e)
-                sStartFailedReason = "编码器初始化失败: ${e.message}"
-                sStreamState = StreamState.START_FAILED
-                sActive = false
-                sStarting = false
-                sPauseFrameSubmit = false
+                // 8月9日修复 B 补充: fatal 统一 cleanup (保留 START_FAILED + reason)
+                requestFatalFailure("编码器初始化失败: ${e.message}")
             }
         }
 
@@ -404,6 +403,48 @@ class StreamingService : Service() {
             val encoder = sH264Encoder
             if (sActive && encoder != null) {
                 encoder.requestKeyframe()
+            }
+        }
+
+        /**
+         * 8月9日修复 B 补充: 统一 fatal failure 入口。
+         *
+         * 适用于任何"stream 已无法继续工作"的 fatal 错误 (EGL 超时 / renderer null /
+         * encoder/EGL 异常 / 运行时帧尺寸变化)。职责:
+         *  1. 保留第一个真实 reason (后续连发错误只记录 log, 不覆盖根因)
+         *  2. 设置 START_FAILED + sActive=false + sStarting=false + sPauseFrameSubmit=true (停止新帧)
+         *  3. 通过 Service instance 切到 main looper 执行 failStreamingCleanup()
+         *     (绝不从 executor/ImageReader 线程直接调 cleanup, 避免自等待/死锁)
+         *  4. 多次调用安全: 实际 cleanup 请求只调度一次 (sFatalCleanupRequested)
+         *
+         * 新 START 时 (ACTION_START) 必须 reset sFatalCleanupRequested, 否则无法再次失败/清理。
+         */
+        fun requestFatalFailure(reason: String) {
+            // 原子地判断"是否首个 fatal"并占位, 保证并发 fatal 只保留一个首因/一次 cleanup
+            val first: Boolean
+            synchronized(sFatalCleanupLock) {
+                first = !sFatalCleanupRequested
+                if (first) sFatalCleanupRequested = true
+            }
+            if (first) {
+                sStartFailedReason = reason  // 首因优先, 后续连锁错误不覆盖
+                InAppLogStore.e(TAG, "[FATAL] $reason")
+            } else {
+                InAppLogStore.w(TAG, "[FATAL] 忽略后续 fatal (cleanup 已请求, 保留首因): $reason")
+            }
+            sStreamState = StreamState.START_FAILED
+            sActive = false
+            sStarting = false
+            sPauseFrameSubmit = true  // 停止新帧
+            if (!first) return  // cleanup 已调度, 不重复
+            val service = sServiceInstance
+            if (service == null) {
+                // 生命周期 race 极端情况: 状态/原因已保留, 但无法调度 Service cleanup
+                Log.w(TAG, "[FATAL] sServiceInstance 为 null, 无法调度 Service cleanup (状态已保留)")
+                return
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                service.failStreamingCleanup()
             }
         }
 
@@ -581,6 +622,8 @@ class StreamingService : Service() {
     override fun onCreate() {
         super.onCreate()
         InAppLogStore.i(TAG, "[3.2.0.3f] Service onCreate")
+        // 8月9日修复 B 补充: 注册 service instance, 供 requestFatalFailure 切 main looper 调度 cleanup
+        sServiceInstance = this
         createNotificationChannel()
     }
 
@@ -594,6 +637,10 @@ class StreamingService : Service() {
                 }
                 // 8月9日修复 B: 新一轮启动前清理旧的失败状态 (B6)
                 sStartFailedReason = ""
+                // 8月9日修复 B 补充: 新 START 重置 fatal cleanup 标志, 允许再次失败/清理
+                synchronized(sFatalCleanupLock) {
+                    sFatalCleanupRequested = false
+                }
                 sStarting = true
                 startForeground(NOTIF_ID, buildNotification("推流中…"))
                 startStreamingInWorker()
@@ -617,6 +664,10 @@ class StreamingService : Service() {
         InAppLogStore.i(TAG, "[3.2.0.3f] Service onDestroy")
         // 8月9日修复 B: onDestroy 只安全释放剩余资源, 不覆盖失败状态 (B11)
         cleanupStreamingResources()
+        // 8月9日修复 B 补充: 解除 service instance 引用, 防止过期实例被 requestFatalFailure 使用
+        if (sServiceInstance === this) {
+            sServiceInstance = null
+        }
         super.onDestroy()
     }
 
