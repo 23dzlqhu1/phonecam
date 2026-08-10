@@ -5,6 +5,7 @@
 #include <QPushButton>
 #include <QTimer>
 #include <QMouseEvent>
+#include <QProcess>
 #include <atomic>
 #include <memory>
 
@@ -53,6 +54,35 @@ private:
     std::atomic<int> m_manualRotation{0};
 };
 
+// 虚拟摄像头健康状态（基于注册表只读检查，不修改任何注册项）
+struct VirtualCameraHealth {
+    bool comRegistered = false;           // CLSID/InprocServer32 注册项存在
+    bool dllExists = false;               // 注册路径指向的文件存在
+    bool pathMatchesCurrentInstall = false; // 注册路径 == 当前安装目录的 DLL
+    bool directShowRegistered = false;    // DirectShow VideoInputDeviceCategory 中有 PhoneCam Camera
+
+    QString registeredPath;
+    QString expectedPath;
+
+    enum class Status {
+        Healthy,
+        MissingRegistration,  // CLSID 不存在
+        MissingDll,           // 注册路径存在，但 DLL 已不存在
+        WrongPath,            // 注册到了旧 PhoneCam 目录
+        DirectShowMissing,    // COM 正常，但 DirectShow 分类中没有 PhoneCam Camera
+    };
+
+    Status status() const {
+        if (!comRegistered) return Status::MissingRegistration;
+        if (!dllExists) return Status::MissingDll;
+        if (!pathMatchesCurrentInstall) return Status::WrongPath;
+        if (!directShowRegistered) return Status::DirectShowMissing;
+        return Status::Healthy;
+    }
+
+    bool healthy() const { return status() == Status::Healthy; }
+};
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -80,6 +110,8 @@ private slots:
     void onRefreshDevices();
     void onManualConnect();
     void onInstallAdb();
+    void onRepairVirtualCamera();
+    void onRepairFinished(int exitCode, QProcess::ExitStatus exitStatus);
 
 
 protected:
@@ -92,6 +124,7 @@ private:
     void startPipeline();
     void updateDiagnosticsBar();
     void updatePreflightStatus();
+    VirtualCameraHealth checkVirtualCameraHealth() const;  // 只读健康检查（64-bit registry view）
     QString activeDeviceDisplayName() const;  // BUG-007: helper for active candidate name
     void enterStreamingState();               // BUG-007: transition UI to streaming
     void exitStreamingState();                // BUG-007: transition UI back to standby
@@ -127,6 +160,8 @@ private:
     QPushButton* m_exportLogBtn;
     QPushButton* m_quitBtn;
     QLabel* m_streamLabel = nullptr;  // BUG-007: 推流 status label (was local in setupUi)
+    QPushButton* m_repairVcamBtn = nullptr;  // 虚拟摄像头一键修复按钮
+    QProcess* m_repairProc = nullptr;        // 异步修复进程（UAC regsvr32）
 
     // State
     bool m_mirror = false;

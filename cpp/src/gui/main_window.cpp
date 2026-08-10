@@ -311,6 +311,17 @@ MainWindow::~MainWindow() {
 
     // 5. Close shared memory
     m_sharedWriter.close();
+
+    // 6. 若修复进程仍在运行（例如窗口被关闭），终止它
+    if (m_repairProc) {
+        disconnect(m_repairProc, nullptr, this, nullptr);
+        if (m_repairProc->state() != QProcess::NotRunning) {
+            m_repairProc->kill();
+            m_repairProc->waitForFinished(2000);
+        }
+        m_repairProc->deleteLater();
+        m_repairProc = nullptr;
+    }
 }
 
 void MainWindow::setupUi() {
@@ -329,16 +340,27 @@ void MainWindow::setupUi() {
     QHBoxLayout* pfLayout = new QHBoxLayout(m_preflightPanel);
     pfLayout->setContentsMargins(12, 8, 12, 8);
     pfLayout->setSpacing(18);
-    QLabel* pfTitle = new QLabel(QString::fromUtf8("会议准备"));
+    QLabel* pfTitle = new QLabel(QString::fromUtf8("状态检查"));
     pfTitle->setStyleSheet("font: 600 13px 'Segoe UI'; color: #2c3e50; background: transparent;");
     pfLayout->addWidget(pfTitle);
     pfLayout->addWidget(new QLabel("|"));
-    const char* pfNames[] = {"手机推流", "PC 接收", "虚拟摄像头", "腾讯会议可见"};
+    const char* pfNames[] = {"手机推流", "PC 接收", "虚拟摄像头", "系统摄像头"};
     for (int i = 0; i < 4; i++) {
         m_preflightLabels[i] = new QLabel(QString::fromUtf8("\u2B1C %1").arg(pfNames[i]));
         m_preflightLabels[i]->setStyleSheet("font: 12px 'Segoe UI'; color: #8b95a5; background: transparent;");
         pfLayout->addWidget(m_preflightLabels[i]);
     }
+    // 虚拟摄像头一键修复按钮：仅在注册异常时显示
+    m_repairVcamBtn = new QPushButton(QString::fromUtf8("修复虚拟摄像头"));
+    m_repairVcamBtn->setStyleSheet(
+        "QPushButton { font: 11px 'Segoe UI'; color: #2b6cb0; background: #e8f0fe; "
+        "border: 1px solid #90b4e0; border-radius: 3px; padding: 2px 10px; }"
+        "QPushButton:hover { background: #d4e4fc; }"
+        "QPushButton:disabled { color: #a0aec0; background: #f0f2f5; border-color: #d5d9e0; }");
+    m_repairVcamBtn->setCursor(Qt::PointingHandCursor);
+    m_repairVcamBtn->setVisible(false);
+    connect(m_repairVcamBtn, &QPushButton::clicked, this, &MainWindow::onRepairVirtualCamera);
+    pfLayout->addWidget(m_repairVcamBtn);
     pfLayout->addStretch();
     m_preflightPanel->setStyleSheet("background: #f8f9fa; border-bottom: 1px solid #e0e3e8;");
     mainLayout->addWidget(m_preflightPanel);
@@ -563,7 +585,7 @@ void MainWindow::setupUi() {
     toolLayout->addWidget(m_rotateBtn);
 
     // P1-2: 预览输出说明
-    QLabel* previewNote = new QLabel(QString::fromUtf8("预览 = 腾讯会议输出"));
+    QLabel* previewNote = new QLabel(QString::fromUtf8("预览 = 虚拟摄像头输出"));
     previewNote->setStyleSheet("font: 10px 'Segoe UI'; color: #a0aec0; background: transparent;");
     toolLayout->addWidget(previewNote);
 
@@ -1085,6 +1107,24 @@ void MainWindow::onExportLogs() {
             }
             ts << "\nStream established: " << (m_streamEstablished ? "yes" : "no") << "\n";
 
+            // Virtual Camera 健康诊断（不写“腾讯会议可见”这类无法证明的承诺）
+            ts << "\n=== Virtual Camera ===\n";
+            const VirtualCameraHealth vcam = checkVirtualCameraHealth();
+            QString vcamHealthText;
+            switch (vcam.status()) {
+            case VirtualCameraHealth::Status::Healthy: vcamHealthText = QStringLiteral("Healthy"); break;
+            case VirtualCameraHealth::Status::MissingRegistration: vcamHealthText = QStringLiteral("MissingRegistration"); break;
+            case VirtualCameraHealth::Status::MissingDll: vcamHealthText = QStringLiteral("MissingDll"); break;
+            case VirtualCameraHealth::Status::WrongPath: vcamHealthText = QStringLiteral("WrongPath"); break;
+            case VirtualCameraHealth::Status::DirectShowMissing: vcamHealthText = QStringLiteral("DirectShowMissing"); break;
+            }
+            ts << "Health: " << vcamHealthText << "\n";
+            ts << "Expected DLL: " << vcam.expectedPath << "\n";
+            ts << "Registered DLL: " << vcam.registeredPath << "\n";
+            ts << "DLL exists: " << (vcam.dllExists ? "yes" : "no") << "\n";
+            ts << "Path matches: " << (vcam.pathMatchesCurrentInstall ? "yes" : "no") << "\n";
+            ts << "DirectShow registered: " << (vcam.directShowRegistered ? "yes" : "no") << "\n";
+
             // Preflight status
             ts << "\n=== Preflight ===\n";
             for (int i = 0; i < 4; i++) {
@@ -1179,62 +1219,199 @@ void MainWindow::updatePreflightStatus() {
     m_preflightLabels[1]->setStyleSheet(pcReceiving ?
         "font: 12px 'Segoe UI'; color: #27ae60; background: transparent;" :
         "font: 12px 'Segoe UI'; color: #c53030; background: transparent;");
-    // Item 3: 虚拟摄像头已注册 (Windows registry check)
-    bool vcamRegistered = false;
-#ifdef Q_OS_WIN
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-            L"SOFTWARE\\Classes\\CLSID\\{B5CA7E2A-7E4B-4C3E-9E1A-3D5F8A2C6B4E}\\InprocServer32",
-            0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        vcamRegistered = true;
-        RegCloseKey(hKey);
-    }
-#endif
-    m_preflightLabels[2]->setText(vcamRegistered ?
+
+    // Item 3/4: 虚拟摄像头健康检查（只读，64-bit registry view）
+    VirtualCameraHealth health = checkVirtualCameraHealth();
+    bool vcamComOk = health.comRegistered && health.dllExists && health.pathMatchesCurrentInstall;
+    m_preflightLabels[2]->setText(vcamComOk ?
         QString::fromUtf8("✅ 虚拟摄像头") : QString::fromUtf8("❌ 虚拟摄像头"));
-    m_preflightLabels[2]->setStyleSheet(vcamRegistered ?
+    m_preflightLabels[2]->setStyleSheet(vcamComOk ?
         "font: 12px 'Segoe UI'; color: #27ae60; background: transparent;" :
         "font: 12px 'Segoe UI'; color: #c53030; background: transparent;");
-    // Item 4: 腾讯会议可见 (DirectShow enumeration via registry)
-    bool dshowVisible = false;
+    // Item 4: PhoneCam Camera 已进入 Windows DirectShow VideoInputDeviceCategory
+    m_preflightLabels[3]->setText(health.directShowRegistered ?
+        QString::fromUtf8("✅ 系统摄像头") : QString::fromUtf8("❌ 系统摄像头"));
+    m_preflightLabels[3]->setStyleSheet(health.directShowRegistered ?
+        "font: 12px 'Segoe UI'; color: #27ae60; background: transparent;" :
+        "font: 12px 'Segoe UI'; color: #c53030; background: transparent;");
+
+    // 修复按钮：修复进行中 → 禁用并显示进度；健康 → 隐藏；异常 → 显示
+    if (m_repairVcamBtn) {
+        bool repairing = m_repairProc && m_repairProc->state() != QProcess::NotRunning;
+        if (repairing) {
+            m_repairVcamBtn->setVisible(true);
+            m_repairVcamBtn->setEnabled(false);
+            m_repairVcamBtn->setText(QString::fromUtf8("修复中..."));
+        } else if (health.healthy()) {
+            m_repairVcamBtn->setVisible(false);
+        } else {
+            m_repairVcamBtn->setVisible(true);
+            m_repairVcamBtn->setEnabled(true);
+            m_repairVcamBtn->setText(QString::fromUtf8("修复虚拟摄像头"));
+            // 已注册但会议软件没刷新时，通过 tooltip 说明 PhoneCam 只能保证系统层面注册
+            m_repairVcamBtn->setToolTip(
+                QString::fromUtf8("如果会议软件在安装/修复前已打开，请完全退出并重新打开会议软件后重新选择摄像头。"));
+        }
+    }
+
+    // Overall status
+    bool allGreen = phoneStreaming && pcReceiving && vcamComOk && health.directShowRegistered;
+    m_preflightPanel->setStyleSheet(allGreen ?
+        "background: #e8f5e9; border-bottom: 1px solid #c8e6c9;" :
+        "background: #f8f9fa; border-bottom: 1px solid #e0e3e8;");
+}
+
+// ── 虚拟摄像头健康检查（只读，不修改任何注册项） ──
+
+VirtualCameraHealth MainWindow::checkVirtualCameraHealth() const {
+    VirtualCameraHealth health;
+    health.expectedPath = QDir(QCoreApplication::applicationDirPath())
+        .absoluteFilePath(QStringLiteral("phonecam-virtualcam.dll"));
+
 #ifdef Q_OS_WIN
-    HKEY hInstance;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-            L"SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance",
-            0, KEY_READ, &hInstance) == ERROR_SUCCESS) {
+    // PhoneCam PC 与虚拟摄像头 DLL 均为 x64：显式读取 64-bit registry view，
+    // 避免 WOW64 下误判。
+    const REGSAM viewFlag = KEY_WOW64_64KEY;
+
+    // 1. CLSID/InprocServer32 是否存在，并读取默认值（注册的 DLL path）
+    wchar_t valueBuf[1024] = {0};
+    DWORD valueSize = sizeof(valueBuf);
+    HKEY hKey = nullptr;
+    LONG lr = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Classes\\CLSID\\{B5CA7E2A-7E4B-4C3E-9E1A-3D5F8A2C6B4E}\\InprocServer32",
+        0, KEY_READ | viewFlag, &hKey);
+    if (lr == ERROR_SUCCESS) {
+        health.comRegistered = true;
+        DWORD type = 0;
+        valueSize = sizeof(valueBuf);
+        if (RegQueryValueExW(hKey, nullptr, nullptr, &type,
+                             (LPBYTE)valueBuf, &valueSize) == ERROR_SUCCESS &&
+            type == REG_SZ && valueBuf[0] != L'\0') {
+            health.registeredPath = QString::fromWCharArray(valueBuf);
+        }
+        RegCloseKey(hKey);
+    }
+
+    // 2. 注册路径指向的文件是否实际存在
+    if (!health.registeredPath.isEmpty()) {
+        health.dllExists = QFileInfo::exists(health.registeredPath);
+    }
+
+    // 3. 注册路径是否指向当前安装目录的 DLL（大小写不敏感，统一斜杠）
+    if (!health.registeredPath.isEmpty()) {
+        const QString regPath = QDir::cleanPath(QDir::fromNativeSeparators(health.registeredPath));
+        const QString expPath = QDir::cleanPath(QDir::fromNativeSeparators(health.expectedPath));
+        health.pathMatchesCurrentInstall = regPath.compare(expPath, Qt::CaseInsensitive) == 0;
+    }
+
+    // 4. DirectShow VideoInputDeviceCategory 中是否存在 PhoneCam Camera
+    HKEY hInstance = nullptr;
+    lr = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance",
+        0, KEY_READ | viewFlag, &hInstance);
+    if (lr == ERROR_SUCCESS) {
         wchar_t subKeyName[256];
         DWORD index = 0;
-        DWORD nameLen = 256;
-        while (RegEnumKeyExW(hInstance, index++, subKeyName, &nameLen,
-                             nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-            HKEY hSub;
-            if (RegOpenKeyExW(hInstance, subKeyName, 0, KEY_READ, &hSub) == ERROR_SUCCESS) {
-                wchar_t friendlyName[512];
+        for (;;) {
+            DWORD nameLen = 256;
+            LONG subLr = RegEnumKeyExW(hInstance, index++, subKeyName, &nameLen,
+                                       nullptr, nullptr, nullptr, nullptr);
+            if (subLr == ERROR_NO_MORE_ITEMS) break;
+            if (subLr != ERROR_SUCCESS) continue;
+            HKEY hSub = nullptr;
+            if (RegOpenKeyExW(hInstance, subKeyName, 0, KEY_READ | viewFlag, &hSub) == ERROR_SUCCESS) {
+                wchar_t friendlyName[512] = {0};
                 DWORD size = sizeof(friendlyName);
-                if (RegQueryValueExW(hSub, L"FriendlyName", nullptr, nullptr,
-                                     (LPBYTE)friendlyName, &size) == ERROR_SUCCESS) {
-                    if (wcsstr(friendlyName, L"PhoneCam Camera") != nullptr) {
-                        dshowVisible = true;
-                    }
+                DWORD type = 0;
+                if (RegQueryValueExW(hSub, L"FriendlyName", nullptr, &type,
+                                     (LPBYTE)friendlyName, &size) == ERROR_SUCCESS &&
+                    type == REG_SZ &&
+                    wcsstr(friendlyName, L"PhoneCam Camera") != nullptr) {
+                    health.directShowRegistered = true;
                 }
                 RegCloseKey(hSub);
             }
-            nameLen = 256;
-            if (dshowVisible) break;
+            if (health.directShowRegistered) break;
         }
         RegCloseKey(hInstance);
     }
 #endif
-    m_preflightLabels[3]->setText(dshowVisible ?
-        QString::fromUtf8("✅ 腾讯会议可见") : QString::fromUtf8("❌ 腾讯会议可见"));
-    m_preflightLabels[3]->setStyleSheet(dshowVisible ?
-        "font: 12px 'Segoe UI'; color: #27ae60; background: transparent;" :
-        "font: 12px 'Segoe UI'; color: #c53030; background: transparent;");
-    // Overall status
-    bool allGreen = phoneStreaming && pcReceiving && vcamRegistered && dshowVisible;
-    m_preflightPanel->setStyleSheet(allGreen ?
-        "background: #e8f5e9; border-bottom: 1px solid #c8e6c9;" :
-        "background: #f8f9fa; border-bottom: 1px solid #e0e3e8;");
+    return health;
+}
+
+// ── 虚拟摄像头一键修复（异步 + UAC） ──
+
+void MainWindow::onRepairVirtualCamera() {
+    if (m_repairProc && m_repairProc->state() != QProcess::NotRunning) return;
+
+    // 修复永远针对当前程序目录的 DLL，不使用旧注册路径
+    const QString dllPath = QDir(QCoreApplication::applicationDirPath())
+        .absoluteFilePath(QStringLiteral("phonecam-virtualcam.dll"));
+    if (!QFileInfo::exists(dllPath)) {
+        QMessageBox::warning(this, QString::fromUtf8("无法修复"),
+            QString::fromUtf8("未找到 phonecam-virtualcam.dll，请重新安装 PhoneCam。"));
+        return;
+    }
+
+    m_repairVcamBtn->setEnabled(false);
+    m_repairVcamBtn->setText(QString::fromUtf8("修复中..."));
+
+    // 通过 PowerShell Start-Process -Verb RunAs 触发 UAC，异步等待 regsvr32 完成。
+    // regsvr32 从 system32 启动 → 64-bit 版本，与 DLL bitness 匹配。
+    // 用户取消 UAC 时 PowerShell 抛错、无 "EXIT=" 输出 → 可区分"取消"与"注册失败"。
+    QString psCmd = QStringLiteral(
+        "$dll='%1'; "
+        "$p=Start-Process -FilePath regsvr32.exe -ArgumentList ('/s \"'+$dll+'\"') "
+        "-Verb RunAs -Wait -PassThru -ErrorAction Stop; "
+        "Write-Output ('EXIT='+$p.ExitCode); exit 0").arg(dllPath);
+
+    m_repairProc = new QProcess(this);
+    connect(m_repairProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, &MainWindow::onRepairFinished);
+    m_repairProc->start(QStringLiteral("powershell.exe"), QStringList()
+        << QStringLiteral("-NoProfile") << QStringLiteral("-NonInteractive")
+        << QStringLiteral("-Command") << psCmd);
+    if (m_repairProc->state() == QProcess::NotRunning) {
+        // 启动失败（极端情况）
+        m_repairProc->deleteLater();
+        m_repairProc = nullptr;
+        m_repairVcamBtn->setEnabled(true);
+        m_repairVcamBtn->setText(QString::fromUtf8("修复虚拟摄像头"));
+        QMessageBox::warning(this, QString::fromUtf8("修复失败"),
+            QString::fromUtf8("无法启动修复流程，请关闭正在使用摄像头的会议软件/浏览器后重试，或重新安装 PhoneCam。"));
+    }
+}
+
+void MainWindow::onRepairFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    Q_UNUSED(exitCode)
+    QProcess* proc = qobject_cast<QProcess*>(sender());
+    QString output;
+    if (proc) {
+        output = QString::fromLocal8Bit(proc->readAllStandardOutput()).trimmed();
+        proc->deleteLater();
+    }
+    m_repairProc = nullptr;
+
+    // 重新做完整健康检查（不能只相信 regsvr32 的 exit code）
+    const VirtualCameraHealth health = checkVirtualCameraHealth();
+    updatePreflightStatus();
+
+    if (output.contains("EXIT=")) {
+        // UAC 已允许，regsvr32 已真正运行
+        const int regExit = output.section("EXIT=", 1, 1).toInt();
+        if (regExit == 0 && health.healthy()) {
+            QMessageBox::information(this, QString::fromUtf8("修复完成"),
+                QString::fromUtf8("PhoneCam Camera 已成功注册。\n\n"
+                    "如果会议软件已在安装/修复前打开，请完全退出并重新打开会议软件后重新选择摄像头。"));
+        } else {
+            QMessageBox::warning(this, QString::fromUtf8("修复未完成"),
+                QString::fromUtf8("修复未完成，请关闭正在使用摄像头的会议软件/浏览器后重试，或重新安装 PhoneCam。"));
+        }
+    } else {
+        // 无 "EXIT=" 输出 → PowerShell 异常退出，通常是用户取消了 UAC
+        QMessageBox::information(this, QString::fromUtf8("已取消"),
+            QString::fromUtf8("修复需要管理员权限，操作已取消。"));
+    }
 }
 
 } // namespace phonecam
