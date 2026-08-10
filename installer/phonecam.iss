@@ -48,8 +48,12 @@ Name: "enableusb"; Description: "Enable USB connection (downloads Android Platfo
 [Files]
 ; prepare-dist.ps1 已递归验证程序、DLL 和 Qt 插件依赖。
 ; VC_redist 只嵌入安装包，由 PrepareToInstall 安装，不写入应用目录。
-Source: "..\dist\staging\*"; DestDir: "{app}"; Excludes: "redist\VC_redist.x64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
+; phonecam-virtualcam.dll 单独注册（regserver），故从通配复制中排除，避免重复安装。
+Source: "..\dist\staging\*"; DestDir: "{app}"; Excludes: "redist\VC_redist.x64.exe,phonecam-virtualcam.dll"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\dist\staging\redist\VC_redist.x64.exe"; Flags: dontcopy noencryption
+; 虚拟摄像头 DLL：64-bit，安装时调用 DllRegisterServer()，卸载时调用 DllUnregisterServer()。
+; x64compatible + 64-bit mode 安装下，Inno Setup 会以 64-bit 进程完成注册，bitness 正确。
+Source: "..\dist\staging\phonecam-virtualcam.dll"; DestDir: "{app}"; Flags: ignoreversion regserver
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
