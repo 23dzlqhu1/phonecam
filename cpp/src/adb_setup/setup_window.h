@@ -33,7 +33,9 @@ enum class SetupState {
 class SetupWindow : public QWidget {
     Q_OBJECT
 public:
-    explicit SetupWindow(QWidget* parent = nullptr);
+    explicit SetupWindow(const QString& androidApkPath = {},
+                         bool installApkRequested = false,
+                         QWidget* parent = nullptr);
 
 protected:
     void closeEvent(QCloseEvent* event) override;  // 关闭窗口时中止下载并清理临时文件
@@ -45,6 +47,7 @@ private slots:
     void onDownloadClicked();                  // [官方下载并安装]
     void onSelectExeClicked();                 // [选择已有 adb.exe]
     void onImportZipClicked();                 // [导入 Platform-Tools ZIP]
+    void onInstallApkClicked();                // [安装/修复手机端]
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
     void onReadyRead();                        // 流式写入临时 ZIP，避免一次性读入内存
     void onDownloadFinished();
@@ -66,6 +69,7 @@ private:
     bool writeAdbPathToSettings(const QString& adbPath) const;
     QString mapNetworkError(QNetworkReply::NetworkError code) const;  // 网络错误→中文提示
     void showFailureDialog(const QString& message);  // 失败自救：重试 / 选 exe / 导入 ZIP
+    bool prepareTlsBackend();                  // HTTPS 预检，并优先启用 Schannel
 
     // 控件
     QLabel* m_statusLabel = nullptr;
@@ -73,6 +77,7 @@ private:
     QPushButton* m_downloadBtn = nullptr;      // [官方下载并安装]
     QPushButton* m_selectExeBtn = nullptr;     // [选择已有 adb.exe]
     QPushButton* m_importZipBtn = nullptr;     // [导入 Platform-Tools ZIP]
+    QPushButton* m_installApkBtn = nullptr;    // [安装/修复手机端]
     QProgressBar* m_progressBar = nullptr;
 
     // 下载状态
@@ -83,10 +88,15 @@ private:
     qint64 m_bytesReceived = 0;
     qint64 m_bytesExpected = -1;
     QStringList m_tlsErrors;                   // 保存真实 TLS 错误详情，仅用于日志与分类
+    QStringList m_availableTlsBackends;
+    QString m_activeTlsBackend;
+    bool m_tlsPreflightOk = false;
 
     // 启动检查结果缓存
     QString m_existingPath;                    // 检查找到的本机 ADB 路径（空 = 未找到）
     QString m_existingVersion;                 // 对应的版本行文本
+    QString m_androidApkPath;                  // 仅接受命令行/安装器明确传入的 APK 绝对路径
+    bool m_installApkRequested = false;         // 等 ADB启动检查结束后再执行 CLI安装
 
     SetupState m_state = SetupState::CheckingExisting;
 

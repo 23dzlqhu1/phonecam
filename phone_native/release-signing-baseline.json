@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "applicationId": "com.phonecam.nativeapp",
+  "versionCode": 17,
+  "versionName": "0.2.8-mvp2-batch3.2.0.3h-portfix3",
+  "certificateSha256": "5423ea7166454aa5c39c49852c552932ef07350486976a95fc81880eb6963d1d",
+  "releaseTag": "v2.0.1",
+  "releaseUrl": "https://github.com/Naokoisme/phonecam/releases/tag/v2.0.1",
+  "assetName": "PhoneCam-Android-v0.2.8.apk",
+  "assetSha256": "b40b08208d1fbc1bd073d84f96d1cbc0944b1802f95a37c18ef1b8c48eec2ee5",
+  "verifiedAt": "2026-08-12 21:27 (Asia/Shanghai)"
+}

@@ -24,6 +24,7 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QDebug>
 #include <QTimer>
 #include <QThread>
@@ -31,17 +32,25 @@
 #include <QUuid>
 #include <QProcess>
 #include <QSslError>
+#include <QSslSocket>
 
 #include <memory>
 #include <utility>
 
 #include "core/adb_locator.h"
+#include "core/adb_command_runner.h"
+#include "core/apk_installer.h"
+#include "core/apk_metadata.h"
+#include "core/tls_diagnostics.h"
 
 namespace phonecam {
 
-SetupWindow::SetupWindow(QWidget* parent)
+SetupWindow::SetupWindow(const QString& androidApkPath, bool installApkRequested,
+                         QWidget* parent)
     : QWidget(parent)
     , m_network(new QNetworkAccessManager(this))
+    , m_androidApkPath(androidApkPath)
+    , m_installApkRequested(installApkRequested)
 {
     setWindowTitle(QString::fromUtf8("PhoneCam USB 连接设置"));
     setMinimumWidth(580);
@@ -87,6 +96,11 @@ SetupWindow::SetupWindow(QWidget* parent)
     m_importZipBtn = new QPushButton(QString::fromUtf8("导入 Platform-Tools ZIP"));
     root->addWidget(m_importZipBtn, 0, Qt::AlignLeft);
 
+    auto* apkTitle = new QLabel(QString::fromUtf8("<b>PhoneCam Android 端</b>"));
+    root->addWidget(apkTitle);
+    m_installApkBtn = new QPushButton(QString::fromUtf8("安装/修复手机端"));
+    root->addWidget(m_installApkBtn, 0, Qt::AlignLeft);
+
     root->addStretch();
 
     connect(m_useExistingBtn, &QPushButton::clicked,
@@ -97,6 +111,8 @@ SetupWindow::SetupWindow(QWidget* parent)
             this, &SetupWindow::onSelectExeClicked);
     connect(m_importZipBtn, &QPushButton::clicked,
             this, &SetupWindow::onImportZipClicked);
+    connect(m_installApkBtn, &QPushButton::clicked,
+            this, &SetupWindow::onInstallApkClicked);
 
     setState(SetupState::CheckingExisting);
 
@@ -124,6 +140,7 @@ void SetupWindow::setState(SetupState state)
     m_downloadBtn->setEnabled(!blocked);
     m_selectExeBtn->setEnabled(!blocked);
     m_importZipBtn->setEnabled(!blocked);
+    m_installApkBtn->setEnabled(!blocked);
     m_progressBar->setVisible(state == SetupState::Downloading);
 }
 
@@ -135,7 +152,8 @@ void SetupWindow::setStatus(const QString& text)
 
 bool SetupWindow::canStartOperation() const
 {
-    return m_state != SetupState::Downloading
+    return m_state != SetupState::CheckingExisting
+        && m_state != SetupState::Downloading
         && m_state != SetupState::Extracting
         && m_state != SetupState::Validating;
 }
@@ -196,13 +214,17 @@ void SetupWindow::onExistingCheckFinished(const QString& path, const QString& ve
         setState(SetupState::Failed);
         setStatus(QString::fromUtf8(
             "未找到可用的 USB 连接组件。\n请选择以下任一种方式完成准备："));
-        return;
+    } else {
+        // 已找到：显示 ✅ + 版本 + 路径，并提供 [使用此 ADB]
+        setState(SetupState::ReadyExisting);
+        setStatus(QString::fromUtf8("✅ 已找到 USB 连接组件\n%1\n路径：%2")
+            .arg(versionText, path));
     }
 
-    // 已找到：显示 ✅ + 版本 + 路径，并提供 [使用此 ADB]
-    setState(SetupState::ReadyExisting);
-    setStatus(QString::fromUtf8("✅ 已找到 USB 连接组件\n%1\n路径：%2")
-        .arg(versionText, path));
+    if (m_installApkRequested) {
+        m_installApkRequested = false;
+        QTimer::singleShot(0, this, &SetupWindow::onInstallApkClicked);
+    }
 }
 
 void SetupWindow::onUseExistingClicked()
@@ -229,6 +251,12 @@ void SetupWindow::onDownloadClicked()
 void SetupWindow::startDownload()
 {
     clearDownload();  // 清理上一次可能残留的下载
+
+    if (!prepareTlsBackend()) {
+        setState(SetupState::Failed);
+        showFailureDialog(tlsRuntimeMissingMessage());
+        return;
+    }
 
     const QString destDir = defaultInstallDir();
     QDir dir(destDir);
@@ -310,7 +338,7 @@ void SetupWindow::onDownloadFinished()
 
     const int httpStatus = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QNetworkReply::NetworkError netError = m_reply->error();
-    const bool tlsFailed = !m_tlsErrors.isEmpty();
+    const bool tlsFailed = !m_tlsErrors.isEmpty() || !m_tlsPreflightOk;
 
     // 详细日志（第 16 节）：记录 source/host/HTTP status/error code/errorString/TLS/bytes/elapsed
     // 不记录代理密码、认证 token 或 URL 参数等敏感信息
@@ -361,7 +389,9 @@ void SetupWindow::onDownloadFinished()
 
     // TLS 握手失败：提示"无法建立安全连接（TLS）"，绝不调用 ignoreSslErrors()
     if (tlsFailed) {
-        fail(QString::fromUtf8("无法建立安全连接（TLS）"));
+        fail(m_tlsPreflightOk
+            ? QString::fromUtf8("无法建立安全连接（TLS）。请检查系统时间、证书或安全软件。")
+            : tlsRuntimeMissingMessage());
         return;
     }
 
@@ -370,7 +400,8 @@ void SetupWindow::onDownloadFinished()
         return;
     }
 
-    fail(QString::fromUtf8("未知网络错误"));
+    fail(QString::fromUtf8(
+        "官方下载未返回有效的 HTTP 响应，请检查网络、DNS或代理设置后重试。"));
 }
 
 void SetupWindow::onSslErrors(const QList<QSslError>& errors)
@@ -380,6 +411,25 @@ void SetupWindow::onSslErrors(const QList<QSslError>& errors)
         m_tlsErrors << error.errorString();
     }
     qWarning().noquote() << "[ADB-SETUP] TLS 错误:" << m_tlsErrors;
+}
+
+bool SetupWindow::prepareTlsBackend()
+{
+    m_availableTlsBackends = QSslSocket::availableBackends();
+    if (m_availableTlsBackends.contains(QStringLiteral("schannel"), Qt::CaseInsensitive)) {
+        QSslSocket::setActiveBackend(QStringLiteral("schannel"));
+    }
+    m_activeTlsBackend = QSslSocket::activeBackend();
+    m_tlsPreflightOk = isTlsRuntimeAvailable(QSslSocket::supportsSsl(),
+                                              m_availableTlsBackends,
+                                              m_activeTlsBackend);
+
+    qInfo().noquote() << "[ADB-SETUP] TLS preflight"
+                      << "supportsSsl=" << QSslSocket::supportsSsl()
+                      << "availableBackends=" << m_availableTlsBackends
+                      << "activeBackend=" << m_activeTlsBackend
+                      << "qtVersion=" << qVersion();
+    return m_tlsPreflightOk;
 }
 
 QString SetupWindow::mapNetworkError(QNetworkReply::NetworkError code) const
@@ -405,8 +455,152 @@ QString SetupWindow::mapNetworkError(QNetworkReply::NetworkError code) const
         return QString::fromUtf8("代理或认证失败，请检查系统代理设置。");
     case QNetworkReply::SslHandshakeFailedError:
         return QString::fromUtf8("无法建立安全连接（TLS）。");
+    case QNetworkReply::ProtocolUnknownError:
+        return m_tlsPreflightOk
+            ? QString::fromUtf8("无法识别官方下载地址使用的 HTTPS 协议，请重新安装 PhoneCam。")
+            : tlsRuntimeMissingMessage();
+    case QNetworkReply::UnknownNetworkError:
+        return m_tlsPreflightOk
+            ? QString::fromUtf8("网络组件返回未分类错误；TLS 后端已加载，请检查代理或安全软件后重试。")
+            : tlsRuntimeMissingMessage();
     default:
-        return QString::fromUtf8("未知网络错误。");
+        return QString::fromUtf8("官方下载失败（网络错误代码 %1），请检查网络、DNS或代理设置。")
+            .arg(int(code));
+    }
+}
+
+void SetupWindow::onInstallApkClicked()
+{
+    if (!canStartOperation()) return;
+    if (m_androidApkPath.trimmed().isEmpty()
+        || !QFileInfo::exists(m_androidApkPath)
+        || !QFileInfo(m_androidApkPath).isFile()) {
+        const QString message = QString::fromUtf8(
+            "未提供 PhoneCam Android 安装包。请重新运行包含正式 APK 的 PhoneCam 安装包；本工具不会下载或搜索第三方 APK。");
+        setStatus(message);
+        QMessageBox::information(this, QString::fromUtf8("没有 Android 安装包"), message);
+        return;
+    }
+
+    const QString apkPath = QFileInfo(m_androidApkPath).absoluteFilePath();
+    const ApkMetadata metadata = readApkMetadata(apkPath);
+    if (!metadata.valid) {
+        const QString message = QString::fromUtf8("无法验证 Android 安装包：%1").arg(metadata.error);
+        setStatus(message);
+        QMessageBox::warning(this, QString::fromUtf8("APK 验证失败"), message);
+        return;
+    }
+    if (metadata.packageName != QString::fromLatin1(kPhoneCamNativePackage)) {
+        const QString message = QString::fromUtf8(
+            "安装包包名是 %1，不是 %2。为保护手机数据，PhoneCam 不会安装或卸载任何应用。")
+                .arg(metadata.packageName, QString::fromLatin1(kPhoneCamNativePackage));
+        setStatus(message);
+        QMessageBox::warning(this, QString::fromUtf8("APK 包名不匹配"), message);
+        return;
+    }
+
+    const QString adbPath = AdbLocator::resolveAdb();
+    if (adbPath.isEmpty() || !QFileInfo(adbPath).isAbsolute()) {
+        const QString message = QString::fromUtf8(
+            "未找到可用的 USB 连接组件。请先完成 ADB 下载、选择或 ZIP 导入。" );
+        setStatus(message);
+        QMessageBox::warning(this, QString::fromUtf8("缺少 USB 连接组件"), message);
+        return;
+    }
+
+    QProcessAdbCommandRunner runner;
+    ApkInstaller installer(runner);
+    const DeviceDiscovery discovery = installer.discoverDevices(adbPath);
+    const QList<AdbDevice> ready = discovery.readyDevices();
+    if (!discovery.commandSucceeded || ready.isEmpty()) {
+        setStatus(discovery.message);
+        QMessageBox::warning(this, QString::fromUtf8("无法安装手机端"), discovery.message);
+        return;
+    }
+
+    AdbDevice selected = ready.first();
+    if (ready.size() > 1) {
+        QStringList labels;
+        for (const AdbDevice& device : ready) {
+            labels.append(device.model.isEmpty()
+                ? device.serial
+                : QStringLiteral("%1 — %2").arg(device.model, device.serial));
+        }
+        bool accepted = false;
+        const QString choice = QInputDialog::getItem(this,
+            QString::fromUtf8("选择安装目标"),
+            QString::fromUtf8("检测到多台手机，请明确选择："), labels, 0, false, &accepted);
+        if (!accepted) {
+            setStatus(QString::fromUtf8("已取消：未选择安装目标，未执行任何安装或卸载命令。"));
+            return;
+        }
+        selected = ready.at(labels.indexOf(choice));
+    }
+
+    setStatus(QString::fromUtf8("正在向 %1（%2）安装 PhoneCam Android 端…")
+        .arg(selected.model.isEmpty() ? QString::fromUtf8("Android 手机") : selected.model,
+             selected.serial));
+
+    const CleanupConfirmation confirm = [this](const QList<AndroidUserState>& users,
+                                                const QString& diagnostic) {
+        QStringList installed;
+        QStringList stateLines;
+        bool ownerNotInstalled = false;
+        for (const AndroidUserState& user : users) {
+            if (user.stateKnown && user.installed) {
+                installed.append(QStringLiteral("%1（User %2）").arg(user.name).arg(user.id));
+            }
+            if (user.id == 0 && user.stateKnown && !user.installed) ownerNotInstalled = true;
+            stateLines.append(QStringLiteral("%1（User %2）：installed=%3, hidden=%4, suspended=%5, stopped=%6")
+                .arg(user.name).arg(user.id)
+                .arg(user.installed ? QStringLiteral("true") : QStringLiteral("false"))
+                .arg(user.hidden ? QStringLiteral("true") : QStringLiteral("false"))
+                .arg(user.suspended ? QStringLiteral("true") : QStringLiteral("false"))
+                .arg(user.stopped ? QStringLiteral("true") : QStringLiteral("false")));
+        }
+
+        QString summary;
+        if (ownerNotInstalled && !installed.isEmpty()) {
+            summary = QString::fromUtf8("旧版 PhoneCam 已不在机主空间，但仍安装在 %1 中。\n\n")
+                .arg(installed.join(QStringLiteral("、")));
+        }
+        summary += QString::fromUtf8(
+            "检测到 APK 签名冲突。\n\n"
+            "包名：com.phonecam.nativeapp\n"
+            "检测到的安装用户：%1\n\n"
+            "继续会删除旧版 PhoneCam 在所有用户/分身中的应用数据，无法恢复。\n"
+            "另一个历史包 com.phonecam.phone 不会被删除。\n\n"
+            "%2")
+            .arg(installed.isEmpty() ? QString::fromUtf8("未能确认") : installed.join(QStringLiteral("、")),
+                 stateLines.join(QLatin1Char('\n')));
+
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(QString::fromUtf8("确认删除旧版 PhoneCam 数据"));
+        box.setText(summary);
+        box.setDetailedText(diagnostic);
+        QPushButton* cancel = box.addButton(QString::fromUtf8("取消"), QMessageBox::RejectRole);
+        QPushButton* proceed = box.addButton(
+            QString::fromUtf8("我已了解，卸载旧版并重新安装"), QMessageBox::DestructiveRole);
+        box.setDefaultButton(cancel);
+        box.setEscapeButton(cancel);
+        box.exec();
+        return box.clickedButton() == proceed;
+    };
+
+    const ApkInstallResult result = installer.install(
+        adbPath, selected.serial, apkPath, metadata, confirm);
+    setStatus(result.message);
+    if (result.succeeded()) {
+        QMessageBox::information(this, QString::fromUtf8("Android 端安装完成"), result.message);
+    } else {
+        QMessageBox box(this);
+        box.setIcon(result.status == ApkInstallStatus::CleanupCancelled
+            ? QMessageBox::Information : QMessageBox::Warning);
+        box.setWindowTitle(QString::fromUtf8("Android 端未安装"));
+        box.setText(result.message);
+        if (!result.diagnostic.isEmpty()) box.setDetailedText(result.diagnostic);
+        box.exec();
     }
 }
 

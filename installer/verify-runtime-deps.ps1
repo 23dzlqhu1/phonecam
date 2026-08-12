@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$StagingDir,
@@ -92,8 +92,14 @@ $requiredPaths = @(
     "phonecam-adb-setup.exe",
     "phonecam-virtualcam.dll",
     "zstd.dll",
+    "Qt6Network.dll",
     "platforms\qwindows.dll"
 )
+if ($BuildType -eq "Debug") {
+    $requiredPaths += "tls\qschannelbackendd.dll"
+} else {
+    $requiredPaths += "tls\qschannelbackend.dll"
+}
 if ($BuildType -eq "Release") {
     $requiredPaths += "redist\VC_redist.x64.exe"
 }
@@ -107,6 +113,20 @@ foreach ($relativePath in $requiredPaths) {
 }
 if ($missingRequired.Count -gt 0) {
     throw "发布目录缺少必需文件：$($missingRequired -join ', ')"
+}
+
+$openSslBackendNames = @("qopensslbackend.dll", "qopensslbackendd.dll")
+$hasOpenSslBackend = $openSslBackendNames | Where-Object {
+    Test-Path -LiteralPath (Join-Path $resolvedStagingDir "tls\$_") -PathType Leaf
+}
+if ($hasOpenSslBackend) {
+    $missingOpenSslRuntime = @("libssl-3-x64.dll", "libcrypto-3-x64.dll") |
+        Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $resolvedStagingDir $_) -PathType Leaf)
+        }
+    if ($missingOpenSslRuntime.Count -gt 0) {
+        throw "staging 包含 qopensslbackend，但缺少匹配的 OpenSSL 运行库：$($missingOpenSslRuntime -join ', ')"
+    }
 }
 
 $availableDlls = @{}

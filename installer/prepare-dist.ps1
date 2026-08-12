@@ -1,7 +1,8 @@
-# 为 Inno Setup 准备发布文件，并在发布前验证全部 PE 运行时依赖。
+﻿# 为 Inno Setup 准备发布文件，并在发布前验证全部 PE 运行时依赖。
 # 用法：
 #   .\prepare-dist.ps1 -BuildType Release
 #   .\prepare-dist.ps1 -BuildType Release -VcRedistPath C:\path\to\VC_redist.x64.exe
+#   .\prepare-dist.ps1 -BuildType Release -AndroidApkPath C:\path\to\signed.apk
 
 [CmdletBinding()]
 param(
@@ -10,7 +11,13 @@ param(
 
     [string]$VcRedistPath = "",
 
-    [string]$DumpbinPath = ""
+    [string]$DumpbinPath = "",
+
+    [string]$AndroidApkPath = "",
+
+    [string]$PreviousReleaseApk = "",
+
+    [string]$TrustedBaselineFile = ""
 )
 
 Set-StrictMode -Version Latest
@@ -205,7 +212,7 @@ Write-Host "Copied runtime DLLs: vcpkg=$vcpkgDllCount, build=$buildDllCount"
 
 # Qt 动态插件不出现在 EXE 的导入表中，必须单独打包。
 $vcpkgQtPluginsDir = Join-Path $vcpkgInstalledDir "Qt6\plugins"
-$pluginDirs = @("platforms", "styles", "tls", "networkinformation", "imageformats")
+$pluginDirs = @("platforms", "styles", "networkinformation", "imageformats")
 foreach ($pluginDirName in $pluginDirs) {
     $sourceDir = Join-Path $vcpkgQtPluginsDir $pluginDirName
     if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
@@ -222,6 +229,62 @@ foreach ($pluginDirName in $pluginDirs) {
     $destinationDir = Join-Path $stagingDir $pluginDirName
     Copy-Item -LiteralPath $sourceDir -Destination $destinationDir -Recurse -Force
     Remove-OppositeModeQtPlugins -PluginDir $destinationDir -Mode $BuildType
+}
+
+# phonecam-adb-setup.exe 包含 Google 官方 HTTPS 下载功能。Schannel 是发布
+# 必需组件，而不是可选插件；只复制当前构建配置对应的插件，避免混入 OpenSSL
+# 后端及其额外依赖。
+$schannelName = if ($BuildType -eq "Debug") {
+    "qschannelbackendd.dll"
+} else {
+    "qschannelbackend.dll"
+}
+$schannelCandidates = @(
+    (Join-Path $buildDir "tls\$schannelName"),
+    (Join-Path $vcpkgQtPluginsDir "tls\$schannelName")
+)
+$schannelSource = $schannelCandidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+if (-not $schannelSource) {
+    throw "找不到必需的 Qt Schannel TLS 后端：$schannelName。拒绝生成 staging。"
+}
+$tlsDestination = Join-Path $stagingDir "tls"
+New-Item -ItemType Directory -Path $tlsDestination -Force | Out-Null
+Copy-Item -LiteralPath $schannelSource -Destination $tlsDestination -Force
+
+# 可选的正式 Android APK。只接受调用者给出的明确路径，不搜索磁盘。
+if ($AndroidApkPath) {
+    if (-not (Test-Path -LiteralPath $AndroidApkPath -PathType Leaf)) {
+        throw "指定的 Android APK 不存在：$AndroidApkPath"
+    }
+    $resolvedAndroidApk = (Resolve-Path -LiteralPath $AndroidApkPath).Path
+    $verifyApkScript = Join-Path $repoRoot "phone_native\verify-release-apk.ps1"
+    if (-not (Test-Path -LiteralPath $verifyApkScript -PathType Leaf)) {
+        throw "找不到 APK 发布门禁脚本：$verifyApkScript"
+    }
+    if (-not $PreviousReleaseApk -and -not $TrustedBaselineFile) {
+        $TrustedBaselineFile = Join-Path $repoRoot "phone_native\release-signing-baseline.json"
+    }
+    & $verifyApkScript `
+        -CandidateApk $resolvedAndroidApk `
+        -PreviousReleaseApk $PreviousReleaseApk `
+        -TrustedBaselineFile $TrustedBaselineFile
+
+    $apkDestination = Join-Path $stagingDir "apk"
+    New-Item -ItemType Directory -Path $apkDestination -Force | Out-Null
+    $stagedApk = Join-Path $apkDestination "phonecam.apk"
+    Copy-Item -LiteralPath $resolvedAndroidApk -Destination $stagedApk -Force
+    $apkHash = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath (Join-Path $apkDestination "phonecam.apk.sha256") `
+        -Value "$apkHash  phonecam.apk" -Encoding Ascii
+    $stagedHash = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($stagedHash -ne $apkHash) {
+        throw "Android APK staging 后 SHA-256 验证失败"
+    }
+    Write-Host "Staged verified Android APK: apk\phonecam.apk (SHA-256=$apkHash)"
+} else {
+    Write-Host "No Android APK supplied; Windows-only release remains enabled."
 }
 
 if ($BuildType -eq "Release") {
