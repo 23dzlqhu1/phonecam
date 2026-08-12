@@ -105,8 +105,18 @@ jobs:
       - name: Build PhoneCam Release
         shell: pwsh
         run: |
-          & .\cpp\build_release.bat
-          if ($LASTEXITCODE -ne 0) { throw "Windows Release build failed." }
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Windows Release build attempt $attempt of $maxAttempts"
+            & .\cpp\build_release.bat
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq $maxAttempts) {
+              throw "Windows Release build failed after $maxAttempts attempts."
+            }
+            $delay = 15 * $attempt
+            Write-Warning "Build attempt $attempt failed; retrying on the same runner in $delay seconds."
+            Start-Sleep -Seconds $delay
+          }
 
       - name: Download and verify published Android APK
         shell: pwsh
