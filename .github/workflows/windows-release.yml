@@ -19,6 +19,7 @@ on:
       - .github/workflows/windows-release.yml
       - cpp/**
       - installer/**
+      - phone_native/verify-release-apk.ps1
   workflow_dispatch:
     inputs:
       version:

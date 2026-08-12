@@ -70,15 +70,31 @@ function Get-ApkReleaseInfo {
     }
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $signature = Invoke-CheckedTool -Tool $ApkSigner `
-        -Arguments @("verify", "--verbose", "--print-certs", $resolved) `
+        -Arguments @("verify", "--verbose", "--print-certs-pem", $resolved) `
         -Operation "apksigner verify"
-    $digestLine = $signature | Where-Object {
-        $_ -match '^Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$'
-    } | Select-Object -First 1
-    if (-not $digestLine -or $digestLine -notmatch '^Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$') {
-        throw "[FAIL] apksigner 未返回 Signer #1 certificate SHA-256 digest。"
+    $signatureText = $signature -join [Environment]::NewLine
+    $pemMatch = [regex]::Match(
+        $signatureText,
+        '(?s)-----BEGIN CERTIFICATE-----\s*(?<body>[A-Za-z0-9+/=\r\n]+?)\s*-----END CERTIFICATE-----'
+    )
+    if (-not $pemMatch.Success) {
+        throw "[FAIL] apksigner 未返回 Signer #1 PEM 证书。`n$signatureText"
     }
-    $certificateSha256 = $matches[1].ToLowerInvariant()
+    try {
+        $certificateBytes = [Convert]::FromBase64String(
+            ($pemMatch.Groups['body'].Value -replace '\s', '')
+        )
+    } catch {
+        throw "[FAIL] apksigner 返回的 Signer #1 PEM 证书无法解析。`n$signatureText"
+    }
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $certificateSha256 = [BitConverter]::ToString(
+            $sha256.ComputeHash($certificateBytes)
+        ).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
 
     $badging = Invoke-CheckedTool -Tool $Aapt2 `
         -Arguments @("dump", "badging", $resolved) `
