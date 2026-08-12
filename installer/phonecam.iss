@@ -7,7 +7,7 @@
 ;   3. Compile this script:        iscc installer\phonecam.iss
 
 #define MyAppName "PhoneCam"
-#define MyAppVersion "2.0.2"
+#define MyAppVersion "2.0.3"
 #define MyAppPublisher "PhoneCam"
 #define MyAppExeName "phonecam.exe"
 #define MyAppAdbSetupExeName "phonecam-adb-setup.exe"
@@ -57,11 +57,12 @@ Source: "..\dist\staging\phonecam-virtualcam.dll"; DestDir: "{app}"; Flags: igno
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\PhoneCam USB 与手机端设置"; Filename: "{app}\{#MyAppAdbSetupExeName}"; Parameters: "--install-apk ""{app}\apk\phonecam.apk"""
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 ; 用户勾选了“启用 USB 连接”时，安装完成后启动 ADB 下载向导。
-Filename: "{app}\{#MyAppAdbSetupExeName}"; Description: "下载并安装 ADB"; Flags: postinstall skipifsilent; Tasks: enableusb
+Filename: "{app}\{#MyAppAdbSetupExeName}"; Parameters: "--install-apk ""{app}\apk\phonecam.apk"""; Description: "配置 USB 连接或安装/修复手机端"; Flags: postinstall skipifsilent; Tasks: enableusb
 
 [Code]
 var

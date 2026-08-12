@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     app.setApplicationName("PhoneCam");
-    app.setApplicationVersion("2.0.2");
+    app.setApplicationVersion("2.0.3");
     app.setOrganizationName("PhoneCam");
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/phonecam.png")));
 
@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    qDebug() << "PhoneCam C++ v2.0.2 starting...";
+    qDebug() << "PhoneCam C++ v2.0.3 starting...";
     if (useLegacyCompose) {
         qDebug() << "[MAIN] --legacy-qimage-compose: using QImage compose backend";
     } else {

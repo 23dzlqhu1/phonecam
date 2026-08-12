@@ -1,10 +1,42 @@
 # PhoneCam 已知问题
 
 > 本文记录当前版本中普通用户可能遇到的问题。
+>
+> 最后更新：2026-08-12 21:38 (Asia/Shanghai)
 
 ---
 
 ## 当前有效问题
+
+### Android 端升级提示“签名不一致”
+
+**现象**：安装 `com.phonecam.nativeapp` 的新版 APK 时，Android 提示
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`。即使已从机主空间卸载，仍可能无法安装。
+
+**原因**：旧 Debug 签名版本可能仍安装在系统分身、应用分身或工作资料中。Android 会检查所有用户空间；机主空间的“卸载”不一定删除其他空间中的同包名应用。
+
+**安全修复流程**：
+
+1. 从 Windows 开始菜单打开“PhoneCam USB 与手机端设置”。
+2. 点击“安装/修复手机端”。
+3. 工具会先执行保留数据的正常升级；只有精确识别到 `com.phonecam.nativeapp` 的签名冲突时，才会列出残留用户空间。
+4. 工具不会自动卸载。只有你在第二次确认中点击“我已了解，卸载旧版并重新安装”，才会全局卸载旧包并重装。
+
+> 警告：确认后的全局卸载会删除 `com.phonecam.nativeapp` 在所有用户/分身中的应用数据，无法恢复。历史包 `com.phonecam.phone` 不会被删除。也可以取消，然后在手机系统设置中手动进入各分身卸载旧版。
+
+**状态**：代码和模拟 ADB测试已通过；2026-08-12 21:38 (Asia/Shanghai) 未获真实设备数据删除授权，因此破坏性设备验收为 `DEVICE_CLEANUP_CONFIRMATION_REQUIRED`。
+
+---
+
+### “官方下载并安装”提示 HTTPS/TLS 组件缺失
+
+**现象**：USB 连接设置无法从 Google 官方下载 Platform-Tools，并明确提示缺少 HTTPS/TLS运行组件。
+
+**原因**：Windows安装目录中的 `tls\qschannelbackend.dll` 缺失或损坏。
+
+**解决方法**：重新安装 PhoneCam；临时也可选择“导入 Platform-Tools ZIP”。不要关闭 TLS校验或忽略证书错误。
+
+**状态**：发布 staging 已强制检查 Schannel；2026-08-12 21:38 (Asia/Shanghai) Qt/Schannel真实官方下载和 `adb version` 集成测试通过。
 
 ### 1. Windows 安装时提示“无法验证发布者”
 

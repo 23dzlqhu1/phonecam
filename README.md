@@ -48,7 +48,7 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 | 平台 | 下载文件 | 大小 | 说明 |
 |------|---------|------|------|
-| **Windows 电脑** | `PhoneCam-2.0.2-Setup.exe` | 约 25 MB | 双击安装，自动配置虚拟摄像头驱动 |
+| **Windows 电脑** | `PhoneCam-2.0.3-Setup.exe` | 约 55 MB | 双击安装，自动配置虚拟摄像头驱动和手机端修复工具 |
 | **Android 手机** | `PhoneCam-Android-v0.2.9.apk` | 约 3 MB | 下载到手机安装，需允许“安装未知来源应用” |
 
 > 💡 **提示**：Windows 安装过程中如果勾选“启用 USB 连接”，安装向导会自动下载官方 Android Platform Tools 并配置 ADB。
@@ -59,7 +59,7 @@ PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，�
 
 ### Windows 端
 
-1. 下载 `PhoneCam-2.0.2-Setup.exe`
+1. 下载 `PhoneCam-2.0.3-Setup.exe`
 2. 双击运行，点击“下一步”
 3. 建议勾选“**启用 USB 连接**”（会自动配置 ADB）
 4. 安装完成后，桌面上会出现 **PhoneCam** 图标
@@ -185,12 +185,12 @@ Windows 端可以通过“设置 → 应用 → PhoneCam”完全卸载，虚拟
 
 ### Android 端
 
-```bash
+```powershell
 cd phone_native
-./gradlew assembleRelease
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build-signed-apk.ps1
 ```
 
-编译后的 APK 位于 `app/build/outputs/apk/release/app-release.apk`。
+正式构建要求四个 `PHONECAM_*` 签名环境变量、存在的原 keystore和 Android SDK Build-Tools；构建后会自动验证 APK签名、版本递增和公开版本证书连续性。编译后的 APK 位于 `app/build/outputs/apk/release/app-release.apk`。
 
 ### Windows 端
 
@@ -206,6 +206,8 @@ cd installer
 ./prepare-dist.ps1 -BuildType Release
 # 然后使用 Inno Setup 编译 phonecam.iss
 ```
+
+如需把已通过门禁的正式 Android APK一并打入 Windows安装包，向 `prepare-dist.ps1` 传入 `-AndroidApkPath`；脚本不会搜索磁盘中的任意 APK。详见 [发布与排障门禁](docs/release-troubleshooting.md)。
 
 ---
 

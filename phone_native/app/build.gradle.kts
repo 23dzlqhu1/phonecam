@@ -34,10 +34,22 @@ android {
     val keyAliasEnv = providers.environmentVariable("PHONECAM_KEY_ALIAS").orNull
     val keyPasswordEnv = providers.environmentVariable("PHONECAM_KEY_PASSWORD").orNull
 
-    val hasReleaseSigning = storeFileEnv != null &&
-            storePasswordEnv != null &&
-            keyAliasEnv != null &&
-            keyPasswordEnv != null
+    val hasReleaseSigning = !storeFileEnv.isNullOrBlank() &&
+            !storePasswordEnv.isNullOrBlank() &&
+            !keyAliasEnv.isNullOrBlank() &&
+            !keyPasswordEnv.isNullOrBlank()
+    val releaseRequested = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+    if (releaseRequested && !hasReleaseSigning) {
+        throw GradleException(
+            "Release signing is required. Set PHONECAM_STORE_FILE, " +
+                "PHONECAM_STORE_PASSWORD, PHONECAM_KEY_ALIAS and PHONECAM_KEY_PASSWORD."
+        )
+    }
+    if (releaseRequested && !file(storeFileEnv!!).isFile) {
+        throw GradleException("PHONECAM_STORE_FILE does not point to an existing keystore file.")
+    }
 
     signingConfigs {
         if (hasReleaseSigning) {
@@ -53,9 +65,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isDebuggable = true
