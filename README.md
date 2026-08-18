@@ -1,5 +1,5 @@
 # PhoneCam — 把 Android 手机变成 Windows 电脑的 USB/无线摄像头
-
+想说的话：这是我的一个vibe coding项目，可能会有一些不完善的地方，希望大家可以反馈和提意见，可以发邮箱23lqhu@stu.edu.cn或者提issues，谢谢🙏
 > **Use your Android phone as a wireless or USB webcam for Windows.**
 
 PhoneCam 是一款免费开源的软件，让你无需购买实体摄像头，就能把 Android 手机变成 Windows 电脑的网络摄像头，支持 **Wi-Fi 无线连接** 和 **USB 数据线连接** 两种方式。兼容腾讯会议、Zoom、OBS、钉钉、微信等所有使用摄像头的 Windows 应用。
